@@ -47,6 +47,42 @@ def save_agents(agents: dict[str, dict[str, Any]]) -> None:
     path.write_text(json.dumps(agents, indent=2) + "\n", encoding="utf-8")
 
 
+def load_room_history(room: str, *, limit: int = 10) -> list[dict[str, str]]:
+    """Last ``limit`` user/assistant records from the room transcript, in order."""
+    if limit <= 0:
+        return []
+    path = thread_path(room)
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        role = rec.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = rec.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        rows.append(rec)
+    out: list[dict[str, str]] = []
+    for rec in rows[-limit:]:
+        role = str(rec["role"])
+        content = rec["content"]
+        agent = rec.get("agent")
+        if isinstance(agent, str) and agent.strip() and agent != "user":
+            content = f"[{agent}] {content}"
+        out.append({"role": role, "content": content})
+    return out
+
+
 def log_message(
     thread: str,
     role: str,

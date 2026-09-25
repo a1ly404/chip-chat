@@ -268,6 +268,77 @@ def test_room_messages_include_law() -> None:
     assert messages[1] == {"role": "user", "content": "hi"}
 
 
+def test_load_room_history_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip import store
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    path = store.thread_path("demo")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    records = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "one", "agent": "lucy"},
+        {"role": "user", "content": "second"},
+        {"role": "assistant", "content": "two", "agent": "mick"},
+        {"role": "user", "content": "third", "agent": "planner"},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    full = store.load_room_history("demo", limit=10)
+    assert full == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "[lucy] one"},
+        {"role": "user", "content": "second"},
+        {"role": "assistant", "content": "[mick] two"},
+        {"role": "user", "content": "[planner] third"},
+    ]
+    window = store.load_room_history("demo", limit=2)
+    assert window == [
+        {"role": "assistant", "content": "[mick] two"},
+        {"role": "user", "content": "[planner] third"},
+    ]
+    assert store.load_room_history("demo", limit=0) == []
+
+
+def test_build_room_messages_includes_transcript(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip import store
+    from chip.cli import build_room_messages
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    store.log_message("example", "user", "earlier question")
+    store.log_message("example", "assistant", "earlier answer", agent="lucy")
+
+    messages = build_room_messages("example", "default", "follow-up", history_limit=10)
+    assert messages[0]["role"] == "system"
+    assert messages[1] == {"role": "user", "content": "earlier question"}
+    assert messages[2] == {"role": "assistant", "content": "[lucy] earlier answer"}
+    assert messages[3] == {"role": "user", "content": "follow-up"}
+
+
+def test_room_shot_loads_prior_transcript(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip import runtime, store
+
+    captured: list[list[dict[str, str]]] = []
+
+    def fake_complete(messages, **kwargs):
+        captured.append(list(messages))
+        return ("ok", {"usage": {"prompt_tokens": 1, "completion_tokens": 1}}, "z-ai/glm-5.3-flash", {})
+
+    monkeypatch.setattr(runtime, "complete", fake_complete)
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    store.log_message("demo", "user", "line one")
+    store.log_message("demo", "assistant", "reply one", agent="lucy")
+
+    from chip.cli import main
+
+    code = main(["room", "demo", "-m", "line two", "--as", "mick", "--json", "--mock"])
+    assert code == 0
+    assert captured
+    msgs = captured[0]
+    assert msgs[1]["content"] == "line one"
+    assert msgs[2]["content"] == "[lucy] reply one"
+    assert msgs[-1] == {"role": "user", "content": "line two"}
+
+
 def test_room_shot_json_mock(tmp_path: Path) -> None:
     proc = _run_chip(
         "room",

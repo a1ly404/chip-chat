@@ -20,6 +20,8 @@ Do not commit those values. The app is not minted in this PR.
 
 `config/chip_relay/rooms.json` is the only room list. The loader has no create-room API. `turn_limit` is 1. Speaker identity is the room's `as` field, supplied by config, not invented at runtime.
 
+Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the shared room transcript (`threads/<room>.jsonl`, default last 10 lines) before that single completion so agents see recent room context. See `docs/CHIP_CHAT.md` for `--history-limit` / `CHIP_CHAT_ROOM_HISTORY_LIMIT`.
+
 `CHIP_RELAY_AUTO` defaults to false. The skeleton refuses to start agent-initiated turns even if it is set true.
 
 ## Startup

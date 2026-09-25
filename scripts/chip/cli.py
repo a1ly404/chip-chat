@@ -232,11 +232,20 @@ def cmd_agent_say(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_room_messages(room: str, persona: str, user_text: str) -> list[dict[str, str]]:
-    """System prompt is room law (binding) plus persona. Memory stays advisory."""
+def build_room_messages(
+    room: str,
+    persona: str,
+    user_text: str,
+    *,
+    history_limit: int | None = None,
+) -> list[dict[str, str]]:
+    """Room law (binding) plus persona, prior transcript, then the new user line."""
     system = law.compose_system(_persona_system(persona), law.load_room_law(room))
+    limit = config.room_history_limit(history_limit)
+    history = store.load_room_history(room, limit=limit)
     return [
         {"role": "system", "content": system},
+        *history,
         {"role": "user", "content": user_text},
     ]
 
@@ -247,8 +256,9 @@ def _room_demo_turn(
     user_text: str,
     *,
     use_mock: bool,
+    history_limit: int | None = None,
 ) -> str:
-    messages = build_room_messages(room, agent_name, user_text)
+    messages = build_room_messages(room, agent_name, user_text, history_limit=history_limit)
     store.log_message(room, "user", user_text, agent=agent_name)
     reply, _, routed, ledger = runtime.complete(
         messages, model=config.default_model(), max_tokens=200, use_mock=use_mock, command="room"
@@ -299,7 +309,8 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     agent = str(args.as_agent).strip()
     use_mock = args.mock or config.mock_mode()
     persona = agent if agent in config.load_personas() else "default"
-    messages = build_room_messages(room, persona, message)
+    history_limit = getattr(args, "history_limit", None)
+    messages = build_room_messages(room, persona, message, history_limit=history_limit)
     messages[0]["content"] += (
         f"\n\nYou are speaking only as {agent}. "
         "Do not invent other speakers or addresses."
@@ -362,7 +373,8 @@ def cmd_room(args: argparse.Namespace) -> int:
     if args.once:
         persona = args.persona or "default"
         _print_room_header(room)
-        messages = build_room_messages(room, persona, args.once)
+        history_limit = getattr(args, "history_limit", None)
+        messages = build_room_messages(room, persona, args.once, history_limit=history_limit)
         store.log_message(room, "user", args.once, agent="user")
         try:
             text, _, routed, ledger = runtime.complete(
@@ -395,10 +407,13 @@ def cmd_room(args: argparse.Namespace) -> int:
             return 2
         a_text = "We need a one-line CLI smoke test for Chip Chat before UI."
         print(f"user> {a_text}\n")
-        b_reply = _room_demo_turn(room, "planner", a_text, use_mock=use_mock)
+        history_limit = getattr(args, "history_limit", None)
+        b_reply = _room_demo_turn(
+            room, "planner", a_text, use_mock=use_mock, history_limit=history_limit
+        )
         handoff = f"Planner said: {b_reply}\nRespond in one short paragraph as Builder."
         print()
-        _room_demo_turn(room, "builder", handoff, use_mock=use_mock)
+        _room_demo_turn(room, "builder", handoff, use_mock=use_mock, history_limit=history_limit)
         print("\n(agent A → agent B handoff complete)")
         return 0
 
@@ -456,6 +471,13 @@ def build_parser() -> argparse.ArgumentParser:
     room.add_argument("--as", dest="as_agent", default=None, help="Caller-supplied speaker name")
     room.add_argument("--json", action="store_true", help="Print one JSON object on stdout")
     room.add_argument("--turn-limit", dest="turn_limit", type=int, default=1, help="Max exchanges this process (default 1)")
+    room.add_argument(
+        "--history-limit",
+        dest="history_limit",
+        type=int,
+        default=None,
+        help="Prior transcript lines to load (default 10, or CHIP_CHAT_ROOM_HISTORY_LIMIT)",
+    )
     room.add_argument("--once", metavar="TEXT", help="One turn in this room (law loaded into the system prompt)")
     room.add_argument("--persona", default="default", help="Persona for --once")
     room.add_argument("--agents", nargs="+", default=None, help="Agent persona names")

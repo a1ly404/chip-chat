@@ -23,6 +23,7 @@ Optional: add repo root to `PATH` or symlink `bin/chip` into `~/bin`.
 | `OPENROUTER_CC_API_KEY` | Yes (live mode) | Chip Chat–only OpenRouter key (`sk-or-…`). **Never** commit. |
 | `CHIP_CHAT_DATA_DIR` | No | Override data directory (default `~/appdata/chip-chat`). |
 | `CHIP_CHAT_MOCK` | No | `1` / `true` for offline mock completions. |
+| `CHIP_CHAT_ROOM_HISTORY_LIMIT` | No | Default prior transcript lines for `chip room` (default `10`). |
 
 The CLI loads `repo/.env` if present (keys already in the shell are not overridden).
 
@@ -86,7 +87,15 @@ Channel files live at `config/chip_chat/channels/<room>.md` (`demo.md`, `example
 ./bin/chip room demo -m 'Start test' --as lucy --json --mock
 ```
 
-`-m` requires `--as` (the only speaker Chip Chat will record). `--json` prints one object: `reply`, `tokens_prompt`, `tokens_completion`, `session_usd`, `monthly_usd`. Exit `0` on success, `1` on CLI errors, `2` on auth or API errors. `--turn-limit` defaults to `1` and this command performs a single exchange.
+`-m` requires `--as` (the only speaker Chip Chat will record). `--json` prints one object: `reply`, `tokens_prompt`, `tokens_completion`, `session_usd`, `monthly_usd`. Exit `0` on success, `1` on CLI errors, `2` on auth or API errors. `--turn-limit` defaults to `1` and this command performs a single exchange (one completion per process); it does not load extra turns beyond that cap.
+
+Before each room turn, Chip Chat reads `threads/<room>.jsonl` and appends the last **N** user/assistant lines to the messages (after room law, before the new line). **N** defaults to **10** (`--history-limit` or `CHIP_CHAT_ROOM_HISTORY_LIMIT`). Assistant lines include a `[agent]` prefix when the transcript recorded one. Room law stays in the system prompt; history is conversational context only.
+
+```bash
+# Second shot sees the first exchange in context (mock, no key):
+CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'First' --as lucy --json
+CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'What did I just say?' --as mick --json
+```
 
 ## Data path
 

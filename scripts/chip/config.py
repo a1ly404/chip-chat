@@ -136,4 +136,21 @@ def mock_mode() -> bool:
     return os.environ.get("CHIP_CHAT_MOCK", "").strip().lower() in ("1", "true", "yes")
 
 
+def room_history_limit(override: int | None = None) -> int:
+    """Max prior user/assistant transcript lines to load into room context."""
+    if override is not None:
+        return max(0, int(override))
+    load_dotenv()
+    raw = os.environ.get("CHIP_CHAT_ROOM_HISTORY_LIMIT", "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    cfg = _read_config_json().get("room_history_limit")
+    if isinstance(cfg, int):
+        return max(0, cfg)
+    return 10
+
+
 load_dotenv()
