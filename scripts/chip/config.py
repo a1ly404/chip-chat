@@ -9,7 +9,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PERSONAS_FILE = REPO_ROOT / "config" / "chip_chat_personas.json"
-CHEAP_MODELS_FILE = REPO_ROOT / "config" / "cheap_chat_models.json"
+MODELS_FILE = REPO_ROOT / "config" / "chip_chat_models.json"
 DOTENV_FILE = REPO_ROOT / ".env"
 
 DEFAULT_MODEL = "z-ai/glm-5.3-flash"
@@ -57,13 +57,23 @@ def load_dotenv() -> None:
             os.environ[key] = value
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return raw if isinstance(raw, dict) else {}
+
+
 def _read_config_json() -> dict[str, Any]:
-    for path in (PERSONAS_FILE, CHEAP_MODELS_FILE):
-        if path.is_file():
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                return raw
-    return {}
+    """Personas file first; model file overrides model keys when present."""
+    merged = _load_json(PERSONAS_FILE)
+    models = _load_json(MODELS_FILE)
+    for key in ("default_model", "escalate_model", "blocked_models", "future_router_model"):
+        if key in models:
+            merged[key] = models[key]
+    if not merged and not models:
+        return {}
+    return merged
 
 
 def data_dir() -> Path:

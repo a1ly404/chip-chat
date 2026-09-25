@@ -52,7 +52,7 @@ Ledger under `~/appdata/chip-chat/` (or `CHIP_CHAT_DATA_DIR`).
 ## Docs & tests
 
 - Full reference: [docs/CHIP_CHAT.md](docs/CHIP_CHAT.md)
-- Tests: `python3 -m pytest scripts/test_chip_chat.py -q`
+- Tests: `pip install -e '.[dev]'` then `python3 -m pytest scripts/test_chip_chat.py -q`
 
 ## Live smoke checklist
 
