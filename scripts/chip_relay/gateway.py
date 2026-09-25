@@ -42,7 +42,7 @@ def post_webhook(url: str, username: str, content: str) -> WebhookResult:
     req = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": "chip-relay"},
         method="POST",
     )
     try:

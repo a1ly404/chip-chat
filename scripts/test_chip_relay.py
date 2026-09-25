@@ -95,6 +95,33 @@ def test_infisical_login_stops_on_html(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("expected stop")
 
 
+def test_post_webhook_sets_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip_relay.gateway import post_webhook
+
+    captured: list[object] = []
+
+    class FakeResp:
+        status = 204
+
+        def __enter__(self) -> FakeResp:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_urlopen(req: object, timeout: int = 30) -> FakeResp:
+        del timeout
+        captured.append(req)
+        return FakeResp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    result = post_webhook("https://example.invalid/hook", "dev", "hello")
+    assert result.status == 204
+    assert captured
+    headers = {k.lower(): v for k, v in captured[0].header_items()}  # type: ignore[union-attr]
+    assert headers.get("user-agent") == "chip-relay"
+
+
 def test_listener_stub_does_not_connect() -> None:
     stub = ListenerStub()
     config = load_config(environ={})
