@@ -35,7 +35,7 @@ The CLI loads `repo/.env` if present (keys already in the shell are not overridd
 | **Blocked** | `deepseek/deepseek-chat` (not on Chip Chat OpenRouter allow-list) |
 | **Future** | `typesafe/jev-1.13` — reserved for Decisions-API routing only; not wired in CLI yet |
 
-Config: `config/chip_chat_personas.json`, `config/cheap_chat_models.json`.
+Config: `config/chip_chat_personas.json`, `config/chip_chat_models.json`.
 
 ## Commands
 
@@ -92,7 +92,7 @@ Before each live completion, Chip Chat refreshes `GET /api/v1/auth/key` and trac
 ## Tests
 
 ```bash
-pip install pytest
+pip install -e '.[dev]'
 python3 -m pytest scripts/test_chip_chat.py -q
 ```
 
@@ -102,6 +102,6 @@ python3 -m pytest scripts/test_chip_chat.py -q
 bin/chip                 # bash entrypoint
 scripts/chip/              # Python package `chip`
 config/chip_chat_personas.json
-config/cheap_chat_models.json
+config/chip_chat_models.json
 docs/CHIP_CHAT.md
 ```

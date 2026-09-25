@@ -5,3 +5,4 @@ __pycache__/
 var/chip-chat/
 .venv/
 venv/
+*.egg-info/
