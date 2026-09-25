@@ -17,3 +17,12 @@
 | Intent | Populate `rooms.json` `speakers` for `#chip-dev` / `#chip-relay` (TODO placeholders until ops paste Discord ids); loud failure when maps are unset; selftest resolves `--as` from speakers (deprecate forced `pm`); unit tests + `docs/SECRETS.md` restart policy. |
 | PR | #14 |
 | Merge hash | TBD |
+
+## Phase 3 — MemPalace Lite (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-25 |
+| Intent | Mine-as-you-go memories on `chip room --close`; store under `memories/<room>/<agent>.jsonl`; recall top-K (~5, ~500 tokens) into the system prompt as **advisory only**; offline unit tests for extract/recall/top-K. |
+| PR | #15 |
+| Merge hash | TBD |

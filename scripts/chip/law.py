@@ -70,8 +70,13 @@ def law_label(room_law: RoomLaw) -> str:
     return f"law={rel.as_posix()}"
 
 
-def compose_system(persona_system: str, room_law: RoomLaw) -> str:
-    """Law is binding. Memory notes never override it."""
+def compose_system(
+    persona_system: str,
+    room_law: RoomLaw,
+    *,
+    mined_memory_block: str = "",
+) -> str:
+    """Law is binding. Memory notes and mined memories never override it."""
     parts: list[str] = []
     if room_law.law.strip():
         parts.append(
@@ -85,6 +90,9 @@ def compose_system(persona_system: str, room_law: RoomLaw) -> str:
             "Use these only when they do not conflict with room law.\n"
             + room_law.memory.strip()
         )
+    mined = (mined_memory_block or "").strip()
+    if mined:
+        parts.append(mined)
     if not parts:
         return persona_system
     return "\n\n".join(parts) + "\n\n" + persona_system

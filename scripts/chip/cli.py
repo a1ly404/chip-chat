@@ -7,7 +7,7 @@ import json
 import re
 import sys
 
-from chip import config, law, mock, openrouter, runtime, spend, store
+from chip import config, law, mempalace, mock, openrouter, runtime, spend, store
 
 _AGENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 
@@ -232,15 +232,55 @@ def cmd_agent_say(args: argparse.Namespace) -> int:
     return 0
 
 
+def recall_mined_memory_block(
+    room: str,
+    agent: str,
+    user_text: str,
+    *,
+    top_k: int | None = None,
+    token_budget: int | None = None,
+) -> str:
+    """Top-K mined memories for prompt assembly (advisory only)."""
+    k = config.memory_top_k(top_k)
+    budget = config.memory_token_budget(token_budget)
+    if k <= 0 or budget <= 0:
+        return ""
+    memories = mempalace.load_memories(room, agent)
+    if not memories:
+        return ""
+    picked = mempalace.select_top_k(
+        memories,
+        user_text,
+        k=k,
+        token_budget=budget,
+    )
+    return mempalace.format_recall_block(picked)
+
+
 def build_room_messages(
     room: str,
     persona: str,
     user_text: str,
     *,
     history_limit: int | None = None,
+    recall_agent: str | None = None,
+    memory_top_k: int | None = None,
+    memory_token_budget: int | None = None,
 ) -> list[dict[str, str]]:
     """Room law (binding) plus persona, prior transcript, then the new user line."""
-    system = law.compose_system(_persona_system(persona), law.load_room_law(room))
+    agent_key = recall_agent or persona
+    mined = recall_mined_memory_block(
+        room,
+        agent_key,
+        user_text,
+        top_k=memory_top_k,
+        token_budget=memory_token_budget,
+    )
+    system = law.compose_system(
+        _persona_system(persona),
+        law.load_room_law(room),
+        mined_memory_block=mined,
+    )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)
     return [
@@ -248,6 +288,20 @@ def build_room_messages(
         *history,
         {"role": "user", "content": user_text},
     ]
+
+
+def close_room_session(room: str) -> int:
+    """Post-process the open session segment into per-agent memory JSONL files."""
+    segment = store.session_segment_rows(room)
+    records = mempalace.extract_from_transcript(room, segment)
+    written = mempalace.append_memories(room, records)
+    store.mark_session_closed(room)
+    print(f"room {room!r} closed: extracted {len(records)} memories, wrote {written} lines")
+    return 0
+
+
+def cmd_room_close(args: argparse.Namespace) -> int:
+    return close_room_session(args.name)
 
 
 def _room_demo_turn(
@@ -310,7 +364,13 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     use_mock = args.mock or config.mock_mode()
     persona = agent if agent in config.load_personas() else "default"
     history_limit = getattr(args, "history_limit", None)
-    messages = build_room_messages(room, persona, message, history_limit=history_limit)
+    messages = build_room_messages(
+        room,
+        persona,
+        message,
+        history_limit=history_limit,
+        recall_agent=agent,
+    )
     messages[0]["content"] += (
         f"\n\nYou are speaking only as {agent}. "
         "Do not invent other speakers or addresses."
@@ -367,6 +427,8 @@ def _print_room_header(room: str) -> None:
 
 def cmd_room(args: argparse.Namespace) -> int:
     room = args.name
+    if getattr(args, "close", False):
+        return cmd_room_close(args)
     use_mock = args.mock or config.mock_mode()
     if getattr(args, "message", None) or getattr(args, "json", False):
         return cmd_room_shot(args)
@@ -486,6 +548,11 @@ def build_parser() -> argparse.ArgumentParser:
     room.add_argument("--once", metavar="TEXT", help="One turn in this room (law loaded into the system prompt)")
     room.add_argument("--persona", default="default", help="Persona for --once")
     room.add_argument("--agents", nargs="+", default=None, help="Agent persona names")
+    room.add_argument(
+        "--close",
+        action="store_true",
+        help="Close the room session and mine advisory memories from its JSONL segment",
+    )
     room.set_defaults(func=cmd_room)
 
     return parser

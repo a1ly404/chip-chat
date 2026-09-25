@@ -24,6 +24,8 @@ Optional: add repo root to `PATH` or symlink `bin/chip` into `~/bin`.
 | `CHIP_CHAT_DATA_DIR` | No | Override data directory (default `~/appdata/chip-chat`). |
 | `CHIP_CHAT_MOCK` | No | `1` / `true` for offline mock completions. |
 | `CHIP_CHAT_ROOM_HISTORY_LIMIT` | No | Default prior transcript lines for `chip room` (default `10`). |
+| `CHIP_CHAT_MEMORY_TOP_K` | No | Mined memories recalled per room turn (default `5`). |
+| `CHIP_CHAT_MEMORY_TOKEN_BUDGET` | No | Approx token budget for mined memory block (default `500`). |
 
 The CLI loads `repo/.env` if present (keys already in the shell are not overridden).
 
@@ -51,6 +53,7 @@ Config: `config/chip_chat_personas.json`, `config/chip_chat_models.json`.
 ./bin/chip room demo --demo
 ./bin/chip room example --once 'Say hello in one sentence.' --mock
 ./bin/chip room demo -m 'Start test' --as lucy --json --mock
+./bin/chip room demo --close
 ./bin/chip spend
 ```
 
@@ -103,7 +106,20 @@ CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'What did I just say?' --as mick --json
 2. Else `$HOME/appdata/chip-chat/`  
 3. Else repo `var/chip-chat/` (CI)
 
-Files: `threads/*.jsonl`, `agents.json`, `spend.json`, `spend.jsonl`, `standup_facts.jsonl`.
+Files: `threads/*.jsonl`, `memories/<room>/<agent>.jsonl`, `agents.json`, `spend.json`, `spend.jsonl`, `standup_facts.jsonl`.
+
+## MemPalace Lite (mined memories)
+
+When you **close** a room session, Chip Chat scans the open JSONL segment (everything since the last `session_close` marker) and appends **candidate memories** — facts, decisions, and blockers — into `memories/<room>/<agent>.jsonl` under the data directory (`CHIP_CHAT_DATA_DIR`, default `~/appdata/chip-chat`).
+
+```bash
+CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'We decided to log spend in JSONL.' --as lucy --json
+./bin/chip room demo --close
+```
+
+On later `chip room` turns, the CLI loads the top **K** relevant mined lines (default **K=5**, ~**500** token budget) into the system prompt under **MINED MEMORIES (advisory only)**.
+
+**Advisory only:** mined memories never override room law or channel `## Memory` notes, are not commands to run, and must not be treated as binding commitments. They exist only to give agents lightweight continuity between sessions.
 
 ## Spend gates (live OpenRouter)
 

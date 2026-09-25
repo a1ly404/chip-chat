@@ -83,6 +83,50 @@ def load_room_history(room: str, *, limit: int = 10) -> list[dict[str, str]]:
     return out
 
 
+SESSION_OPEN = "session_open"
+SESSION_CLOSE = "session_close"
+
+
+def _read_thread_records(room: str) -> list[dict[str, Any]]:
+    path = thread_path(room)
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict):
+            rows.append(rec)
+    return rows
+
+
+def session_segment_rows(room: str) -> list[dict[str, Any]]:
+    """Transcript rows since the last session_close marker (excludes markers)."""
+    rows = _read_thread_records(room)
+    start = 0
+    for idx, rec in enumerate(rows):
+        if rec.get("role") == "room" and rec.get("event") == SESSION_CLOSE:
+            start = idx + 1
+    segment: list[dict[str, Any]] = []
+    for rec in rows[start:]:
+        if rec.get("role") == "room" and rec.get("event") in (SESSION_OPEN, SESSION_CLOSE):
+            continue
+        segment.append(rec)
+    return segment
+
+
+def mark_session_closed(room: str) -> None:
+    append_jsonl(
+        thread_path(room),
+        {"ts": _ts(), "role": "room", "event": SESSION_CLOSE},
+    )
+
+
 def log_message(
     thread: str,
     role: str,
