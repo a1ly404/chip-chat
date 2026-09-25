@@ -11,7 +11,7 @@
       "webhook_env": "CHIP_WEBHOOK_DEV",
       "speakers": {
         "discord_ids": {
-          "TODO_PM_DISCORD_USER_ID": "pm"
+          "1553148704494714890": "pm"
         },
         "handles": {
           "TODO_pm_discord_handle": "pm"
@@ -26,7 +26,7 @@
       "webhook_env": "CHIP_WEBHOOK_DEV",
       "speakers": {
         "discord_ids": {
-          "TODO_PM_DISCORD_USER_ID": "pm",
+          "1553148704494714890": "pm",
           "TODO_DEV_DISCORD_USER_ID": "dev"
         },
         "handles": {
@@ -40,7 +40,13 @@
       "as": "selftest",
       "discord_channel": "chip-selftest",
       "channel_id": "1553148284686573700",
-      "webhook_env": "CHIP_WEBHOOK_SELFTEST"
+      "webhook_env": "CHIP_WEBHOOK_SELFTEST",
+      "speakers": {
+        "discord_ids": {
+          "1553182793041838141": "selftest"
+        },
+        "handles": {}
+      }
     }
   ]
 }

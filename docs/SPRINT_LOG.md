@@ -18,6 +18,8 @@
 | PR | #14 |
 | Merge hash | TBD |
 
+**2026-09-25:** Real `pm` Discord id in `rooms.json`; `chip-selftest` bot id → `selftest` speaker on `#chip-selftest`; `dev` still TODO; selftest author defaults documented (`SECRETS.md`, `.env.example`).
+
 ## Phase 3 — MemPalace Lite (Freeze)
 
 | Field | Value |

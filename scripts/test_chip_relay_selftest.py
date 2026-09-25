@@ -23,6 +23,17 @@ def test_selftest_resolves_persona_from_speakers_map(monkeypatch) -> None:
     assert persona == "pm"
 
 
+def test_selftest_resolves_chip_selftest_bot_from_production_rooms() -> None:
+    persona, err = resolve_selftest_persona(
+        {
+            "CHIP_RELAY_SELFTEST_AUTHOR_ID": "1553182793041838141",
+            "CHIP_RELAY_SELFTEST_ROOM": "selftest",
+        }
+    )
+    assert err is None
+    assert persona == "selftest"
+
+
 def test_selftest_requires_author_identity(monkeypatch) -> None:
     from chip_relay.config import ROOMS_FILE
 

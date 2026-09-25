@@ -18,6 +18,9 @@ Discord **user snowflake ids** and optional **handles** (username, lower-cased a
 | --- | --- | --- |
 | `#chip-dev` | `rooms[].id == "dev"` → `speakers` | `pm`, `dev` |
 | `#chip-relay` | `rooms[].id == "relay"` → `speakers` | `pm` |
+| `#chip-selftest` | `rooms[].id == "selftest"` → `speakers` | `selftest` |
+
+**Known Discord ids (2026-09-25):** `pm` bot user id `1553148704494714890` (committed under `speakers.discord_ids` for `#chip-dev` and `#chip-relay`). `chip-selftest` bot user id `1553182793041838141` → persona `selftest` on `#chip-selftest`. `dev` bot user id is still `TODO_DEV_DISCORD_USER_ID` until ops paste it. Ally (human operator, not mapped to `pm`/`dev` in `rooms.json`): alternative `CHIP_RELAY_SELFTEST_AUTHOR_ID=187044496872046592` only when that id is also present in the target room's `speakers` map (or set `CHIP_RELAY_SELFTEST_AUTHOR_HANDLE` instead).
 
 **Live / restart policy:** edit `config/chip_relay/rooms.json` on the Hyper-V host (or bake an updated file into the deploy artifact), then `docker compose restart chip-relay` (or restart the relay process). Startup and dispatch refuse to guess `--as` while a room still has only `TODO_*` speaker entries.
 
@@ -26,7 +29,8 @@ Discord **user snowflake ids** and optional **handles** (username, lower-cased a
 - `CHIP_RELAY_SELFTEST=1`
 - `CHIP_RELAY_SELFTEST_AUTHOR_ID` — must match a key under `speakers.discord_ids` for the target room, **or**
 - `CHIP_RELAY_SELFTEST_AUTHOR_HANDLE` — must match `speakers.handles` (after lower-casing)
-- Optional: `CHIP_RELAY_SELFTEST_ROOM` (default `dev`), `CHIP_RELAY_SELFTEST_MESSAGE`
+- Recommended defaults for Layer 3: `CHIP_RELAY_SELFTEST_ROOM=selftest`, `CHIP_RELAY_SELFTEST_AUTHOR_ID=1553182793041838141` (maps to persona `selftest` on `#chip-selftest`). Alternative author: Ally human id `187044496872046592` when mapped in the chosen room's `speakers`.
+- Optional: `CHIP_RELAY_SELFTEST_ROOM` (code default `dev` if unset), `CHIP_RELAY_SELFTEST_MESSAGE`
 
 Access requires **Cloudflare Access** (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) plus **machine identity** (`INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`) for the Infisical API. Relay startup documents the env var names in `docs/CHIP_RELAY.md`; values stay in Infisical or your private `.env`.
 

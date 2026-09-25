@@ -52,10 +52,13 @@ def test_startup_ok_when_key_check_passes() -> None:
     assert check_startup(config, key_check=lambda: None, environ=_env()) == []
 
 
-def test_startup_reports_unconfigured_speakers_on_production_rooms() -> None:
+def test_startup_ok_when_pm_speaker_on_production_rooms() -> None:
     config = load_config(environ=_env())
     errors = check_startup(config, key_check=lambda: None, environ=_env())
-    assert any("speakers map" in err for err in errors)
+    assert not any("speakers map" in err for err in errors)
+    dev = config.room("dev")
+    assert dev.speakers_by_id.get("1553148704494714890") == "pm"
+    assert "TODO_DEV_DISCORD_USER_ID" in dev.speakers_by_id
 
 
 def test_startup_reports_key_health_failure() -> None:

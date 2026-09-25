@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from chip_relay.config import load_config
+from chip_relay.config import RelayConfig, RoomBinding, load_config
 from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
 from chip_relay.replay import format_assistant, load_turns
 from chip_relay.selftest import budget_ok
@@ -198,7 +198,15 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
 
 
 def test_unconfigured_speakers_map_fails_loudly() -> None:
-    config = load_config(environ={})
+    room = RoomBinding(
+        id="dev",
+        as_agent="dev",
+        webhook_env="CHIP_WEBHOOK_DEV",
+        discord_channel="chip-dev",
+        speakers_declared=True,
+        speakers_by_id={"TODO_DEV_DISCORD_USER_ID": "dev"},
+    )
+    config = RelayConfig(channel="chip-relay", turn_limit=1, auto=False, rooms=(room,))
     calls: list[list[str]] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
