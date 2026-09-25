@@ -15,6 +15,7 @@ from pathlib import Path
 from chip.spend import WARN_MONTHLY_USD, load_ledger
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
+from chip_relay.personas import resolve_persona
 from chip_relay.watchdog import HEARTBEAT_INTERVAL_S, Watchdog, heartbeat_line
 
 REPO = Path(__file__).resolve().parents[2]
@@ -122,6 +123,7 @@ def run_gateway() -> int:
             channel=room.discord_channel,
             content=message.content or "",
             author=str(message.author.name),
+            author_id=str(message.author.id),
         )
 
         def _chip(args: list[str], timeout: int) -> ChipResult:
@@ -139,7 +141,12 @@ def run_gateway() -> int:
         if result.ok:
             stats["ok"] += 1
             stats["last_error"] = ""
-            print(f"processed channel={room.id} agent={incoming.author}", flush=True)
+            persona = resolve_persona(
+                room,
+                author_id=incoming.author_id,
+                author_handle=incoming.author,
+            )
+            print(f"processed channel={room.id} persona={persona}", flush=True)
         else:
             stats["fail"] += 1
             stats["last_error"] = result.alert

@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 
 from chip_relay.config import RelayConfig
+from chip_relay.personas import resolve_persona
 
 MAX_MESSAGE_CHARS = 2000
 CHIP_TIMEOUT_S = 30
@@ -16,6 +17,7 @@ class Incoming:
     channel: str
     content: str
     author: str
+    author_id: str = ""
 
 
 @dataclass
@@ -66,13 +68,18 @@ def handle_message(
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
 
+    persona = resolve_persona(
+        room,
+        author_id=incoming.author_id,
+        author_handle=incoming.author,
+    )
     args = [
         "room",
         room.id,
         "-m",
         text,
         "--as",
-        incoming.author.strip(),
+        persona,
         "--json",
         "--turn-limit",
         "1",
@@ -89,11 +96,10 @@ def handle_message(
         return _fail(logs, "chip json malformed", chip_calls=1)
 
     url = environ.get(room.webhook_env, "")
-    identity = incoming.author.strip()
-    posted: WebhookResult = webhook(url, identity, reply)
+    posted: WebhookResult = webhook(url, persona, reply)
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=1)
     if record is not None:
-        record(room.id, reply, identity)
-    logs.append(f"posted {identity} to {incoming.channel}")
+        record(room.id, reply, persona)
+    logs.append(f"posted {persona} to {incoming.channel}")
     return DispatchResult(ok=True, chip_calls=1, webhook_calls=1, logs=logs)

@@ -468,7 +468,12 @@ def build_parser() -> argparse.ArgumentParser:
     room.add_argument("name", nargs="?", default="demo", help="Room name (or 'demo')")
     room.add_argument("--demo", action="store_true", help="Scripted planner → builder handoff")
     room.add_argument("-m", "--message", default=None, help="Non-interactive message (requires --as)")
-    room.add_argument("--as", dest="as_agent", default=None, help="Caller-supplied speaker name")
+    room.add_argument(
+        "--as",
+        dest="as_agent",
+        default=None,
+        help="Speaker id (persona key from config/chip_chat_personas.json when defined)",
+    )
     room.add_argument("--json", action="store_true", help="Print one JSON object on stdout")
     room.add_argument("--turn-limit", dest="turn_limit", type=int, default=1, help="Max exchanges this process (default 1)")
     room.add_argument(

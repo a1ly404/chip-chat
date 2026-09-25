@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from chip.config import REPO_ROOT
@@ -14,6 +14,26 @@ TOKEN_ENV = "DISCORD_CHIP_RELAY_TOKEN"
 AUTO_ENV = "CHIP_RELAY_AUTO"
 
 
+def _speaker_maps(entry: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Parse optional ``speakers`` block: discord_ids and handles → persona id."""
+    raw = entry.get("speakers")
+    if not isinstance(raw, dict):
+        return {}, {}
+    by_id: dict[str, str] = {}
+    ids = raw.get("discord_ids")
+    if isinstance(ids, dict):
+        for key, persona in ids.items():
+            if key is not None and persona is not None:
+                by_id[str(key).strip()] = str(persona).strip()
+    by_handle: dict[str, str] = {}
+    handles = raw.get("handles")
+    if isinstance(handles, dict):
+        for key, persona in handles.items():
+            if key is not None and persona is not None:
+                by_handle[str(key).strip().lower()] = str(persona).strip()
+    return by_id, by_handle
+
+
 @dataclass(frozen=True)
 class RoomBinding:
     id: str
@@ -21,6 +41,8 @@ class RoomBinding:
     webhook_env: str
     discord_channel: str
     channel_id: str = ""
+    speakers_by_id: dict[str, str] = field(default_factory=dict)
+    speakers_by_handle: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -64,6 +86,7 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
     raw = json.loads(file.read_text(encoding="utf-8"))
     rooms: list[RoomBinding] = []
     for entry in raw.get("rooms") or []:
+        by_id, by_handle = _speaker_maps(entry)
         rooms.append(
             RoomBinding(
                 id=str(entry["id"]),
@@ -71,6 +94,8 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
                 webhook_env=str(entry["webhook_env"]),
                 discord_channel=str(entry.get("discord_channel") or entry["id"]),
                 channel_id=str(entry.get("channel_id") or ""),
+                speakers_by_id=by_id,
+                speakers_by_handle=by_handle,
             )
         )
     return RelayConfig(

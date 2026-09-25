@@ -50,8 +50,8 @@ def _deliver(content: str = "hello from the guild", channel: str = "chip-dev"):
 def test_message_create_calls_chip_and_webhook() -> None:
     result, calls, posts = _deliver()
     assert result.ok
-    assert calls == [["room", "dev", "-m", "hello from the guild", "--as", "member", "--json", "--turn-limit", "1"]]
-    assert posts == [("https://example.invalid/dev", "member", "canned")]
+    assert calls == [["room", "dev", "-m", "hello from the guild", "--as", "dev", "--json", "--turn-limit", "1"]]
+    assert posts == [("https://example.invalid/dev", "dev", "canned")]
     assert result.chip_calls == 1
 
 
@@ -191,7 +191,7 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
         record=lambda room, reply, agent: written.append(f"{room}:{agent}:{reply}"),
     )
     assert second.ok
-    assert written == ["dev:member:canned"]
+    assert written == ["dev:dev:canned"]
     assert calls == [1, 1]
     assert tmp_path is not None
 

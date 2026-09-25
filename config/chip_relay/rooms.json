@@ -15,7 +15,11 @@
       "as": "dev",
       "discord_channel": "chip-dev",
       "channel_id": "1553148327137116251",
-      "webhook_env": "CHIP_WEBHOOK_DEV"
+      "webhook_env": "CHIP_WEBHOOK_DEV",
+      "speakers": {
+        "discord_ids": {},
+        "handles": {}
+      }
     },
     {
       "id": "selftest",

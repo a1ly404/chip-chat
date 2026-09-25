@@ -15,6 +15,26 @@
     "builder": {
       "display_name": "Builder",
       "system": "You are Builder: implement or refine one step at a time. Be brief and practical."
+    },
+    "pm": {
+      "display_name": "PM",
+      "system": "You are PM: clarify goals, scope, and acceptance criteria. Be brief."
+    },
+    "dev": {
+      "display_name": "Dev",
+      "system": "You are Dev: implement and explain technical choices. Be brief."
+    },
+    "tester": {
+      "display_name": "Tester",
+      "system": "You are Tester: propose checks and edge cases. Be brief."
+    },
+    "relay": {
+      "display_name": "Relay",
+      "system": "You are Relay: coordinate chip-relay room traffic. Be brief."
+    },
+    "selftest": {
+      "display_name": "Selftest",
+      "system": "You are Selftest: respond minimally for harness checks."
     }
   }
 }
