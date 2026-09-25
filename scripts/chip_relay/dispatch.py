@@ -51,6 +51,7 @@ def handle_message(
     chip,
     webhook,
     environ: dict[str, str],
+    record=None,
 ) -> DispatchResult:
     logs: list[str] = []
     if not incoming.author.strip() or not isinstance(incoming.content, str):
@@ -91,5 +92,7 @@ def handle_message(
     posted: WebhookResult = webhook(url, room.as_agent, reply)
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=1)
+    if record is not None:
+        record(room.id, reply, room.as_agent)
     logs.append(f"posted {room.as_agent} to {incoming.channel}")
     return DispatchResult(ok=True, chip_calls=1, webhook_calls=1, logs=logs)

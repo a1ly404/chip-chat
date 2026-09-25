@@ -8,13 +8,23 @@ import sys
 
 from chip import openrouter
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
+from chip_relay.infisical_rest import missing_boot
 from chip_relay.listener import ListenerNotWired, ListenerStub
 
 
-def check_startup(config: RelayConfig, *, key_check, environ: dict[str, str] | None = None) -> list[str]:
+def check_startup(
+    config: RelayConfig,
+    *,
+    key_check,
+    discord_check=None,
+    webhook_check=None,
+    environ: dict[str, str] | None = None,
+) -> list[str]:
     """Return human-readable errors. Empty means the skeleton may exit 0."""
     env = os.environ if environ is None else environ
     errors: list[str] = []
+    for name in missing_boot(env):
+        errors.append(f"missing boot cred {name}")
     if config.turn_limit != 1:
         errors.append(f"turn_limit must be 1 (got {config.turn_limit})")
     if not config.rooms:
@@ -28,13 +38,22 @@ def check_startup(config: RelayConfig, *, key_check, environ: dict[str, str] | N
         seen.add(binding.id)
         if not binding.webhook_env or binding.webhook_env not in env:
             errors.append(f"room {binding.id} webhook env {binding.webhook_env} is unset")
-        elif env.get(binding.webhook_env, "").strip().startswith("http"):
-            pass
         else:
-            errors.append(f"room {binding.id} webhook env {binding.webhook_env} is empty")
+            url = env.get(binding.webhook_env, "").strip()
+            if not url:
+                errors.append(f"room {binding.id} webhook env {binding.webhook_env} is empty")
+            elif webhook_check is not None:
+                status = webhook_check(url)
+                if status >= 400:
+                    errors.append(f"webhook {binding.webhook_env} unreachable HTTP {status}")
     token = env.get(TOKEN_ENV, "").strip()
     if not token:
-        errors.append(f"{TOKEN_ENV} is unset (Infisical; dedicated chip-relay bot, not the v1 token)")
+        errors.append(f"{TOKEN_ENV} is unset")
+    elif discord_check is not None:
+        try:
+            discord_check(token)
+        except Exception as exc:
+            errors.append(f"{TOKEN_ENV} rejected ({exc.__class__.__name__})")
     if config.auto:
         errors.append("CHIP_RELAY_AUTO is true; this skeleton will not run agent-initiated turns")
     try:

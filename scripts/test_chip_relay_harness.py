@@ -18,7 +18,7 @@ FIXTURE = REPO / "scripts" / "fixtures" / "e2e.jsonl"
 
 def _env() -> dict[str, str]:
     return {
-        "DISCORD_CHIP_RELAY_WEBHOOK_DEV": "https://example.invalid/dev",
+        "CHIP_WEBHOOK_DEV": "https://example.invalid/dev",
     }
 
 
@@ -160,6 +160,40 @@ def test_replay_rejects_assistant_without_agent() -> None:
 def test_selftest_budget_blocks_at_warn_gate() -> None:
     assert budget_ok(4.99)
     assert not budget_ok(5.0)
+
+
+def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
+    config = load_config(environ={})
+    calls: list[int] = []
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del args, timeout
+        calls.append(1)
+        if len(calls) == 1:
+            return ChipResult(returncode=-1, stdout="", timed_out=True)
+        return ChipResult(0, '{"reply": "canned"}')
+
+    first = handle_message(
+        Incoming("chip-dev", "hi", "member"),
+        config,
+        chip=chip,
+        webhook=lambda *a: WebhookResult(204),
+        environ=_env(),
+    )
+    assert first.alert == "slow_call_killed"
+    written: list[str] = []
+    second = handle_message(
+        Incoming("chip-dev", "again", "member"),
+        config,
+        chip=chip,
+        webhook=lambda *a: WebhookResult(204),
+        environ=_env(),
+        record=lambda room, reply, agent: written.append(f"{room}:{agent}:{reply}"),
+    )
+    assert second.ok
+    assert written == ["dev:dev:canned"]
+    assert calls == [1, 1]
+    assert tmp_path is not None
 
 
 def test_watchdog_pages_once_then_stops() -> None:

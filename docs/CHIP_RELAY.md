@@ -6,13 +6,13 @@ Standalone process for a later Discord relay. This change does not connect to Di
 
 Use a **dedicated chip-relay Discord application**. Do not reuse the v1 bot token. A shared token is one gateway session, so the relay and the v1 bot cannot listen at the same time, and it would couple this repo to the old bot.
 
-Infisical secret name: `DISCORD_CHIP_RELAY_TOKEN`.
+Runtime names fetched from Infisical project `chipchat` (prod), never committed:
 
-Webhook URLs are also Infisical-only, one per fixed identity:
+- `DISCORD_CHIP_RELAY_TOKEN`
+- `CHIP_WEBHOOK_DEV`
+- `CHIP_WEBHOOK_SELFTEST`
 
-- `DISCORD_CHIP_RELAY_WEBHOOK_PM`
-- `DISCORD_CHIP_RELAY_WEBHOOK_DEV`
-- `DISCORD_CHIP_RELAY_WEBHOOK_TESTER`
+Every request to the Infisical host sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`. A non-JSON login response stops the process.
 
 Do not commit those values. The app is not minted in this PR.
 

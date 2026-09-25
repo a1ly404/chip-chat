@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+HEARTBEAT_INTERVAL_S = 15 * 60
+
+
 @dataclass
 class Watchdog:
     consecutive_failures: int = 0
