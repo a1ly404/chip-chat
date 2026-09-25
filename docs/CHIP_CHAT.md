@@ -48,6 +48,7 @@ Config: `config/chip_chat_personas.json`, `config/chip_chat_models.json`.
 ./bin/chip agent spawn alice --persona planner
 ./bin/chip agent say alice "Outline demo steps"
 ./bin/chip room demo --demo
+./bin/chip room example --once 'Say hello in one sentence.' --mock
 ./bin/chip spend
 ```
 
@@ -65,6 +66,22 @@ CHIP_CHAT_MOCK=1 ./bin/chip room demo --demo
 export OPENROUTER_CC_API_KEY='sk-or-v1-…'
 ./bin/chip ping
 ./bin/chip room demo --demo
+```
+
+## Room law (Amendment 5)
+
+Channel files live at `config/chip_chat/channels/<room>.md` (`demo.md`, `example.md`).
+
+`chip room <name>` loads that file into the system prompt:
+
+- `## Law` is **binding**. It overrides persona wording.
+- `## Memory` is **advisory**. It must not override law.
+- A file with neither heading is treated entirely as binding law.
+- A room with no file still runs; the CLI prints `law=(none)`.
+
+```bash
+./bin/chip room demo --demo --mock
+./bin/chip room example --once 'One sentence.' --mock
 ```
 
 ## Data path
