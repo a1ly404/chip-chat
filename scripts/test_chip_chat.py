@@ -451,6 +451,11 @@ def test_ui_lists_turns_and_mock_send(tmp_path: Path, monkeypatch: pytest.Monkey
     assert any(t.get("role") == "user" for t in turns)
 
 
+def test_chip_ui_launcher_executable() -> None:
+    ui_launcher = REPO / "bin" / "chip-ui"
+    assert ui_launcher.is_file()
+
+
 def test_launcher_executable() -> None:
     assert LAUNCHER.is_file()
     with tempfile.TemporaryDirectory() as tmp:

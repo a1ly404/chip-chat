@@ -51,15 +51,19 @@ Ledger under `~/appdata/chip-chat/` (or `CHIP_CHAT_DATA_DIR`). Docker relay: `do
 
 ## Local UI (Path A)
 
-The UI does not talk to OpenRouter. It lists rooms, shows the last turns from `~/appdata/chip-chat/threads/<room>.jsonl`, and sends one message with `./bin/chip room <room> --once`.
+The UI does not talk to OpenRouter. It lists rooms, shows the last turns from `~/appdata/chip-chat/threads/<room>.jsonl`, and sends one message with `./bin/chip room <room> --once`. Design: [docs/UI_PATH_A.md](docs/UI_PATH_A.md).
+
+**WSL2:** run the server inside your Ubuntu distro, then open `http://127.0.0.1:8765/` in your Windows browser (default WSL2 forwards localhost).
 
 ```bash
+chmod +x bin/chip-ui
+
 # offline (default): passes --mock
-python3 scripts/chip_ui.py
-# then open http://127.0.0.1:8765/
+./bin/chip-ui
+# or: python3 scripts/chip_ui.py
 
 # one live turn per Send (uses OPENROUTER_CC_API_KEY; still under the $5/$10 gates)
-CHIP_CHAT_UI_LIVE=1 python3 scripts/chip_ui.py
+CHIP_CHAT_UI_LIVE=1 ./bin/chip-ui
 ```
 
 ## Docs & tests

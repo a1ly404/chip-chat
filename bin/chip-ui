@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Path A local UI — shells bin/chip. See docs/UI_PATH_A.md
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec python3 "${ROOT}/scripts/chip_ui.py"

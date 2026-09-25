@@ -37,3 +37,12 @@
 | Intent | Allowlisted tool manifest (`config/chip_tools.json`) with risk tiers; `chip tool` / `chip task` CLI and `chip.tool.run`; execution gated on `--execute` / `CHIP_TOOL_AUTO` (default off); task envelopes with `tool_invocations` + `execution_result`; 30s timeout kill; JSONL audit trail; offline tests. |
 | PR | #16 |
 | Merge hash | TBD |
+
+## Phase 5 — Path A local UI (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-25 |
+| Intent | Thin localhost UI scaffolding: room list, JSONL transcript view, send via `./bin/chip room … --once` (mock unless `CHIP_CHAT_UI_LIVE=1`); `bin/chip-ui` entrypoint; design doc `docs/UI_PATH_A.md`; WSL run notes in README. No auth, no Cloudflare. |
+| PR | #18 |
+| Merge hash | TBD |
