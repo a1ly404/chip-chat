@@ -16,6 +16,7 @@ from chip.spend import WARN_MONTHLY_USD, load_ledger
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
 from chip_relay.personas import resolve_persona
+from chip_relay.health_server import clear_gateway_ready, set_gateway_ready, start_health_server
 from chip_relay.watchdog import HEARTBEAT_INTERVAL_S, Watchdog, heartbeat_line
 
 REPO = Path(__file__).resolve().parents[2]
@@ -54,6 +55,9 @@ def post_webhook(url: str, username: str, content: str) -> WebhookResult:
 
 def run_gateway() -> int:
     import discord
+
+    clear_gateway_ready()
+    start_health_server()
 
     config = load_config()
     token = os.environ.get(TOKEN_ENV, "").strip()
@@ -108,6 +112,7 @@ def run_gateway() -> int:
 
     @client.event
     async def on_ready() -> None:
+        set_gateway_ready()
         print("gateway ready", flush=True)
         asyncio.create_task(heartbeat_loop())
 

@@ -1,0 +1,28 @@
+# Hyper-V Docker: chip-relay with persistent ledger/threads and boot .env (no secrets in image).
+# See docs/DOCKER.md
+
+services:
+  chip-relay:
+    build: .
+    image: chip-relay:latest
+    restart: unless-stopped
+    environment:
+      CHIP_CHAT_DATA_DIR: /data/chip-chat
+    volumes:
+      - chip-chat-data:/data/chip-chat
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:48082/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  chip-chat-data:

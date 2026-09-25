@@ -47,7 +47,7 @@ Live calls refresh OpenRouter usage and enforce:
 - **$5** — WARN (stderr + `standup_facts.jsonl`)
 - **$10** — cutoff (live calls refused; mock still OK)
 
-Ledger under `~/appdata/chip-chat/` (or `CHIP_CHAT_DATA_DIR`).
+Ledger under `~/appdata/chip-chat/` (or `CHIP_CHAT_DATA_DIR`). Docker relay: `docs/DOCKER.md`.
 
 ## Local UI (Path A)
 

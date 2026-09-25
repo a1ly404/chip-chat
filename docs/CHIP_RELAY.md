@@ -51,7 +51,7 @@ Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exis
 
 ## Startup
 
-`bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. `--listen` exits with an error because the gateway stub does not connect.
+`bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. With `--listen`, boot creds come from `.env` (or the environment), runtime Discord/OpenRouter values are loaded from Infisical, then the live gateway starts. An internal HTTP server answers `GET /health` on port **48082** (env `CHIP_RELAY_HEALTH_PORT`): **503** until Discord `on_ready`, then **200**. Docker deploy: `docs/DOCKER.md`.
 
 ## Harness
 
@@ -62,5 +62,5 @@ Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=
 Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
 
 ```bash
-python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py -q
 ```
