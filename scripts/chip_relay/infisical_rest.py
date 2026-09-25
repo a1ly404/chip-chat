@@ -19,6 +19,7 @@ RUNTIME_SECRETS = (
     "CHIP_WEBHOOK_DEV",
     "OPENROUTER_CC_API_KEY",
 )
+OPTIONAL_SECRETS = ("DISCORD_V1_TOKEN",)
 DEFAULT_API_URL = "https://infisical.razzormail.com"
 DEFAULT_PROJECT_ID = "cc1062f8-f99b-408b-abbf-2236548d63af"
 
@@ -47,6 +48,7 @@ def _request(
     body: dict | None = None,
 ) -> tuple[int, str, str]:
     data = None if body is None else json.dumps(body).encode()
+    headers = {**headers, "User-Agent": "chip-relay"}
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -95,7 +97,7 @@ def fetch_runtime_secrets(environ: dict[str, str] | None = None) -> dict[str, st
     found: dict[str, str] = {}
     for item in json.loads(raw).get("secrets") or []:
         key = item.get("secretKey")
-        if key in RUNTIME_SECRETS:
+        if key in RUNTIME_SECRETS or key in OPTIONAL_SECRETS:
             found[key] = str(item.get("secretValue") or "")
     absent = [name for name in RUNTIME_SECRETS if not found.get(name, "").strip()]
     if absent:

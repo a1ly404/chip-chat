@@ -72,7 +72,7 @@ def handle_message(
         "-m",
         text,
         "--as",
-        room.as_agent,
+        incoming.author.strip(),
         "--json",
         "--turn-limit",
         "1",
@@ -89,10 +89,11 @@ def handle_message(
         return _fail(logs, "chip json malformed", chip_calls=1)
 
     url = environ.get(room.webhook_env, "")
-    posted: WebhookResult = webhook(url, room.as_agent, reply)
+    identity = incoming.author.strip()
+    posted: WebhookResult = webhook(url, identity, reply)
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=1)
     if record is not None:
-        record(room.id, reply, room.as_agent)
-    logs.append(f"posted {room.as_agent} to {incoming.channel}")
+        record(room.id, reply, identity)
+    logs.append(f"posted {identity} to {incoming.channel}")
     return DispatchResult(ok=True, chip_calls=1, webhook_calls=1, logs=logs)

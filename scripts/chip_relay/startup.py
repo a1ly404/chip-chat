@@ -67,6 +67,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chip-relay", description="Chip relay startup checks")
     parser.add_argument("--listen", action="store_true", help="Refused until the gateway is wired")
     args = parser.parse_args(argv)
+    if args.listen:
+        from chip_relay.infisical_rest import InfisicalAccessError, fetch_runtime_secrets
+
+        try:
+            fetched = fetch_runtime_secrets()
+        except InfisicalAccessError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        infisical_key = fetched.pop("OPENROUTER_CC_API_KEY", "")
+        os.environ.update(fetched)
+        if infisical_key:
+            try:
+                openrouter.key_health(infisical_key)
+            except openrouter.ChipConfigError:
+                print("ERROR: OPENROUTER_CC_API_KEY from Infisical failed key health; keeping boot key", file=sys.stderr)
+                from chip.config import DOTENV_FILE
+
+                for line in DOTENV_FILE.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("OPENROUTER_CC_API_KEY="):
+                        os.environ["OPENROUTER_CC_API_KEY"] = line.split("=", 1)[1].strip().strip("'").strip('"')
+                        break
+            else:
+                os.environ["OPENROUTER_CC_API_KEY"] = infisical_key
     config = load_config()
     try:
         key = openrouter.require_api_key()
@@ -82,13 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {err}", file=sys.stderr)
     if errors:
         return 1
-    stub = ListenerStub()
     if args.listen:
-        try:
-            stub.connect(config)
-        except ListenerNotWired as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 3
+        from chip_relay.gateway import run_gateway
+
+        return run_gateway()
+    stub = ListenerStub()
     print(
         f"chip-relay checks ok channel={config.channel} rooms={len(config.rooms)} "
         f"auto={str(config.auto).lower()} listen=stub"

@@ -1,17 +1,27 @@
 {
   "channel": "chip-relay",
   "turn_limit": 1,
+  "heartbeat_channel_id": "1553158948373266503",
   "rooms": [
+    {
+      "id": "relay",
+      "as": "relay",
+      "discord_channel": "chip-relay",
+      "channel_id": "1553158948373266503",
+      "webhook_env": "CHIP_WEBHOOK_DEV"
+    },
     {
       "id": "dev",
       "as": "dev",
       "discord_channel": "chip-dev",
+      "channel_id": "1553148327137116251",
       "webhook_env": "CHIP_WEBHOOK_DEV"
     },
     {
       "id": "selftest",
       "as": "selftest",
       "discord_channel": "chip-selftest",
+      "channel_id": "1553148284686573700",
       "webhook_env": "CHIP_WEBHOOK_SELFTEST"
     }
   ]

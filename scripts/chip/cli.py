@@ -9,7 +9,7 @@ import sys
 
 from chip import config, law, mock, openrouter, runtime, spend, store
 
-_AGENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,32}$")
+_AGENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 
 
 def _print_spend_summary(ledger: dict) -> None:

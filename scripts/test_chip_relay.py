@@ -28,7 +28,7 @@ def test_load_fixed_rooms_and_auto_defaults_false() -> None:
     assert config.auto is False
     assert config.turn_limit == 1
     assert config.channel == "chip-relay"
-    assert [room.id for room in config.rooms] == ["dev", "selftest"]
+    assert [room.id for room in config.rooms] == ["relay", "dev", "selftest"]
     assert config.room("dev").as_agent == "dev"
 
 

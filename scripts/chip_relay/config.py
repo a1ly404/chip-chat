@@ -20,6 +20,7 @@ class RoomBinding:
     as_agent: str
     webhook_env: str
     discord_channel: str
+    channel_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class RelayConfig:
     turn_limit: int
     auto: bool
     rooms: tuple[RoomBinding, ...]
+    heartbeat_channel_id: str = ""
 
     def room(self, room_id: str) -> RoomBinding:
         for binding in self.rooms:
@@ -42,6 +44,13 @@ class RelayConfig:
                 return binding
         known = ", ".join(binding.discord_channel for binding in self.rooms)
         raise KeyError(f"channel {discord_channel!r} is not configured ({known})")
+
+    def room_for_channel_id(self, channel_id: str) -> RoomBinding:
+        wanted = str(channel_id)
+        for binding in self.rooms:
+            if binding.channel_id == wanted:
+                return binding
+        raise KeyError(f"unknown channel {wanted}")
 
 
 def auto_enabled(environ: dict[str, str] | None = None) -> bool:
@@ -61,6 +70,7 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
                 as_agent=str(entry["as"]),
                 webhook_env=str(entry["webhook_env"]),
                 discord_channel=str(entry.get("discord_channel") or entry["id"]),
+                channel_id=str(entry.get("channel_id") or ""),
             )
         )
     return RelayConfig(
@@ -68,4 +78,5 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
         turn_limit=int(raw.get("turn_limit") or 1),
         auto=auto_enabled(environ),
         rooms=tuple(rooms),
+        heartbeat_channel_id=str(raw.get("heartbeat_channel_id") or ""),
     )
