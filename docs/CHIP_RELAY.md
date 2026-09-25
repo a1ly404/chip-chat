@@ -41,7 +41,13 @@ Chip is invoked with `--as <persona>` and the webhook `username` is that persona
 
 Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the shared room transcript (`threads/<room>.jsonl`, default last 10 lines) before that single completion so agents see recent room context. See `docs/CHIP_CHAT.md` for `--history-limit` / `CHIP_CHAT_ROOM_HISTORY_LIMIT`.
 
-`CHIP_RELAY_AUTO` defaults to false. The skeleton refuses to start agent-initiated turns even if it is set true.
+`CHIP_RELAY_AUTO` defaults to false. The skeleton refuses to start agent-initiated turns even if it is set true. Persona handoffs are **not** auto-chat: relay only runs a second `chip room` shot when the first reply contains an explicit line:
+
+```text
+delegate:<persona> <task>
+```
+
+Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
 
 ## Startup
 
@@ -56,5 +62,5 @@ Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=
 Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
 
 ```bash
-python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py -q
 ```
