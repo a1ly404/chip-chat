@@ -10,6 +10,7 @@ from chip import openrouter
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.infisical_rest import missing_boot
 from chip_relay.listener import ListenerNotWired, ListenerStub
+from chip_relay.personas import speakers_maps_effective, speakers_unconfigured_message
 
 
 def check_startup(
@@ -36,6 +37,8 @@ def check_startup(
         if binding.id in seen:
             errors.append(f"duplicate room {binding.id}")
         seen.add(binding.id)
+        if binding.speakers_declared and not speakers_maps_effective(binding):
+            errors.append(speakers_unconfigured_message(binding))
         if not binding.webhook_env or binding.webhook_env not in env:
             errors.append(f"room {binding.id} webhook env {binding.webhook_env} is unset")
         else:

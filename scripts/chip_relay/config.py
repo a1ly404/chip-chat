@@ -41,6 +41,7 @@ class RoomBinding:
     webhook_env: str
     discord_channel: str
     channel_id: str = ""
+    speakers_declared: bool = False
     speakers_by_id: dict[str, str] = field(default_factory=dict)
     speakers_by_handle: dict[str, str] = field(default_factory=dict)
 
@@ -94,6 +95,7 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
                 webhook_env=str(entry["webhook_env"]),
                 discord_channel=str(entry.get("discord_channel") or entry["id"]),
                 channel_id=str(entry.get("channel_id") or ""),
+                speakers_declared="speakers" in entry,
                 speakers_by_id=by_id,
                 speakers_by_handle=by_handle,
             )

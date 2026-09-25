@@ -8,7 +8,15 @@
       "as": "relay",
       "discord_channel": "chip-relay",
       "channel_id": "1553158948373266503",
-      "webhook_env": "CHIP_WEBHOOK_DEV"
+      "webhook_env": "CHIP_WEBHOOK_DEV",
+      "speakers": {
+        "discord_ids": {
+          "TODO_PM_DISCORD_USER_ID": "pm"
+        },
+        "handles": {
+          "TODO_pm_discord_handle": "pm"
+        }
+      }
     },
     {
       "id": "dev",
@@ -17,8 +25,14 @@
       "channel_id": "1553148327137116251",
       "webhook_env": "CHIP_WEBHOOK_DEV",
       "speakers": {
-        "discord_ids": {},
-        "handles": {}
+        "discord_ids": {
+          "TODO_PM_DISCORD_USER_ID": "pm",
+          "TODO_DEV_DISCORD_USER_ID": "dev"
+        },
+        "handles": {
+          "TODO_pm_discord_handle": "pm",
+          "TODO_dev_discord_handle": "dev"
+        }
       }
     },
     {

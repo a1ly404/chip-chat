@@ -57,6 +57,6 @@ docker compose exec chip-relay python3 -c \
 
 `restart: unless-stopped` keeps the relay up across Docker daemon restarts on Hyper-V.
 
-## Phase 2 (out of scope here)
+## Phase 2 — speaker maps
 
-Speaker maps and live Discord channel deploy are not part of this image change; ensure Infisical webhooks and relay token are correct for heartbeat and room dispatch.
+Replace `TODO_*` entries in `config/chip_relay/rooms.json` with real Discord user ids/handles for `#chip-dev` and `#chip-relay` (see `docs/SECRETS.md`). After editing on the host, `docker compose restart chip-relay`. Until maps are real, startup checks fail and dispatch will not guess `--as`.

@@ -14,6 +14,7 @@ from chip_relay.watchdog import Watchdog, heartbeat_line
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "scripts" / "fixtures" / "e2e.jsonl"
+ROOMS_FIXTURE = REPO / "scripts" / "fixtures" / "relay_rooms.json"
 
 
 def _env() -> dict[str, str]:
@@ -23,7 +24,7 @@ def _env() -> dict[str, str]:
 
 
 def _deliver(content: str = "hello from the guild", channel: str = "chip-dev"):
-    config = load_config(environ={})
+    config = load_config(path=ROOMS_FIXTURE, environ={})
     calls: list[list[str]] = []
     posts: list[tuple[str, str, str]] = []
 
@@ -38,7 +39,7 @@ def _deliver(content: str = "hello from the guild", channel: str = "chip-dev"):
         return WebhookResult(status=204)
 
     result = handle_message(
-        Incoming(channel=channel, content=content, author="member"),
+        Incoming(channel=channel, content=content, author="harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=webhook,
@@ -75,7 +76,7 @@ def test_oversized_message_does_not_call_chip() -> None:
 
 
 def test_chip_exit_2_is_loud_and_not_retried() -> None:
-    config = load_config(environ={})
+    config = load_config(path=ROOMS_FIXTURE, environ={})
     calls: list[int] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
@@ -84,7 +85,7 @@ def test_chip_exit_2_is_loud_and_not_retried() -> None:
         return ChipResult(returncode=2, stdout="")
 
     result = handle_message(
-        Incoming("chip-dev", "hi", "member"),
+        Incoming("chip-dev", "hi", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=lambda *a: pytest.fail("webhook must not be called"),
@@ -96,7 +97,7 @@ def test_chip_exit_2_is_loud_and_not_retried() -> None:
 
 
 def test_chip_timeout_logs_slow_call_killed_once() -> None:
-    config = load_config(environ={})
+    config = load_config(path=ROOMS_FIXTURE, environ={})
     calls: list[int] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
@@ -105,7 +106,7 @@ def test_chip_timeout_logs_slow_call_killed_once() -> None:
         return ChipResult(returncode=-1, stdout="", timed_out=True)
 
     result = handle_message(
-        Incoming("chip-dev", "hi", "member"),
+        Incoming("chip-dev", "hi", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=lambda *a: pytest.fail("no webhook after timeout"),
@@ -116,7 +117,7 @@ def test_chip_timeout_logs_slow_call_killed_once() -> None:
 
 
 def test_webhook_4xx_does_not_retry() -> None:
-    config = load_config(environ={})
+    config = load_config(path=ROOMS_FIXTURE, environ={})
     calls: list[int] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
@@ -132,7 +133,7 @@ def test_webhook_4xx_does_not_retry() -> None:
         return WebhookResult(status=400)
 
     result = handle_message(
-        Incoming("chip-dev", "hi", "member"),
+        Incoming("chip-dev", "hi", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=webhook,
@@ -163,7 +164,7 @@ def test_selftest_budget_blocks_at_warn_gate() -> None:
 
 
 def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
-    config = load_config(environ={})
+    config = load_config(path=ROOMS_FIXTURE, environ={})
     calls: list[int] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
@@ -174,7 +175,7 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
         return ChipResult(0, '{"reply": "canned"}')
 
     first = handle_message(
-        Incoming("chip-dev", "hi", "member"),
+        Incoming("chip-dev", "hi", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=lambda *a: WebhookResult(204),
@@ -183,7 +184,7 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
     assert first.alert == "slow_call_killed"
     written: list[str] = []
     second = handle_message(
-        Incoming("chip-dev", "again", "member"),
+        Incoming("chip-dev", "again", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
         webhook=lambda *a: WebhookResult(204),
@@ -194,6 +195,27 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
     assert written == ["dev:dev:canned"]
     assert calls == [1, 1]
     assert tmp_path is not None
+
+
+def test_unconfigured_speakers_map_fails_loudly() -> None:
+    config = load_config(environ={})
+    calls: list[list[str]] = []
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del args, timeout
+        calls.append([])
+        return ChipResult(0, '{"reply": "nope"}')
+
+    result = handle_message(
+        Incoming("chip-dev", "hi", "anyone", author_id="123"),
+        config,
+        chip=chip,
+        webhook=lambda *a: pytest.fail("webhook must not run"),
+        environ=_env(),
+    )
+    assert not result.ok
+    assert "speakers map" in result.alert
+    assert calls == []
 
 
 def test_watchdog_pages_once_then_stops() -> None:

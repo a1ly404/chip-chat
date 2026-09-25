@@ -37,7 +37,9 @@ Resolution order for an inbound message:
 2. `speakers.handles[normalized_handle]` (strip + lower-case) when the handle is present.
 3. The room's `as` field (default persona for that channel).
 
-Chip is invoked with `--as <persona>` and the webhook `username` is that persona. Unmapped humans still get the room default, not their Discord name.
+If a room declares `speakers` but every key is still a `TODO_*` placeholder (or the maps are empty), **startup and dispatch fail loudly** — relay will not silently use the room `as` field. Replace placeholders with real Discord ids/handles (see `docs/SECRETS.md`) and restart the relay.
+
+Chip is invoked with `--as <persona>` and the webhook `username` is that persona. When speaker maps are configured, unmapped humans still get the room default, not their Discord name.
 
 Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the shared room transcript (`threads/<room>.jsonl`, default last 10 lines) before that single completion so agents see recent room context. See `docs/CHIP_CHAT.md` for `--history-limit` / `CHIP_CHAT_ROOM_HISTORY_LIMIT`.
 
@@ -57,10 +59,10 @@ Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exis
 
 Layer 1 and 2 run in CI (`scripts/test_chip_relay_harness.py`). A red mock test blocks the PR. Failures log once and do not retry. A chip call reported past 30 seconds is `slow_call_killed`.
 
-Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=1`, and it exits before any live call when `monthly_usd` is at or above the $5 WARN gate. This skeleton does not post to Discord. The relay PR is not Done until one passing selftest transcript and spend line are pasted in the PR body.
+Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=1`, resolves persona from the room `speakers` map via `CHIP_RELAY_SELFTEST_AUTHOR_ID` / `CHIP_RELAY_SELFTEST_AUTHOR_HANDLE` (no hard-coded `--as pm`), and exits before any live call when `monthly_usd` is at or above the $5 WARN gate. It runs one `chip room` shot (OpenRouter spend) but does not post to Discord. The relay PR is not Done until one passing selftest transcript and spend line are pasted in the PR body.
 
 Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
 
 ```bash
-python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_selftest.py -q
 ```

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from chip_relay.config import RoomBinding
 from chip_relay.dispatch import ChipResult, Incoming, WebhookResult, handle_message
-from chip_relay.personas import resolve_persona
+from chip_relay.personas import resolve_persona, resolve_persona_for_dispatch, speakers_maps_effective
 
 
 def _dev_room(**kwargs) -> RoomBinding:
@@ -31,6 +31,44 @@ def test_resolve_by_handle_case_insensitive() -> None:
 def test_fallback_to_room_default() -> None:
     room = _dev_room(speakers_by_id={"1": "pm"})
     assert resolve_persona(room, author_id="unknown", author_handle="stranger") == "dev"
+
+
+def test_todo_only_speakers_are_not_effective() -> None:
+    room = _dev_room(
+        speakers_declared=True,
+        speakers_by_id={"TODO_PM_DISCORD_USER_ID": "pm"},
+        speakers_by_handle={"TODO_pm_discord_handle": "pm"},
+    )
+    assert not speakers_maps_effective(room)
+    persona, alert = resolve_persona_for_dispatch(room, author_id="123", author_handle="human")
+    assert alert is not None
+    assert "speakers map" in alert
+
+
+def test_dispatch_refuses_unconfigured_speakers() -> None:
+    from chip_relay.config import RelayConfig
+
+    room = _dev_room(
+        speakers_declared=True,
+        speakers_by_id={"TODO_DEV_DISCORD_USER_ID": "dev"},
+    )
+    config = RelayConfig(channel="chip-relay", turn_limit=1, auto=False, rooms=(room,))
+    calls: list[list[str]] = []
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del args, timeout
+        calls.append([])
+        return ChipResult(0, '{"reply": "ok"}')
+
+    result = handle_message(
+        Incoming("chip-dev", "hi", "human", author_id="1"),
+        config,
+        chip=chip,
+        webhook=lambda *a: WebhookResult(204),
+        environ={"CHIP_WEBHOOK_DEV": "https://example.invalid/dev"},
+    )
+    assert not result.ok
+    assert calls == []
 
 
 def test_dispatch_uses_mapped_persona_for_chip_and_webhook() -> None:

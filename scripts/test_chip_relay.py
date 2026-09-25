@@ -30,6 +30,8 @@ def test_load_fixed_rooms_and_auto_defaults_false() -> None:
     assert config.channel == "chip-relay"
     assert [room.id for room in config.rooms] == ["relay", "dev", "selftest"]
     assert config.room("dev").as_agent == "dev"
+    assert config.room("dev").speakers_declared is True
+    assert config.room("relay").speakers_declared is True
 
 
 def test_unknown_room_is_not_created() -> None:
@@ -43,8 +45,17 @@ def test_unknown_room_is_not_created() -> None:
 
 
 def test_startup_ok_when_key_check_passes() -> None:
-    config = load_config(environ=_env())
+    from pathlib import Path
+
+    rooms = Path(__file__).resolve().parent / "fixtures" / "relay_rooms.json"
+    config = load_config(path=rooms, environ=_env())
     assert check_startup(config, key_check=lambda: None, environ=_env()) == []
+
+
+def test_startup_reports_unconfigured_speakers_on_production_rooms() -> None:
+    config = load_config(environ=_env())
+    errors = check_startup(config, key_check=lambda: None, environ=_env())
+    assert any("speakers map" in err for err in errors)
 
 
 def test_startup_reports_key_health_failure() -> None:

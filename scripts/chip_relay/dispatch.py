@@ -14,7 +14,7 @@ from chip_relay.delegate import (
     max_logged_delegate_hop,
     parse_delegate,
 )
-from chip_relay.personas import resolve_persona
+from chip_relay.personas import resolve_persona_for_dispatch
 
 MAX_MESSAGE_CHARS = 2000
 CHIP_TIMEOUT_S = 30
@@ -139,11 +139,13 @@ def handle_message(
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
 
-    persona = resolve_persona(
+    persona, persona_alert = resolve_persona_for_dispatch(
         room,
         author_id=incoming.author_id,
         author_handle=incoming.author,
     )
+    if persona_alert:
+        return _fail(logs, persona_alert)
     reply, outcome = _run_chip_shot(room.id, persona, text, chip=chip)
     chip_calls = 1
     if outcome.timed_out:
