@@ -267,6 +267,24 @@ def test_room_messages_include_law() -> None:
     assert messages[1] == {"role": "user", "content": "hi"}
 
 
+def test_ui_lists_turns_and_mock_send(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("CHIP_CHAT_UI_LIVE", raising=False)
+    spec = importlib.util.spec_from_file_location("chip_ui", REPO / "scripts" / "chip_ui.py")
+    assert spec and spec.loader
+    ui = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ui)
+    assert "demo" in ui.list_rooms()
+    proc = ui.send_via_cli("example", "Say hello in one sentence.")
+    assert proc.returncode == 0
+    assert "--mock" in proc.args
+    turns = ui.recent_turns("example", 10)
+    assert turns
+    assert any(t.get("role") == "user" for t in turns)
+
+
 def test_launcher_executable() -> None:
     assert LAUNCHER.is_file()
     with tempfile.TemporaryDirectory() as tmp:

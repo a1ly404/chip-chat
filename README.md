@@ -49,6 +49,19 @@ Live calls refresh OpenRouter usage and enforce:
 
 Ledger under `~/appdata/chip-chat/` (or `CHIP_CHAT_DATA_DIR`).
 
+## Local UI (Path A)
+
+The UI does not talk to OpenRouter. It lists rooms, shows the last turns from `~/appdata/chip-chat/threads/<room>.jsonl`, and sends one message with `./bin/chip room <room> --once`.
+
+```bash
+# offline (default): passes --mock
+python3 scripts/chip_ui.py
+# then open http://127.0.0.1:8765/
+
+# one live turn per Send (uses OPENROUTER_CC_API_KEY; still under the $5/$10 gates)
+CHIP_CHAT_UI_LIVE=1 python3 scripts/chip_ui.py
+```
+
 ## Docs & tests
 
 - Full reference: [docs/CHIP_CHAT.md](docs/CHIP_CHAT.md)
