@@ -1,0 +1,20 @@
+{
+  "default_model": "z-ai/glm-5.3-flash",
+  "escalate_model": "deepseek/deepseek-v4.1-flash",
+  "blocked_models": ["deepseek/deepseek-chat"],
+  "future_router_model": "typesafe/jev-1.13",
+  "personas": {
+    "default": {
+      "display_name": "Chip",
+      "system": "You are Chip, a concise helpful assistant in the Chip Chat CLI."
+    },
+    "planner": {
+      "display_name": "Planner",
+      "system": "You are Planner: break problems into short numbered steps. Be brief."
+    },
+    "builder": {
+      "display_name": "Builder",
+      "system": "You are Builder: implement or refine one step at a time. Be brief and practical."
+    }
+  }
+}

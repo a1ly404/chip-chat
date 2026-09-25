@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Chip Chat CLI — OPENROUTER_CC_API_KEY only. See docs/CHIP_CHAT.md
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m chip "$@"

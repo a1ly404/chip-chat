@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install pytest
+      - name: Mock tests
+        run: python3 -m pytest scripts/test_chip_chat.py -q
+      - name: Launcher smoke
+        run: |
+          chmod +x bin/chip
+          CHIP_CHAT_MOCK=1 ./bin/chip ping
+          CHIP_CHAT_MOCK=1 ./bin/chip chat --once 'Reply with exactly: pong'

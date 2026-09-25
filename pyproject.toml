@@ -1,0 +1,9 @@
+[project]
+name = "chip-chat"
+version = "0.1.0"
+description = "Chip Chat — cheap multi-agent OpenRouter CLI"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["scripts"]
+pythonpath = ["scripts"]
