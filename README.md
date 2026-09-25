@@ -1,0 +1,1 @@
+# Chip Chat\n\nCheap chat brain. Standalone CLI for WSL / Ubuntu.\n\nSoT: this repo (not razzorstack).\n\nScaffolding landing next.\n
