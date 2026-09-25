@@ -19,6 +19,7 @@ class RoomBinding:
     id: str
     as_agent: str
     webhook_env: str
+    discord_channel: str
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,13 @@ class RelayConfig:
                 return binding
         known = ", ".join(binding.id for binding in self.rooms)
         raise KeyError(f"room {room_id!r} is not configured ({known}); relay will not create rooms")
+
+    def room_for_channel(self, discord_channel: str) -> RoomBinding:
+        for binding in self.rooms:
+            if binding.discord_channel == discord_channel:
+                return binding
+        known = ", ".join(binding.discord_channel for binding in self.rooms)
+        raise KeyError(f"channel {discord_channel!r} is not configured ({known})")
 
 
 def auto_enabled(environ: dict[str, str] | None = None) -> bool:
@@ -52,6 +60,7 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
                 id=str(entry["id"]),
                 as_agent=str(entry["as"]),
                 webhook_env=str(entry["webhook_env"]),
+                discord_channel=str(entry.get("discord_channel") or entry["id"]),
             )
         )
     return RelayConfig(

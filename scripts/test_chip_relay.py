@@ -59,7 +59,7 @@ def test_startup_refuses_auto_and_bad_turn_limit() -> None:
         channel="chip-relay",
         turn_limit=2,
         auto=True,
-        rooms=(RoomBinding("pm", "pm", "DISCORD_CHIP_RELAY_WEBHOOK_PM"),),
+        rooms=(RoomBinding("pm", "pm", "DISCORD_CHIP_RELAY_WEBHOOK_PM", "chip-pm"),),
     )
     errors = check_startup(config, key_check=lambda: None, environ=env)
     assert any("turn_limit" in err for err in errors)

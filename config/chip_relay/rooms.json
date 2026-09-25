@@ -5,16 +5,19 @@
     {
       "id": "pm",
       "as": "pm",
+      "discord_channel": "chip-pm",
       "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_PM"
     },
     {
       "id": "dev",
       "as": "dev",
+      "discord_channel": "chip-dev",
       "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_DEV"
     },
     {
       "id": "tester",
       "as": "tester",
+      "discord_channel": "chip-tester",
       "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_TESTER"
     }
   ]

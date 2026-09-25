@@ -26,6 +26,14 @@ Do not commit those values. The app is not minted in this PR.
 
 `bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. `--listen` exits with an error because the gateway stub does not connect.
 
+## Harness
+
+Layer 1 and 2 run in CI (`scripts/test_chip_relay_harness.py`). A red mock test blocks the PR. Failures log once and do not retry. A chip call reported past 30 seconds is `slow_call_killed`.
+
+Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=1`, and it exits before any live call when `monthly_usd` is at or above the $5 WARN gate. This skeleton does not post to Discord. The relay PR is not Done until one passing selftest transcript and spend line are pasted in the PR body.
+
+Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
+
 ```bash
-python3 -m pytest scripts/test_chip_relay.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_harness.py -q
 ```
