@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "default_timeout_seconds": 30,
+  "tools": [
+    {
+      "id": "echo",
+      "argv": ["python3", "-c", "import sys; print(' '.join(sys.argv[1:]))"],
+      "risk": "low",
+      "allow_extra_args": true
+    },
+    {
+      "id": "sleepy",
+      "argv": ["python3", "-c", "import time; time.sleep(120)"],
+      "risk": "high",
+      "allow_extra_args": false
+    },
+    {
+      "id": "git-status",
+      "argv": ["git", "status", "--short", "--branch"],
+      "risk": "low",
+      "allow_extra_args": false
+    }
+  ]
+}

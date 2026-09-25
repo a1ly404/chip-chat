@@ -7,7 +7,8 @@ import json
 import re
 import sys
 
-from chip import config, law, mempalace, mock, openrouter, runtime, spend, store
+from chip import config, law, mempalace, mock, openrouter, runtime, spend, store, task, tool
+from chip.tools_manifest import list_tools
 
 _AGENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 
@@ -487,6 +488,115 @@ def cmd_room(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tool_list(args: argparse.Namespace) -> int:
+    rows = list_tools()
+    if args.json:
+        payload = [
+            {
+                "id": t.id,
+                "argv": list(t.argv),
+                "risk": t.risk,
+                "allow_extra_args": t.allow_extra_args,
+                "description": t.description,
+            }
+            for t in rows
+        ]
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+    if not rows:
+        print("No tools in allowlist manifest.")
+        return 0
+    for t in rows:
+        extras = " (+extra args)" if t.allow_extra_args else ""
+        print(f"{t.id}\t{t.risk}\t{' '.join(t.argv)}{extras}")
+        if t.description:
+            print(f"  {t.description}")
+    return 0
+
+
+def cmd_tool_run(args: argparse.Namespace) -> int:
+    tool_id = args.tool_id
+    extra = list(args.extra_args or [])
+    if extra and extra[0] == "--":
+        extra = extra[1:]
+    try:
+        result = tool.run(
+            tool_id,
+            *extra,
+            execute=bool(args.execute),
+            timeout_seconds=args.timeout,
+            cwd=args.cwd,
+        )
+    except tool.ToolNotAllowedError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    payload = result.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        if not result.executed:
+            print("DRY-RUN (gated): pass --execute or set CHIP_TOOL_AUTO=1", file=sys.stderr)
+        print(f"tool={result.tool_id} exit={result.exit_code} risk={result.risk}")
+        if result.stdout:
+            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
+    if not result.executed:
+        return 3
+    return 0 if result.exit_code == 0 else 4
+
+
+def cmd_task_create(args: argparse.Namespace) -> int:
+    args_list = list(args.args or [])
+    try:
+        envelope = task.create_task(args.tool_id, args=args_list, note=args.note)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(envelope, ensure_ascii=False))
+    else:
+        print(f"created {envelope['id']} tool={envelope['tool']} status={envelope['status']}")
+    return 0
+
+
+def cmd_task_show(args: argparse.Namespace) -> int:
+    try:
+        envelope = task.load_task(args.task_id)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(envelope, ensure_ascii=False))
+    else:
+        print(json.dumps(envelope, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_task_run(args: argparse.Namespace) -> int:
+    try:
+        envelope = task.run_task(
+            args.task_id,
+            execute=bool(args.execute),
+            timeout_seconds=args.timeout,
+            cwd=args.cwd,
+        )
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    exec_res = envelope.get("execution_result") or {}
+    gated = bool(exec_res.get("gated"))
+    if args.json:
+        print(json.dumps(envelope, ensure_ascii=False))
+    else:
+        print(f"task {envelope['id']} status={envelope['status']}")
+        print(json.dumps(exec_res, indent=2, ensure_ascii=False))
+    if gated:
+        return 3
+    ok = bool(exec_res.get("ok"))
+    return 0 if ok else 4
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -554,6 +664,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Close the room session and mine advisory memories from its JSONL segment",
     )
     room.set_defaults(func=cmd_room)
+
+    tool_p = sub.add_parser("tool", help="Allowlisted task execution tools")
+    tool_sub = tool_p.add_subparsers(dest="tool_cmd", required=True)
+
+    tool_list = tool_sub.add_parser("list", parents=[common], help="Show allowlisted tools")
+    tool_list.add_argument("--json", action="store_true", help="JSON array of tool specs")
+    tool_list.set_defaults(func=cmd_tool_list)
+
+    tool_run = tool_sub.add_parser("run", parents=[common], help="Run one allowlisted tool (gated)")
+    tool_run.add_argument("tool_id", help="Tool id from config/chip_tools.json")
+    tool_run.add_argument("extra_args", nargs=argparse.REMAINDER, help="Extra argv segments (if allowed)")
+    tool_run.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually spawn the process (default: dry-run unless CHIP_TOOL_AUTO=1)",
+    )
+    tool_run.add_argument("--timeout", type=float, default=None, help="Override manifest timeout (seconds)")
+    tool_run.add_argument("--cwd", default=None, help="Working directory for the subprocess")
+    tool_run.add_argument("--json", action="store_true", help="Print one JSON object")
+    tool_run.set_defaults(func=cmd_tool_run)
+
+    task_p = sub.add_parser("task", help="Task envelopes (tool_invocations + execution_result)")
+    task_sub = task_p.add_subparsers(dest="task_cmd", required=True)
+
+    task_create = task_sub.add_parser("create", parents=[common], help="Create a pending task")
+    task_create.add_argument("--tool", dest="tool_id", required=True, help="Allowlisted tool id")
+    task_create.add_argument("--args", nargs="*", default=[], help="Extra argv for the tool")
+    task_create.add_argument("--note", default=None, help="Optional note")
+    task_create.add_argument("--json", action="store_true")
+    task_create.set_defaults(func=cmd_task_create)
+
+    task_show = task_sub.add_parser("show", parents=[common], help="Show task envelope")
+    task_show.add_argument("task_id")
+    task_show.add_argument("--json", action="store_true")
+    task_show.set_defaults(func=cmd_task_show)
+
+    task_run = task_sub.add_parser("run", parents=[common], help="Run task tool (gated)")
+    task_run.add_argument("task_id")
+    task_run.add_argument("--execute", action="store_true", help="Actually execute (see CHIP_TOOL_AUTO)")
+    task_run.add_argument("--timeout", type=float, default=None)
+    task_run.add_argument("--cwd", default=None)
+    task_run.add_argument("--json", action="store_true")
+    task_run.set_defaults(func=cmd_task_run)
 
     return parser
 

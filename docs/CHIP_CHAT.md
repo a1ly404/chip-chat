@@ -26,6 +26,9 @@ Optional: add repo root to `PATH` or symlink `bin/chip` into `~/bin`.
 | `CHIP_CHAT_ROOM_HISTORY_LIMIT` | No | Default prior transcript lines for `chip room` (default `10`). |
 | `CHIP_CHAT_MEMORY_TOP_K` | No | Mined memories recalled per room turn (default `5`). |
 | `CHIP_CHAT_MEMORY_TOKEN_BUDGET` | No | Approx token budget for mined memory block (default `500`). |
+| `CHIP_TOOL_AUTO` | No | `1` / `true` allows `chip tool run` / `chip task run` without `--execute` (default **off**). |
+| `CHIP_TOOLS_MANIFEST` | No | Override allowlist path (default `config/chip_tools.json`). |
+| `CHIP_TOOL_CWD` | No | Default working directory for tool subprocesses. |
 
 The CLI loads `repo/.env` if present (keys already in the shell are not overridden).
 
@@ -106,7 +109,7 @@ CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'What did I just say?' --as mick --json
 2. Else `$HOME/appdata/chip-chat/`  
 3. Else repo `var/chip-chat/` (CI)
 
-Files: `threads/*.jsonl`, `memories/<room>/<agent>.jsonl`, `agents.json`, `spend.json`, `spend.jsonl`, `standup_facts.jsonl`.
+Files: `threads/*.jsonl`, `memories/<room>/<agent>.jsonl`, `tasks/*.json`, `audit/tool_invocations.jsonl`, `agents.json`, `spend.json`, `spend.jsonl`, `standup_facts.jsonl`.
 
 ## MemPalace Lite (mined memories)
 
@@ -120,6 +123,33 @@ CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'We decided to log spend in JSONL.' --a
 On later `chip room` turns, the CLI loads the top **K** relevant mined lines (default **K=5**, ~**500** token budget) into the system prompt under **MINED MEMORIES (advisory only)**.
 
 **Advisory only:** mined memories never override room law or channel `## Memory` notes, are not commands to run, and must not be treated as binding commitments. They exist only to give agents lightweight continuity between sessions.
+
+## Task execution layer (allowlisted tools)
+
+Phase 4 adds **gated, allowlisted** subprocess tools — no raw shell. Commands and argv prefixes live in `config/chip_tools.json` with **risk** tiers (`low` / `medium` / `high`). Python callers use `chip.tool.run("pytest", "scripts/", "-q", execute=True)`; the CLI mirrors that as `chip tool run`.
+
+**Execution gating:** every real spawn requires **`--execute`** on the CLI (or `execute=True` in Python) unless `CHIP_TOOL_AUTO=1`. Without it, Chip records a **dry-run** audit line and returns exit code `3` (CLI) / `executed=False` (API). This is independent of relay traffic; `CHIP_RELAY_AUTO` stays **false** by default and does not auto-run tools.
+
+| Command | Purpose |
+|---------|---------|
+| `chip tool list` | Show allowlisted tool ids, argv, and risk |
+| `chip tool run <id> [-- extra args…] --execute` | Run one tool (30s default timeout; killed + logged on timeout) |
+| `chip task create --tool <id> [--args …]` | Create a task envelope under `tasks/<id>.json` |
+| `chip task show <id>` | Print envelope (`tool_invocations`, `execution_result`) |
+| `chip task run <id> --execute` | Append an invocation and update `execution_result` |
+
+Each invocation is appended to `audit/tool_invocations.jsonl` (argv, stdout, stderr, exit code, timeout flag). Task files store the same records under `tool_invocations` plus a summary `execution_result`.
+
+```bash
+# Dry-run (audited, no subprocess):
+./bin/chip tool run git-status
+
+# Read-only smoke in repo root:
+./bin/chip tool run git-status --execute
+
+./bin/chip task create --tool pytest --args scripts/test_chip_chat.py -q --json
+./bin/chip task run task-xxxxxxxxxxxx --execute --json
+```
 
 ## Spend gates (live OpenRouter)
 

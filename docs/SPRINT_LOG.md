@@ -27,4 +27,13 @@
 | Date | 2026-09-25 |
 | Intent | Mine-as-you-go memories on `chip room --close`; store under `memories/<room>/<agent>.jsonl`; recall top-K (~5, ~500 tokens) into the system prompt as **advisory only**; offline unit tests for extract/recall/top-K. |
 | PR | #15 |
+| Merge hash | `506b94e` |
+
+## Phase 4 — Task execution layer (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-25 |
+| Intent | Allowlisted tool manifest (`config/chip_tools.json`) with risk tiers; `chip tool` / `chip task` CLI and `chip.tool.run`; execution gated on `--execute` / `CHIP_TOOL_AUTO` (default off); task envelopes with `tool_invocations` + `execution_result`; 30s timeout kill; JSONL audit trail; offline tests. |
+| PR | #16 |
 | Merge hash | TBD |
