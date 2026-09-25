@@ -1,0 +1,21 @@
+{
+  "channel": "chip-relay",
+  "turn_limit": 1,
+  "rooms": [
+    {
+      "id": "pm",
+      "as": "pm",
+      "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_PM"
+    },
+    {
+      "id": "dev",
+      "as": "dev",
+      "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_DEV"
+    },
+    {
+      "id": "tester",
+      "as": "tester",
+      "webhook_env": "DISCORD_CHIP_RELAY_WEBHOOK_TESTER"
+    }
+  ]
+}
