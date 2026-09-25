@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 
 from chip import config, law, mock, openrouter, runtime, spend, store
+
+_AGENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,32}$")
 
 
 def _print_spend_summary(ledger: dict) -> None:
@@ -255,6 +259,95 @@ def _room_demo_turn(
     return reply
 
 
+def _validate_agent(name: str | None) -> str | None:
+    """Caller-supplied identity only. Returns an error string, or None if valid."""
+    if not name or not name.strip():
+        return "--as is required (caller-supplied agent; Chip Chat will not invent one)"
+    if not _AGENT_NAME.fullmatch(name.strip()):
+        return f"--as {name!r} must be a single name (letters, digits, _ or -)"
+    return None
+
+
+def _shot_usage(payload: dict, ledger: dict) -> tuple[int, int, float, float]:
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    prompt = int(usage.get("prompt_tokens") or ledger.get("last_prompt_tokens") or 0)
+    completion = int(usage.get("completion_tokens") or ledger.get("last_completion_tokens") or 0)
+    session = float(ledger.get("session_usd") or 0.0)
+    monthly = float(ledger.get("monthly_usd") or 0.0)
+    return prompt, completion, session, monthly
+
+
+def cmd_room_shot(args: argparse.Namespace) -> int:
+    """Non-interactive room turn. --json prints one object and nothing else."""
+    message = (getattr(args, "message", None) or "").strip()
+    agent_err = _validate_agent(getattr(args, "as_agent", None))
+    if not message:
+        print("ERROR: -m/--message is required", file=sys.stderr)
+        return 1
+    if agent_err:
+        print(f"ERROR: {agent_err}", file=sys.stderr)
+        return 1
+    limit = getattr(args, "turn_limit", 1)
+    limit = 1 if limit is None else int(limit)
+    if limit < 1:
+        print("ERROR: --turn-limit must be >= 1", file=sys.stderr)
+        return 1
+    # One -m is one exchange. A limit below 1 is rejected above; this process never loops.
+
+    room = args.name
+    agent = str(args.as_agent).strip()
+    use_mock = args.mock or config.mock_mode()
+    persona = agent if agent in config.load_personas() else "default"
+    messages = build_room_messages(room, persona, message)
+    messages[0]["content"] += (
+        f"\n\nYou are speaking only as {agent}. "
+        "Do not invent other speakers or addresses."
+    )
+    before = float(spend.load_ledger().get("session_usd") or 0.0)
+    store.log_message(room, "user", message)
+    try:
+        text, payload, routed, ledger = runtime.complete(
+            messages,
+            model=config.default_model(),
+            max_tokens=120,
+            use_mock=use_mock,
+            command="room",
+        )
+    except openrouter.ChipConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    prompt_n, completion_n, session_usd, monthly_usd = _shot_usage(payload, ledger)
+    call_cost = max(0.0, session_usd - before)
+    store.log_message(
+        room,
+        "assistant",
+        text,
+        agent=agent,
+        model=routed,
+        extra={
+            "tokens_prompt": prompt_n,
+            "tokens_completion": completion_n,
+            "cost_usd": call_cost,
+        },
+    )
+    result = {
+        "reply": text,
+        "tokens_prompt": prompt_n,
+        "tokens_completion": completion_n,
+        "session_usd": session_usd,
+        "monthly_usd": monthly_usd,
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        _print_room_header(room)
+        print(text)
+        print("---")
+        _print_spend_summary(ledger)
+    return 0
+
+
 def _print_room_header(room: str) -> None:
     loaded = law.load_room_law(room)
     print(law.law_label(loaded))
@@ -264,6 +357,8 @@ def _print_room_header(room: str) -> None:
 def cmd_room(args: argparse.Namespace) -> int:
     room = args.name
     use_mock = args.mock or config.mock_mode()
+    if getattr(args, "message", None) or getattr(args, "json", False):
+        return cmd_room_shot(args)
     if args.once:
         persona = args.persona or "default"
         _print_room_header(room)
@@ -357,6 +452,10 @@ def build_parser() -> argparse.ArgumentParser:
     room = sub.add_parser("room", parents=[common], help="Multi-agent room")
     room.add_argument("name", nargs="?", default="demo", help="Room name (or 'demo')")
     room.add_argument("--demo", action="store_true", help="Scripted planner → builder handoff")
+    room.add_argument("-m", "--message", default=None, help="Non-interactive message (requires --as)")
+    room.add_argument("--as", dest="as_agent", default=None, help="Caller-supplied speaker name")
+    room.add_argument("--json", action="store_true", help="Print one JSON object on stdout")
+    room.add_argument("--turn-limit", dest="turn_limit", type=int, default=1, help="Max exchanges this process (default 1)")
     room.add_argument("--once", metavar="TEXT", help="One turn in this room (law loaded into the system prompt)")
     room.add_argument("--persona", default="default", help="Persona for --once")
     room.add_argument("--agents", nargs="+", default=None, help="Agent persona names")

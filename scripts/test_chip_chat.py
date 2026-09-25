@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -265,6 +266,100 @@ def test_room_messages_include_law() -> None:
     assert "Do not invent spend numbers" in messages[0]["content"]
     assert "MEMORY NOTES (advisory only)" in messages[0]["content"]
     assert messages[1] == {"role": "user", "content": "hi"}
+
+
+def test_room_shot_json_mock(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "-m",
+        "Start test",
+        "--as",
+        "lucy",
+        "--json",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["tokens_prompt"] == 12
+    assert payload["tokens_completion"] == 20
+    assert "session_usd" in payload and "monthly_usd" in payload
+    assert "reply" in payload
+    lines = (tmp_path / "threads" / "demo.jsonl").read_text(encoding="utf-8").splitlines()
+    assistant = json.loads(lines[-1])
+    assert assistant["agent"] == "lucy"
+    assert assistant["role"] == "assistant"
+    assert assistant["model"]
+    assert "tokens_prompt" in assistant
+    assert "cost_usd" in assistant
+
+
+def test_room_shot_requires_as(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "-m",
+        "hi",
+        "--json",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 1
+    assert "--as" in proc.stderr
+
+
+def test_room_shot_api_error_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip import runtime
+    from chip.openrouter import ChipConfigError
+
+    def boom(*_a, **_k):
+        raise ChipConfigError("auth failed")
+
+    monkeypatch.setattr(runtime, "complete", boom)
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    from chip.cli import main
+
+    code = main(["room", "demo", "-m", "hi", "--as", "lucy", "--json", "--mock"])
+    assert code == 2
+
+
+def test_room_shot_turn_limit_blocks(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "-m",
+        "hi",
+        "--as",
+        "lucy",
+        "--turn-limit",
+        "0",
+        "--json",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 1
+    assert not (tmp_path / "threads" / "demo.jsonl").exists()
+
+
+def test_room_shot_does_not_invent_agent(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "-m",
+        "Start test",
+        "--as",
+        "mick",
+        "--json",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 0
+    raw = (tmp_path / "threads" / "demo.jsonl").read_text(encoding="utf-8")
+    assert "human_ally" not in raw
+    assert "planner" not in raw
+    agents = [json.loads(line).get("agent") for line in raw.splitlines()]
+    assert agents == [None, "mick"]
 
 
 def test_ui_lists_turns_and_mock_send(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
