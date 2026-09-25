@@ -220,6 +220,53 @@ def test_require_api_key_rejects_owui_env_names_only() -> None:
     assert "OPENROUTER_CC_API_KEY" in str(exc.value)
 
 
+def test_room_law_splits_binding_and_advisory() -> None:
+    from chip.law import compose_system, load_room_law
+
+    loaded = load_room_law("demo")
+    assert loaded.path is not None
+    assert "Stay inside Chip Chat CLI scope" in loaded.law
+    assert "Prefer mock runs" in loaded.memory
+    system = compose_system("You are Planner.", loaded)
+    assert "ROOM LAW (binding)" in system
+    assert "MEMORY NOTES (advisory only)" in system
+    assert system.index("ROOM LAW") < system.index("MEMORY NOTES")
+    assert system.endswith("You are Planner.")
+
+
+def test_room_law_missing_file_is_empty() -> None:
+    from chip.law import compose_system, law_label, load_room_law
+
+    loaded = load_room_law("no-such-room")
+    assert loaded.path is None
+    assert law_label(loaded) == "law=(none)"
+    assert compose_system("persona", loaded) == "persona"
+
+
+def test_room_once_mock_prints_law_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = _run_chip(
+            "room",
+            "example",
+            "--once",
+            "Say hello in one sentence.",
+            "--mock",
+            env={"CHIP_CHAT_DATA_DIR": tmp},
+        )
+    assert proc.returncode == 0
+    assert "law=config/chip_chat/channels/example.md" in proc.stdout
+
+
+def test_room_messages_include_law() -> None:
+    from chip.cli import build_room_messages
+
+    messages = build_room_messages("example", "default", "hi")
+    assert messages[0]["role"] == "system"
+    assert "Do not invent spend numbers" in messages[0]["content"]
+    assert "MEMORY NOTES (advisory only)" in messages[0]["content"]
+    assert messages[1] == {"role": "user", "content": "hi"}
+
+
 def test_launcher_executable() -> None:
     assert LAUNCHER.is_file()
     with tempfile.TemporaryDirectory() as tmp:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from chip import config, mock, openrouter, runtime, spend, store
+from chip import config, law, mock, openrouter, runtime, spend, store
 
 
 def _print_spend_summary(ledger: dict) -> None:
@@ -228,6 +228,15 @@ def cmd_agent_say(args: argparse.Namespace) -> int:
     return 0
 
 
+def build_room_messages(room: str, persona: str, user_text: str) -> list[dict[str, str]]:
+    """System prompt is room law (binding) plus persona. Memory stays advisory."""
+    system = law.compose_system(_persona_system(persona), law.load_room_law(room))
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_text},
+    ]
+
+
 def _room_demo_turn(
     room: str,
     agent_name: str,
@@ -235,11 +244,7 @@ def _room_demo_turn(
     *,
     use_mock: bool,
 ) -> str:
-    system = _persona_system(agent_name)
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_text},
-    ]
+    messages = build_room_messages(room, agent_name, user_text)
     store.log_message(room, "user", user_text, agent=agent_name)
     reply, _, routed, ledger = runtime.complete(
         messages, model=config.default_model(), max_tokens=200, use_mock=use_mock, command="room"
@@ -250,13 +255,42 @@ def _room_demo_turn(
     return reply
 
 
+def _print_room_header(room: str) -> None:
+    loaded = law.load_room_law(room)
+    print(law.law_label(loaded))
+    print(f"Data: {config.data_dir()}")
+
+
 def cmd_room(args: argparse.Namespace) -> int:
     room = args.name
     use_mock = args.mock or config.mock_mode()
+    if args.once:
+        persona = args.persona or "default"
+        _print_room_header(room)
+        messages = build_room_messages(room, persona, args.once)
+        store.log_message(room, "user", args.once, agent="user")
+        try:
+            text, _, routed, ledger = runtime.complete(
+                messages,
+                model=config.default_model(),
+                max_tokens=400,
+                use_mock=use_mock,
+                command="room",
+            )
+        except openrouter.ChipConfigError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 3
+        store.log_message(room, "assistant", text, agent=persona, model=routed)
+        print(text)
+        print("---")
+        _print_spend_summary(ledger)
+        return 0
+
     if args.demo or room == "demo":
         room = "demo" if room == "demo" else room
         print(f"Room demo (room={room}, mock={use_mock})")
-        print(f"Data: {config.data_dir()}\n")
+        _print_room_header(room)
+        print()
         try:
             if not use_mock:
                 openrouter.require_api_key()
@@ -275,9 +309,9 @@ def cmd_room(args: argparse.Namespace) -> int:
 
     personas = config.load_personas()
     names = args.agents or ["planner", "builder"]
-    print(f"Room {room!r} agents={names} (use --demo for scripted handoff)")
+    print(f"Room {room!r} agents={names} (use --demo for scripted handoff, or --once TEXT)")
     print(f"Personas loaded: {', '.join(personas.keys())}")
-    print(f"Data: {config.data_dir()}")
+    _print_room_header(room)
     return 0
 
 
@@ -323,6 +357,8 @@ def build_parser() -> argparse.ArgumentParser:
     room = sub.add_parser("room", parents=[common], help="Multi-agent room")
     room.add_argument("name", nargs="?", default="demo", help="Room name (or 'demo')")
     room.add_argument("--demo", action="store_true", help="Scripted planner → builder handoff")
+    room.add_argument("--once", metavar="TEXT", help="One turn in this room (law loaded into the system prompt)")
+    room.add_argument("--persona", default="default", help="Persona for --once")
     room.add_argument("--agents", nargs="+", default=None, help="Agent persona names")
     room.set_defaults(func=cmd_room)
 
