@@ -310,7 +310,7 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
         text, payload, routed, ledger = runtime.complete(
             messages,
             model=config.default_model(),
-            max_tokens=120,
+            max_tokens=512,
             use_mock=use_mock,
             command="room",
         )
