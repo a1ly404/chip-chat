@@ -65,6 +65,7 @@ CHIP_CHAT_UI_LIVE=1 python3 scripts/chip_ui.py
 ## Docs & tests
 
 - Full reference: [docs/CHIP_CHAT.md](docs/CHIP_CHAT.md)
+- Relay skeleton (no Discord connection): [docs/CHIP_RELAY.md](docs/CHIP_RELAY.md)
 - Tests: `pip install -e '.[dev]'` then `python3 -m pytest scripts/test_chip_chat.py -q`
 
 ## Live smoke checklist

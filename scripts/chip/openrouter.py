@@ -46,6 +46,21 @@ def _headers(key: str) -> dict[str, str]:
     }
 
 
+def key_health(key: str) -> dict[str, Any]:
+    """GET /api/v1/key. Relay startup uses this; it does not chat."""
+    req = urllib.request.Request(f"{UPSTREAM}/key", headers=_headers(key))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        raise ChipConfigError(f"OpenRouter key health failed HTTP {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise ChipConfigError(f"OpenRouter key health unreachable: {exc}") from exc
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
 def auth_key_info(key: str) -> dict[str, Any]:
     req = urllib.request.Request(f"{UPSTREAM}/auth/key", headers=_headers(key))
     try:

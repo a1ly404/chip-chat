@@ -1,0 +1,108 @@
+"""Relay skeleton tests. No Discord and no OpenRouter network."""
+
+from __future__ import annotations
+
+import pytest
+
+from chip.openrouter import ChipConfigError
+from chip_relay.config import RoomBinding, RelayConfig, load_config
+from chip_relay.listener import ListenerNotWired, ListenerStub
+from chip_relay.startup import check_startup
+
+
+def _env() -> dict[str, str]:
+    return {
+        "INFISICAL_CLIENT_ID": "boot-id",
+        "INFISICAL_CLIENT_SECRET": "boot-secret",
+        "CF_ACCESS_CLIENT_ID": "boot-cf-id",
+        "CF_ACCESS_CLIENT_SECRET": "boot-cf-secret",
+        "DISCORD_CHIP_RELAY_TOKEN": "test-token-not-real",
+        "CHIP_WEBHOOK_DEV": "https://example.invalid/dev",
+        "CHIP_WEBHOOK_SELFTEST": "https://example.invalid/selftest",
+        "CHIP_RELAY_AUTO": "false",
+    }
+
+
+def test_load_fixed_rooms_and_auto_defaults_false() -> None:
+    config = load_config(environ={})
+    assert config.auto is False
+    assert config.turn_limit == 1
+    assert config.channel == "chip-relay"
+    assert [room.id for room in config.rooms] == ["relay", "dev", "selftest"]
+    assert config.room("dev").as_agent == "dev"
+
+
+def test_unknown_room_is_not_created() -> None:
+    config = load_config(environ={})
+    try:
+        config.room("brand-new")
+    except KeyError as exc:
+        assert "not configured" in str(exc)
+    else:
+        raise AssertionError("expected KeyError")
+
+
+def test_startup_ok_when_key_check_passes() -> None:
+    config = load_config(environ=_env())
+    assert check_startup(config, key_check=lambda: None, environ=_env()) == []
+
+
+def test_startup_reports_key_health_failure() -> None:
+    config = load_config(environ=_env())
+
+    def bad() -> None:
+        raise ChipConfigError("OpenRouter key health failed HTTP 401")
+
+    errors = check_startup(config, key_check=bad, environ=_env())
+    assert any("401" in err for err in errors)
+
+
+def test_startup_refuses_auto_and_bad_turn_limit() -> None:
+    env = _env()
+    env["CHIP_RELAY_AUTO"] = "true"
+    config = RelayConfig(
+        channel="chip-relay",
+        turn_limit=2,
+        auto=True,
+        rooms=(RoomBinding("dev", "dev", "CHIP_WEBHOOK_DEV", "chip-dev"),),
+    )
+    errors = check_startup(config, key_check=lambda: None, environ=env)
+    assert any("turn_limit" in err for err in errors)
+    assert any("CHIP_RELAY_AUTO" in err for err in errors)
+
+
+def test_missing_boot_reports_names_only() -> None:
+    config = load_config(environ={})
+    errors = check_startup(config, key_check=lambda: None, environ={})
+    joined = " ".join(errors)
+    assert "INFISICAL_CLIENT_SECRET" in joined
+    assert "boot-secret" not in joined
+
+
+def test_infisical_login_stops_on_html(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip_relay.infisical_rest import InfisicalAccessError, fetch_runtime_secrets
+
+    def fake_request(url: str, **kwargs):
+        del url, kwargs
+        return 200, "text/html", "<!DOCTYPE html>"
+
+    monkeypatch.setattr("chip_relay.infisical_rest._request", fake_request)
+    try:
+        fetch_runtime_secrets(_env())
+    except InfisicalAccessError as exc:
+        assert "non-JSON" in str(exc)
+    else:
+        raise AssertionError("expected stop")
+
+
+def test_listener_stub_does_not_connect() -> None:
+    stub = ListenerStub()
+    config = load_config(environ={})
+    assert stub.run(config) == 0
+    assert stub.started is False
+    try:
+        stub.connect(config)
+    except ListenerNotWired:
+        assert stub.started is False
+    else:
+        raise AssertionError("expected ListenerNotWired")
