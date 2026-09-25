@@ -49,6 +49,7 @@ Config: `config/chip_chat_personas.json`, `config/chip_chat_models.json`.
 ./bin/chip agent say alice "Outline demo steps"
 ./bin/chip room demo --demo
 ./bin/chip room example --once 'Say hello in one sentence.' --mock
+./bin/chip room demo -m 'Start test' --as lucy --json --mock
 ./bin/chip spend
 ```
 
@@ -82,7 +83,10 @@ Channel files live at `config/chip_chat/channels/<room>.md` (`demo.md`, `example
 ```bash
 ./bin/chip room demo --demo --mock
 ./bin/chip room example --once 'One sentence.' --mock
+./bin/chip room demo -m 'Start test' --as lucy --json --mock
 ```
+
+`-m` requires `--as` (the only speaker Chip Chat will record). `--json` prints one object: `reply`, `tokens_prompt`, `tokens_completion`, `session_usd`, `monthly_usd`. Exit `0` on success, `1` on CLI errors, `2` on auth or API errors. `--turn-limit` defaults to `1` and this command performs a single exchange.
 
 ## Data path
 
