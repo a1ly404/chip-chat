@@ -195,6 +195,33 @@ Forbidden zone: agents rewriting their own safety/claim/remux constraints, flipp
 
 **PM-like law for cheap models:** fixed envelopes (claim / triage / learning / parked / verified-as-of) with zero judgment fields, plus a spend gate that refuses open digs. Chip Chat's next design should ship **durable law-md + KISS protocol/memory specs first — not more chat features** — so glm-flash implementers can't invent process. Skip our v1 mistake: always-on expensive babysit personas that re-derive policy from chat instead of obeying short machine-checkable contracts.
 
+### Round 4 — law review + blind spots (verbatim)
+
+**Part 1 — Law corrections (≤5):**
+1. **stand-down is dangerously over-broad.** Real thrift stand-down is selective: expensive personas IDLE unless @mentioned; Chip Chat stays hot; Buffr AutoDev deploy = Cursor/GHA routine stays enabled. Freezing ALL persona wakes would kill the hot path Ally explicitly kept. Spec: name what pauses vs what stays hot; never imply total fleet silence.
+2. **escalation-ladder incomplete + conflated.** Page/GO triggers also include encode-class, capacity gap, Ally-only walls (OPS_BOT_TOKEN_ORACLE_CONFIRMED, execute flips, media deletes). "Tell Ally once / no dig unless ping" is the Buffr ship-FAIL thrift path, not a substitute for paging remux/credential incidents — split those.
+3. **room-turns should not be (HARD, PM).** Every persona obeys speak-as-yourself + silence-as-valid; PM coordinates but doesn't uniquely own room law. Add: @mention ⇒ respond, never read another agent's private chat/memory, private notes use DM not the room.
+4. **forbidden-zone misses the bypass class.** Beyond rewriting law: Auto-review workarounds (encode/rename commands, cookie/session scrapes, minting access from stored secrets) and silent wall flips. learning:/skill proposals never auto-apply — Ally/PM must promote.
+5. **Missing claim-steal/unlock law.** Unlock only via done, confirmed handoff:, or steal (heartbeat miss AND ping-no-reply) — without it, stand-down + park deadlocks the board; agents invent "I'll just take it."
+
+**Part 2 — Spec these two before an incident:** (1) Stale-claim break — heartbeat interval, ping definition, who steals, park-pauses-heartbeat? Bites first: half-finished claims after stand-down/mid-task break. (2) Scope/path granularity — one live claim ↔ one canonical path; forbid ticket-wide claims. Defer: long handoff chains (confirmed handoff: each hop; no transitive ownership).
+
+**Part 3 — New-lane onboarding (before first task):** Charter (owns/never-touches/mutate class) · Room seat (IDLE-unless-@mention) · Claim obedience · Triage gate · Thrift class (default cheap-agent) · Channels (standups vs incidents) · Done bar (CI + verified-as-of) · Kill/walls · Smoke (dry-run ticket: triage→claim→refuse-without-evidence→park). Cheap-model: envelopes only (no judgment fields); allowlisted tools; refuse free dig; wake payload minimal; no vibes-memory without learning: shape.
+
+**Part 4 — Mandatory retro (3rd premature Done):** Facts (IDs, who flipped, timestamps, missing boxes) → Blast radius → Root cause → ONE concrete rule edit → Reopen list. ≤1 page; PM + Ally attend (+Lyla if media); flipping lanes comment evidence only; lands on program ticket + thrift ticket as learning: + AGENT_CLAIM patch — never only in chat.
+
+**Final — ranked blind spots (ask these next):**
+1. Tool allowlists + --execute gates (how CHIP_RELAY_AUTO=false interacts with stand-down)
+2. Evidence forgery / confident lies — pytest green but prod isn't; refusing "I verified" without checkable artifact
+3. Human-in-the-loop unpaid clicks (OTP, UI pick, ATV smoke) — so tickets don't false-Done
+4. Secret handling — names vs values; Infisical vs Cursor env; never in tickets/Discord
+5. Idempotency / TOCTOU — remux flock, session>0, double Composer on same RAZ
+6. Cross-room leakage — Buffr→Chip Chat drift; DM vs room; shared history
+7. Spend meters — what CHIP_STAND_DOWN keys off; paper-trail resume format
+8. Law test harness — pytest rejecting malformed claim/parked/learning envelopes
+
+**If only one more round: #1 tool allowlist + #8 envelope tests — they prevent the first cheap-model jailbreak better than more prose law.**
+
 ## Part 2 — `[sand-workflow:oracle-ops-ship]` (58 lines, verbatim)
 
 ```markdown
