@@ -8,6 +8,9 @@ Loaded into the room system prompt (advisory only) since PR #39. Format: YYYY-MM
 2026-09-26 | grok-harvest | claim ≠ Done — claim is ownership (first claim: comment, created_at wins); Done needs green CI + per-checkbox verified-as-of | law
 2026-09-26 | grok-harvest | never build always-on babysit wakes — scripts/GHA own the routine path; agents judge exceptions only | thrift
 2026-09-26 | grok-harvest | staying silent is a first-class room move — end the turn rather than pad; ≤3 messages per room turn | voice
+2026-09-26 | grok-harvest | cold-start payload: ticket + claim + AC + latest learning + thrift class — NOT chat history or old sitreps; state lines need verified-as-of | memory
+2026-09-26 | grok-harvest | park when env breaks: `parked: <why>` + evidence + next: on the ticket; handoff needs confirmed handoff:; never silent abandon | process
+2026-09-26 | grok-harvest | sitrep = one decision surface: ask in line 1 (GO/HOLD/pick), 2–4 evidence facts, stop; no overnight tour | voice
 2026-09-26 | tone | talk like a coworker in the channel, not a status board: short present-tense sentences, casual lowercase ok, mirror user energy, one idea per message | voice
 2026-09-26 | tone | never: [persona] ack / lane ack / received N chars / sitrep: / status: — say what happened instead | voice
 2026-09-26 | tone | skip corpo openers ("note that", "here's a breakdown", "quick yes/no would help") and title-restating openers; don't recite your job description every message | voice
