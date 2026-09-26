@@ -22,7 +22,7 @@ Do not commit those values. The app is not minted in this PR.
 
 ### Personas (stable speakers)
 
-Relay does not post under raw Discord usernames. Each room may define optional `speakers` maps from Discord to persona ids (`pm`, `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`):
+Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps **human** Discord snowflakes (and handles) to persona ids (`pm`, `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` (no human snowflake required for `dev` / `pm`). Example human map:
 
 ```json
 "speakers": {

@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from chip.spend import WARN_MONTHLY_USD, load_ledger
+from chip.spend import WARN_MONTHLY_USD, ledger_monthly_usd, load_ledger
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
 from chip_relay.personas import resolve_persona
@@ -64,7 +64,7 @@ def run_gateway() -> int:
     if not token:
         print(f"ERROR: {TOKEN_ENV} is unset", file=sys.stderr)
         return 1
-    monthly = float(load_ledger().get("monthly_usd") or 0.0)
+    monthly = ledger_monthly_usd(load_ledger())
     if monthly >= WARN_MONTHLY_USD:
         print(f"ERROR: monthly_usd={monthly} >= WARN {WARN_MONTHLY_USD}", file=sys.stderr)
         return 2
@@ -77,7 +77,7 @@ def run_gateway() -> int:
     stats = {"ok": 0, "fail": 0, "last_error": "", "last_message_at": 0.0}
 
     def monthly_now() -> float:
-        return float(load_ledger().get("monthly_usd") or 0.0)
+        return ledger_monthly_usd(load_ledger())
 
     async def post_heartbeat() -> None:
         channel = client.get_channel(int(config.heartbeat_channel_id))

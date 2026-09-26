@@ -153,7 +153,7 @@ Each invocation is appended to `audit/tool_invocations.jsonl` (argv, stdout, std
 
 ## Spend gates (live OpenRouter)
 
-Before each live completion, Chip Chat refreshes `GET /api/v1/auth/key` and tracks spend locally.
+Before each live completion, Chip Chat refreshes `GET /api/v1/auth/key` and tracks spend locally in `$CHIP_CHAT_DATA_DIR/spend.json` (Docker: `/data/chip-chat` on the `chip-chat-data` volume). When OpenRouter returns a positive `usage_monthly`, that value is authoritative. When the API omits usage or reports zero, Chip keeps the on-disk **token estimate** (`estimated_monthly_usd`) so relay heartbeats and `$5` / `$10` gates do not reset after a container restart.
 
 | Threshold | Behavior |
 |-----------|----------|

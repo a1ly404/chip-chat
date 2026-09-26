@@ -57,8 +57,11 @@ def test_startup_ok_when_pm_speaker_on_production_rooms() -> None:
     errors = check_startup(config, key_check=lambda: None, environ=_env())
     assert not any("speakers map" in err for err in errors)
     dev = config.room("dev")
+    relay = config.room("relay")
     assert dev.speakers_by_id.get("1553148704494714890") == "pm"
-    assert "TODO_DEV_DISCORD_USER_ID" in dev.speakers_by_id
+    assert dev.speakers_by_id.get("187044496872046592") == "pm"
+    assert relay.speakers_by_id.get("187044496872046592") == "pm"
+    assert "TODO_DEV_DISCORD_USER_ID" not in dev.speakers_by_id
 
 
 def test_startup_reports_key_health_failure() -> None:

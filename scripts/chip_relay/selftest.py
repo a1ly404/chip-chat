@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     from chip import spend
 
     ledger = spend.load_ledger()
-    monthly = float(ledger.get("monthly_usd") or 0.0)
+    monthly = spend.ledger_monthly_usd(ledger)
     if not budget_ok(monthly):
         print(
             f"ERROR: monthly_usd={monthly} >= WARN {WARN_MONTHLY_USD}; selftest refused",

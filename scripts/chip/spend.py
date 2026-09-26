@@ -90,11 +90,12 @@ def _parse_usd(value: Any) -> float | None:
 
 
 def monthly_usd_from_auth(info: dict[str, Any]) -> float | None:
+    """OpenRouter key usage when positive; zero/absent means no authoritative signal."""
     for key in ("usage_monthly", "usage", "usage_daily"):
         parsed = _parse_usd(info.get(key))
         if parsed is not None and parsed > 0:
             return parsed
-    return _parse_usd(info.get("usage_monthly"))
+    return None
 
 
 def estimate_token_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -128,6 +129,17 @@ def effective_monthly_usd(ledger: dict[str, Any], api_monthly: float | None) -> 
     return float(ledger.get("estimated_monthly_usd") or 0.0)
 
 
+def ledger_monthly_usd(ledger: dict[str, Any]) -> float:
+    """Monthly spend from on-disk ledger (relay heartbeats, selftest, gates without a fresh auth call)."""
+    stored = _parse_usd(ledger.get("monthly_usd"))
+    source = str(ledger.get("monthly_source") or "")
+    if source == "api" and stored is not None and stored > 0:
+        return effective_monthly_usd(ledger, stored)
+    if stored is not None and stored > 0:
+        return stored
+    return effective_monthly_usd(ledger, None)
+
+
 def write_standup_fact(fact: str) -> None:
     append_jsonl(standup_facts_path(), {"ts": _ts(), "fact": fact})
 
@@ -154,7 +166,7 @@ def refresh_from_auth(key: str) -> tuple[dict[str, Any], float | None]:
     api_monthly = monthly_usd_from_auth(info)
     ledger = load_ledger()
     ledger["verified_as_of"] = _ts()
-    if api_monthly is not None:
+    if api_monthly is not None and api_monthly > 0:
         ledger["monthly_usd"] = api_monthly
         ledger["monthly_source"] = "api"
     save_ledger(ledger)
@@ -202,7 +214,8 @@ def record_after_live_completion(
         ledger["monthly_source"] = "api"
     elif cost_usd > 0:
         ledger["estimated_monthly_usd"] = float(ledger.get("estimated_monthly_usd") or 0.0) + cost_usd
-        if not ledger.get("monthly_usd"):
+        current = _parse_usd(ledger.get("monthly_usd"))
+        if current is None or current <= 0:
             ledger["monthly_usd"] = ledger["estimated_monthly_usd"]
             ledger["monthly_source"] = "token_estimate"
 
@@ -242,11 +255,11 @@ def print_spend_report(key: str | None = None) -> int:
             print(f"auth/key: ERROR {exc}")
             monthly = effective_monthly_usd(ledger, None)
     else:
-        monthly = effective_monthly_usd(ledger, _parse_usd(ledger.get("monthly_usd")))
+        monthly = ledger_monthly_usd(ledger)
 
     print(f"data_dir={data_dir()}")
     print(f"verified_as_of={ledger.get('verified_as_of')}")
-    print(f"monthly_usd={ledger.get('monthly_usd')} source={ledger.get('monthly_source')}")
+    print(f"monthly_usd={ledger_monthly_usd(ledger)} source={ledger.get('monthly_source')}")
     print(f"estimated_monthly_usd={ledger.get('estimated_monthly_usd')}")
     print(f"session_usd={ledger.get('session_usd')}")
     print(f"last_model={ledger.get('last_model')} last_command={ledger.get('last_command')}")

@@ -18,7 +18,9 @@
 | PR | #14 |
 | Merge hash | TBD |
 
-**2026-09-25:** Real `pm` Discord id in `rooms.json`; `chip-selftest` bot id → `selftest` speaker on `#chip-selftest`; `dev` still TODO; selftest author defaults documented (`SECRETS.md`, `.env.example`).
+**2026-09-25:** Real `pm` Discord id in `rooms.json`; `chip-selftest` bot id → `selftest` speaker on `#chip-selftest`; selftest author defaults documented (`SECRETS.md`, `.env.example`).
+
+**2026-09-26:** Ally human `187044496872046592` → `pm` on `#chip-dev` / `#chip-relay`; removed `TODO_DEV` (AI `dev` is webhook-only). Spend: do not overwrite ledger with OpenRouter `usage_monthly=0`; heartbeats use `ledger_monthly_usd`; persistence regression test.
 
 ## Phase 3 — MemPalace Lite (Freeze)
 

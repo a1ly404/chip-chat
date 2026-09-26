@@ -209,6 +209,45 @@ def test_token_estimate_deepseek(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cost == pytest.approx(0.07, rel=1e-3)
 
 
+def test_spend_ledger_persists_across_reload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chip import spend
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    ledger = spend.default_ledger()
+    ledger["monthly_usd"] = 0.001467
+    ledger["estimated_monthly_usd"] = 0.001467
+    ledger["monthly_source"] = "token_estimate"
+    spend.save_ledger(ledger)
+
+    reloaded = spend.load_ledger()
+    assert reloaded["monthly_usd"] == pytest.approx(0.001467)
+    assert spend.ledger_monthly_usd(reloaded) == pytest.approx(0.001467)
+    assert (tmp_path / "spend.json").is_file()
+
+
+def test_refresh_from_auth_does_not_zero_token_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chip import spend
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    ledger = spend.default_ledger()
+    ledger["estimated_monthly_usd"] = 0.001467
+    ledger["monthly_usd"] = 0.001467
+    ledger["monthly_source"] = "token_estimate"
+    spend.save_ledger(ledger)
+
+    monkeypatch.setattr(
+        spend.openrouter,
+        "auth_key_info",
+        lambda _key: {"usage_monthly": 0},
+    )
+    updated, api_monthly = spend.refresh_from_auth("sk-or-v1-unit-test-key")
+    assert api_monthly is None
+    assert updated["monthly_usd"] == pytest.approx(0.001467)
+    assert spend.ledger_monthly_usd(updated) == pytest.approx(0.001467)
+
+
 def test_require_api_key_rejects_owui_env_names_only() -> None:
     """Chip module must not read OWUI key from env."""
     from chip.openrouter import ENV_KEY, require_api_key

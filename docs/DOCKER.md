@@ -57,6 +57,10 @@ docker compose exec chip-relay python3 -c \
 
 `restart: unless-stopped` keeps the relay up across Docker daemon restarts on Hyper-V.
 
-## Phase 2 — speaker maps
+## Spend ledger (same volume)
 
-Replace `TODO_*` entries in `config/chip_relay/rooms.json` with real Discord user ids/handles for `#chip-dev` and `#chip-relay` (see `docs/SECRETS.md`). After editing on the host, `docker compose restart chip-relay`. Until maps are real, startup checks fail and dispatch will not guess `--as`.
+`spend.json` and `spend.jsonl` live under `CHIP_CHAT_DATA_DIR` (the `chip-chat-data` volume in compose). Relay heartbeats and `./bin/chip spend` read that path. After a container restart, `monthly_usd` should not drop to zero unless OpenRouter reports a positive `usage_monthly` or the ledger file was lost (wrong data dir). Local token estimates are kept when the API returns zero or omits usage.
+
+## Speaker maps
+
+Human Discord ids for `#chip-dev` / `#chip-relay` are in `config/chip_relay/rooms.json` (see `docs/SECRETS.md`). Rebuild or pull an image that includes an updated `rooms.json`, or bind-mount the file on the host, then `docker compose restart chip-relay`.
