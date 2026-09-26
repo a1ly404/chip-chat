@@ -25,10 +25,28 @@ from chip_relay.dispatch import (
 from chip_relay.routing import RouteKind, classify_gateway_message
 from chip_relay.personas import resolve_persona
 from chip_relay.health_server import clear_gateway_ready, set_gateway_ready, start_health_server
-from chip_relay.watchdog import HEARTBEAT_INTERVAL_S, Watchdog, heartbeat_line
+from chip_relay.watchdog import (
+    HEARTBEAT_INTERVAL_S,
+    HeartbeatGate,
+    Watchdog,
+    heartbeat_line,
+    should_post_heartbeat,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 LAUNCHER = REPO / "bin" / "chip"
+RELAY_ERROR_PREFIX = "[chip-relay] ERROR: "
+
+
+def dispatch_error_visible_in_channel(alert: str) -> bool:
+    """In-channel ERROR for empty chip replies and webhook failures only."""
+    if alert == "empty chip reply":
+        return True
+    return alert.startswith("webhook ")
+
+
+def format_channel_dispatch_error(alert: str) -> str:
+    return f"{RELAY_ERROR_PREFIX}{alert}"
 
 
 def run_chip(args: list[str], timeout: int) -> ChipResult:
@@ -82,6 +100,7 @@ def run_gateway() -> int:
     intents.members = True
     client = discord.Client(intents=intents)
     dog = Watchdog()
+    heartbeat_gate = HeartbeatGate(baseline_monthly_usd=monthly_now())
     stats = {"ok": 0, "fail": 0, "last_error": "", "last_message_at": 0.0}
     seen_message_ids: set[int] = set()
     max_seen_ids = 2048
@@ -90,20 +109,33 @@ def run_gateway() -> int:
         return ledger_monthly_usd(load_ledger())
 
     async def post_heartbeat() -> None:
+        now = time.time()
+        current_monthly = monthly_now()
+        if not should_post_heartbeat(
+            now=now,
+            last_post_at=heartbeat_gate.last_post_at,
+            baseline_monthly_usd=heartbeat_gate.baseline_monthly_usd,
+            current_monthly_usd=current_monthly,
+            last_error=stats["last_error"],
+            watchdog_consecutive_failures=dog.consecutive_failures,
+            watchdog_would_page=dog.would_page_on_next_failure(),
+        ):
+            print("heartbeat skipped", flush=True)
+            return
         channel = client.get_channel(int(config.heartbeat_channel_id))
-        ok = stats["fail"] == 0 or stats["ok"] > 0 and not stats["last_error"]
         rate = 1.0 if (stats["ok"] + stats["fail"]) == 0 else stats["ok"] / (stats["ok"] + stats["fail"])
-        age = int(time.time() - stats["last_message_at"]) if stats["last_message_at"] else -1
+        age = int(now - stats["last_message_at"]) if stats["last_message_at"] else -1
         line = heartbeat_line(
             last_message_age_s=age,
             success_rate=rate,
             last_error=stats["last_error"],
-            monthly_usd=monthly_now(),
+            monthly_usd=current_monthly,
         )
         try:
             if channel is None:
                 raise RuntimeError("heartbeat channel missing")
             await channel.send(line)
+            heartbeat_gate.note_post(current_monthly, now)
             verdict = dog.observe(True)
         except Exception as exc:
             stats["last_error"] = exc.__class__.__name__
@@ -193,6 +225,15 @@ def run_gateway() -> int:
             stats["fail"] += 1
             stats["last_error"] = result.alert
             print(f"ERROR: {result.alert}", file=sys.stderr, flush=True)
+            if dispatch_error_visible_in_channel(result.alert):
+                try:
+                    await message.channel.send(format_channel_dispatch_error(result.alert)[:2000])
+                except Exception as exc:
+                    print(
+                        f"ERROR: failed to post dispatch error: {exc.__class__.__name__}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
     client.run(token)
     return 0

@@ -79,6 +79,15 @@ def _parse_chip_reply(stdout: str) -> str | None:
         return None
 
 
+def _chip_reply_failure(reply: str | None) -> str:
+    """Return a dispatch alert when chip stdout has no postable reply, else \"\"."""
+    if reply is None:
+        return "chip json malformed"
+    if not reply.strip():
+        return "empty chip reply"
+    return ""
+
+
 def log_delegate_handoff(
     room_id: str,
     *,
@@ -176,8 +185,9 @@ def handle_inbound_delegate(
         return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
     if follow_outcome.returncode != 0:
         return _fail(logs, f"chip exit {follow_outcome.returncode}", chip_calls=chip_calls)
-    if follow_reply is None:
-        return _fail(logs, "chip json malformed", chip_calls=chip_calls)
+    reply_alert = _chip_reply_failure(follow_reply)
+    if reply_alert:
+        return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
     posted: WebhookResult = webhook(url, request.persona, follow_reply)
@@ -233,8 +243,9 @@ def handle_message(
         return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
     if outcome.returncode != 0:
         return _fail(logs, f"chip exit {outcome.returncode}", chip_calls=chip_calls)
-    if reply is None:
-        return _fail(logs, "chip json malformed", chip_calls=chip_calls)
+    reply_alert = _chip_reply_failure(reply)
+    if reply_alert:
+        return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
     posted: WebhookResult = webhook(url, persona, reply)
@@ -272,8 +283,9 @@ def handle_message(
                 return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
             if follow_outcome.returncode != 0:
                 return _fail(logs, f"chip exit {follow_outcome.returncode}", chip_calls=chip_calls)
-            if follow_reply is None:
-                return _fail(logs, "chip json malformed", chip_calls=chip_calls)
+            reply_alert = _chip_reply_failure(follow_reply)
+            if reply_alert:
+                return _fail(logs, reply_alert, chip_calls=chip_calls)
             posted = webhook(url, request.persona, follow_reply)
             webhook_calls += 1
             if posted.status >= 400:
