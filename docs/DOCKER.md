@@ -41,6 +41,16 @@ docker compose ps
 docker compose logs -f chip-relay
 ```
 
+### Hyper-V: chip-relay stuck in `Created`
+
+On some Hyper-V Docker hosts, `docker compose up -d --force-recreate chip-relay` can leave the container in state **Created** (never running), which blocks the `#chip-dev` gateway. Use the repo recovery script from the deploy directory (e.g. `C:\Users\17783\chip-chat` — Git Bash or WSL on Windows):
+
+```bash
+./scripts/chip_relay_up.sh
+```
+
+Optional: `CHIP_RELAY_PULL=1` to pull before build; `CHIP_RELAY_UP_TIMEOUT=600` if Infisical/Discord startup is slow. The script removes **Created** / **Exited** / **dead** relay containers, runs `compose up -d --force-recreate`, retries once if still **Created**, then exits non-zero unless `GET /health` returns **200** inside the container (port **48082**).
+
 No host ports are published. Health is checked **inside** the container on `127.0.0.1:48082/health` (override with `CHIP_RELAY_HEALTH_PORT`).
 
 - `503` + body `starting` until the Discord gateway fires `on_ready`
