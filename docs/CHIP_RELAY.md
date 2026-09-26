@@ -83,6 +83,8 @@ To let an automation bot (for example Grok relay posting Ally GOs) hit the same 
 
 Untrusted `APP` / bot authors are still skipped.
 
+When Discord auto-attaches a long post as `message.txt` (or `text/plain`) with little or no inline `content`, the live gateway fetches that attachment (up to 64 KiB, UTF-8 text only) and treats it as the inbound body for routing and `Incoming` dispatch — same as if the text had been inline.
+
 ### Local inject (no Discord)
 
 ```bash

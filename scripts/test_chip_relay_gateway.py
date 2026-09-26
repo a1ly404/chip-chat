@@ -21,6 +21,16 @@ from chip_relay.inject import resolve_inject_author_id, run_inject
 ROOMS = Path(__file__).resolve().parent / "fixtures" / "relay_rooms.json"
 
 
+def _attachment(
+    *,
+    url: str = "https://cdn.discordapp.com/attachments/1/message.txt",
+    filename: str = "message.txt",
+    content_type: str = "text/plain",
+    size: int = 12,
+) -> SimpleNamespace:
+    return SimpleNamespace(url=url, filename=filename, content_type=content_type, size=size)
+
+
 def _message(
     *,
     content: str,
@@ -29,11 +39,13 @@ def _message(
     bot: bool = False,
     webhook_id: int | None = None,
     msg_id: int = 1,
+    attachments: list[SimpleNamespace] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=msg_id,
         content=content,
         webhook_id=webhook_id,
+        attachments=attachments or [],
         author=SimpleNamespace(id=author_id, name=author_name, bot=bot),
     )
 
@@ -47,6 +59,100 @@ def _dev_room() -> RoomBinding:
         speakers_by_id={"187044496872046592": "pm", "900000000000000002": "dev"},
         speakers_declared=True,
     )
+
+
+def test_empty_content_with_text_attachment_routes_human() -> None:
+    room = _dev_room()
+    go_body = "GO: long ally objective\nline two"
+    decision = classify_gateway_message(
+        _message(
+            content="",
+            attachments=[_attachment(size=len(go_body))],
+        ),
+        relay_bot_user_id=999,
+        room=room,
+        fetch_attachment=lambda _url: go_body,
+    )
+    assert decision is not None
+    assert decision.kind == RouteKind.HUMAN
+    assert decision.incoming is not None
+    assert decision.incoming.content == go_body
+
+
+def test_empty_content_without_attachment_still_ignored() -> None:
+    room = _dev_room()
+    assert (
+        classify_gateway_message(
+            _message(content=""),
+            relay_bot_user_id=999,
+            room=room,
+        )
+        is None
+    )
+
+
+def test_oversized_attachment_ignored() -> None:
+    room = _dev_room()
+    from chip_relay.routing import ATTACHMENT_TEXT_MAX_BYTES
+
+    assert (
+        classify_gateway_message(
+            _message(
+                content="",
+                attachments=[_attachment(size=ATTACHMENT_TEXT_MAX_BYTES + 1)],
+            ),
+            relay_bot_user_id=999,
+            room=room,
+            fetch_attachment=lambda _url: "should not run",
+        )
+        is None
+    )
+
+
+def test_non_text_attachment_ignored() -> None:
+    room = _dev_room()
+    assert (
+        classify_gateway_message(
+            _message(
+                content="",
+                attachments=[
+                    _attachment(
+                        filename="photo.png",
+                        content_type="image/png",
+                        size=100,
+                    )
+                ],
+            ),
+            relay_bot_user_id=999,
+            room=room,
+            fetch_attachment=lambda _url: "binary",
+        )
+        is None
+    )
+
+
+def test_trusted_bot_go_in_attachment() -> None:
+    room = _dev_room()
+    env = {
+        "CHIP_RELAY_INJECT_BOT_IDS": "555",
+        "CHIP_RELAY_INJECT_AUTHOR_ID": ALLY_INJECT_AUTHOR_ID,
+    }
+    decision = classify_gateway_message(
+        _message(
+            content="",
+            author_id=555,
+            bot=True,
+            attachments=[_attachment(size=8)],
+        ),
+        relay_bot_user_id=999,
+        room=room,
+        environ=env,
+        fetch_attachment=lambda _url: "GO: sitrep",
+    )
+    assert decision is not None
+    assert decision.kind == RouteKind.INJECT_BOT
+    assert decision.incoming is not None
+    assert decision.incoming.content == "GO: sitrep"
 
 
 def test_classify_human_message() -> None:
