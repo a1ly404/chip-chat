@@ -48,3 +48,12 @@
 | Intent | Thin localhost UI scaffolding: room list, JSONL transcript view, send via `./bin/chip room … --once` (mock unless `CHIP_CHAT_UI_LIVE=1`); `bin/chip-ui` entrypoint; design doc `docs/UI_PATH_A.md`; WSL run notes in README. No auth, no Cloudflare. |
 | PR | #18 |
 | Merge hash | TBD |
+
+## Phase 6 — Spec A standing law bundle (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-26 |
+| Intent | law.md + constraints.jsonl on `/data/chip-chat`; session_boot inject order; BLOCKED/NEED_TOOL semantics; OPERATING_LAW 1–20; pm/dev channel law; mock tests T1–T4. |
+| PR | TBD |
+| Merge hash | TBD |

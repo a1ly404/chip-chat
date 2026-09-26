@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from chip import config
+from chip import constraints
 from chip import store
+from chip.need_tool import NeedToolError
 from chip.tools_manifest import ToolSpec, default_timeout_seconds, resolve_tool
 
 AUTO_ENV = "CHIP_TOOL_AUTO"
@@ -96,6 +98,7 @@ def run(
     timeout_seconds: float | None = None,
     cwd: str | Path | None = None,
     task_id: str | None = None,
+    user_intent: str | None = None,
 ) -> ToolRunResult:
     """
     Run an allowlisted tool by id. No shell — argv comes from the manifest only.
@@ -105,7 +108,13 @@ def run(
     """
     spec = resolve_tool(tool_name)
     if spec is None:
-        raise ToolNotAllowedError(f"tool {tool_name!r} is not on the allowlist")
+        raise NeedToolError(tool_name)
+
+    intent = (user_intent or "").strip()
+    if intent:
+        blocked = constraints.first_hard_block(intent)
+        if blocked:
+            raise ToolGatedError(blocked)
 
     argv = build_argv(spec, extra_args)
     workdir = _resolve_cwd(cwd)

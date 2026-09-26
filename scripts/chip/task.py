@@ -10,6 +10,7 @@ from typing import Any
 
 from chip import config
 from chip import tool as tool_exec
+from chip.need_tool import NeedToolError
 from chip.tools_manifest import resolve_tool
 
 TASKS_DIR_NAME = "tasks"
@@ -71,7 +72,7 @@ def load_task(task_id: str) -> dict[str, Any]:
 
 def create_task(tool_id: str, args: list[str] | None = None, note: str | None = None) -> dict[str, Any]:
     if resolve_tool(tool_id) is None:
-        raise ValueError(f"tool {tool_id!r} is not on the allowlist")
+        raise NeedToolError(tool_id)
     env = empty_envelope(tool_id=tool_id, args=args, note=note)
     save_task(env)
     return env
@@ -109,6 +110,7 @@ def run_task(
     envelope["status"] = "running"
     save_task(envelope)
 
+    note = str(envelope.get("note") or "")
     try:
         result = tool_exec.run(
             tool_id,
@@ -117,7 +119,28 @@ def run_task(
             timeout_seconds=timeout_seconds,
             cwd=cwd,
             task_id=task_id,
+            user_intent=note,
         )
+    except NeedToolError as exc:
+        envelope["status"] = "failed"
+        envelope["execution_result"] = {
+            "ok": False,
+            "exit_code": -1,
+            "error": exc.token(),
+            "gated": False,
+        }
+        save_task(envelope)
+        return envelope
+    except tool_exec.ToolGatedError as exc:
+        envelope["status"] = "failed"
+        envelope["execution_result"] = {
+            "ok": False,
+            "exit_code": -1,
+            "error": str(exc),
+            "gated": True,
+        }
+        save_task(envelope)
+        return envelope
     except tool_exec.ToolNotAllowedError as exc:
         envelope["status"] = "failed"
         envelope["execution_result"] = {

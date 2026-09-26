@@ -75,9 +75,13 @@ def compose_system(
     room_law: RoomLaw,
     *,
     mined_memory_block: str = "",
+    session_boot_prefix: str = "",
 ) -> str:
     """Law is binding. Memory notes and mined memories never override it."""
     parts: list[str] = []
+    boot = (session_boot_prefix or "").strip()
+    if boot:
+        parts.append(boot)
     if room_law.law.strip():
         parts.append(
             "ROOM LAW (binding). Follow this exactly. "
@@ -91,7 +95,7 @@ def compose_system(
             + room_law.memory.strip()
         )
     mined = (mined_memory_block or "").strip()
-    if mined:
+    if mined and not boot:
         parts.append(mined)
     if not parts:
         return persona_system

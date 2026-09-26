@@ -7,7 +7,9 @@ import json
 import re
 import sys
 
-from chip import config, law, mempalace, mock, openrouter, runtime, spend, store, task, tool
+from chip import config, constraints, law, mempalace, mock, openrouter, runtime, spend, store, task, tool
+from chip import standing_law
+from chip.need_tool import NeedToolError
 from chip.tools_manifest import list_tools
 
 _AGENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -274,13 +276,18 @@ def build_room_messages(
         room,
         agent_key,
         user_text,
-        top_k=memory_top_k,
+        top_k=memory_top_k or config.memory_top_k(),
         token_budget=memory_token_budget,
+    )
+    boot = standing_law.session_boot_system_prefix(
+        room,
+        persona,
+        advisory_memory_block=mined,
     )
     system = law.compose_system(
         _persona_system(persona),
         law.load_room_law(room),
-        mined_memory_block=mined,
+        session_boot_prefix=boot,
     )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)
@@ -364,6 +371,21 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     agent = str(args.as_agent).strip()
     use_mock = args.mock or config.mock_mode()
     persona = agent if agent in config.load_personas() else "default"
+    author_role = "Ally" if agent == "Ally" else ""
+    constraints.try_add_from_message(
+        message,
+        author_role=author_role,
+        source_turn=f"{room}:{agent}",
+    )
+    blocked = constraints.first_hard_block(message)
+    if blocked:
+        store.log_message(room, "user", message)
+        store.log_message(room, "assistant", blocked, agent=agent)
+        if args.json:
+            print(json.dumps({"reply": blocked, "blocked": True}, ensure_ascii=False))
+        else:
+            print(blocked)
+        return 0
     history_limit = getattr(args, "history_limit", None)
     messages = build_room_messages(
         room,
@@ -527,8 +549,14 @@ def cmd_tool_run(args: argparse.Namespace) -> int:
             timeout_seconds=args.timeout,
             cwd=args.cwd,
         )
+    except NeedToolError as exc:
+        print(exc.token(), file=sys.stderr)
+        return 1
     except tool.ToolNotAllowedError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except tool.ToolGatedError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
     payload = result.to_dict()
     if args.json:

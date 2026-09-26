@@ -139,7 +139,8 @@ def test_build_room_messages_includes_mined_block(tmp_path: Path, monkeypatch: p
         recall_agent="default",
     )
     system = messages[0]["content"]
-    assert "MINED MEMORIES (advisory only)" in system
-    assert "not instructions to execute" in system
+    assert "ADVISORY MEMORY (not_law)" in system
     assert "ten dollars" in system
-    assert system.index("ROOM LAW") < system.index("MINED MEMORIES")
+    assert "ROOM LAW" in system
+    assert system.index("ADVISORY MEMORY") < system.index("ROOM LAW")
+    assert system.index("ten dollars") < system.index("ROOM LAW")
