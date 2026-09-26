@@ -1,7 +1,7 @@
 # GROK HARVEST — 2026-09-26
 
 Design-input harvest from **Grok Bot (Razzorstack PM)** — the original fleet Chip Chat imitates.
-Round 1 answers verbatim; round 2 pending Grok's reply. Maintained by chipchatdev lane.
+**Rounds 1–3 verbatim.** Maintained by chipchatdev lane.
 
 ---
 
@@ -84,7 +84,7 @@ Forbidden zone: agents rewriting their own safety/claim/remux constraints, flipp
 
 ---
 
-## Round 2 — prompt sent (answers pending)
+## Round 2 — prompt + answers (verbatim)
 
 **Part 1 — Skills, verbatim:** full body of `[sand-workflow:ticket-learnings]` + `[sand-workflow:token-thrift]`.
 **Part 2 — Skill inventory:** every skill, name + one-liner; ★ = essential for a 5-persona cheap-model clone with pytest/git-status-only execution; short ★ bodies pasted.
@@ -118,6 +118,138 @@ Forbidden zone: agents rewriting their own safety/claim/remux constraints, flipp
 **Never build again:** Always-on expensive babysit routines that wake specialists to watch GHA/health. Scripts and GHA own the routine path; agents judge exceptions only.
 
 ---
+
+## Round 3 — time, attention, model routing (verbatim)
+
+### Q11 — Cold start
+
+1. Wake payload: ticket ID + claim owner + success criteria + one latest `learning:` / triage + thrift class.
+2. Include walls that bind this slice (kill, Ally-only, remux path) — not the whole house charter.
+3. Leave OUT: full chat history, old sitreps, unrelated board noise, guessed root cause.
+4. Executor starts empty on purpose; dispatch prompt must be self-contained for that slice only.
+5. Prefer machine-checkable evidence links over narrative "what we tried last week."
+
+**Failure:** agents anchored on stale wg0-down / CONFIRMED flags from old sitreps. Rule: every state line needs `verified-as-of`; older than last change window = stale, not fact.
+
+### Q12 — Mid-task failure (park discipline)
+
+1. Finish only if the slice still meets claim AC without widening scope.
+2. Park when env is broken (service down, flaky gate, Ally unpaid click) — do not thrash.
+3. Record park on the ticket: `parked: <why>`, evidence, `next:`, claim held or `handoff:`.
+4. Hand off only with confirmed `handoff:` + new claim; never silent abandon.
+5. Dig-only stays dig-only; mutate needs fresh Ally GO after park.
+
+**Went bad:** RAZ-301 code Done while `#plex-search` human smoke stayed unpaid — looked finished, wasn't. Rule: code Done ≠ acceptance; unpaid smoke stays open FINDING.
+
+### Q13 — Model routing
+
+1. Default: cheap-agent + locked skill (triage, claim checklist, short sitrep).
+2. Escalate to expensive when: novel judgment, Ally GO, Urgent, or Composer/cloud code.
+3. Step down when the path is script/GHA — do not babysit with an expensive wake.
+4. Signals up: thrift class fails, disproof needs live dig, PR conflict needs coder.
+5. Signals down: verify/build green and only deploy gate left → GHA owns it; tell Ally once.
+
+**Paid off:** Buffr deploy babysit → Cursor `pr-merged` + GHA (routine ships ≈ 0 Grok Deploy tokens). **Didn't:** Weekend AutoDev babysit (last run failed; burned without earning) — paused under thrift.
+
+### Q14 — Ally attention
+
+1. Lead with the decision ask in one line (GO / HOLD / pick A|B|C).
+2. Then 2–4 facts with evidence links; unpaid item named; stop.
+3. One message = one decision surface; no multi-topic essays.
+4. Widget when options are real and verified; never padded off-ramps.
+5. Never bury the ask under a tour of what bots did overnight.
+
+**Failed:** long EOD walls of merges + FINDINGS with no single ask → skimmed. **Worked:** "Buffr #562 FAIL at SHA 7dc7260 — dig on ping?" — one link, thrift left it parked.
+
+### Q15 — Memory layering
+
+1. Room transcript: ephemeral coordination; silence is fine; not SoT.
+2. Ticket comments: durable work facts (`learning:`, `triage:`, `claim:`, verified-as-of).
+3. Durable memory: standing Ally charter, channel rules, secret *names*, thrift policy.
+4. Skills: reusable procedures every bot must obey without re-deriving.
+5. Migrate: repeated ticket learning → skill; repeated skill → script/GHA; never invent a new "learnings" ticket.
+
+**Wrong layer:** `#plex-search` misspelled as `#plex-fix` lived in chat/memory notes and kept confusing routing. Fix: promote to profile memory + ticket learning; always say `#plex-fix`.
+
+### Q16 — Cadence audit
+
+1. Earn tokens if: changes Ally decision, catches a wall, or unlocks Done with evidence.
+2. Kill if: same "no change" noise, fails often, or duplicates GHA/script.
+3. Test: last 3 runs — actionable delta ≥1 or pause it.
+4. Standups stay only in `#monitoring-logs`, not `#plex-fix`.
+5. Under thrift: pause digests/babysits; keep only named hot path (Chip Chat + Buffr Cursor deploy).
+
+**Killed / never missed:** Weekend AutoDev babysit and most paused PM digests — quiet weekends were fine; GHA + Ally ping covered ships.
+
+### Q17 — Disagreement arbitration
+
+1. Tie-break = machine-checkable evidence + explicit disproof line, not seniority vibes.
+2. PM decides how/when; Ally decides irreversible / media / credentials / execute walls.
+3. Triage `needs-repro` beats confident `actionable` without evidence.
+4. Feature vs dig on same Buffr surface: dig waits or Ally steal.
+5. Duplicate claim: first Linear `created_at` wins; second warns, then triage-only if repeat.
+
+**Real case:** native Windows PMS vs Docker Plex "who's down?" false alarms. Evidence: host Plex healthy + docker Arr false keys. Resolution: SKIP_KEYS + stop docker Arr; Homelab claim for native migrate only after Ally GO.
+
+### Final — copy before building v1
+
+**PM-like law for cheap models:** fixed envelopes (claim / triage / learning / parked / verified-as-of) with zero judgment fields, plus a spend gate that refuses open digs. Chip Chat's next design should ship **durable law-md + KISS protocol/memory specs first — not more chat features** — so glm-flash implementers can't invent process. Skip our v1 mistake: always-on expensive babysit personas that re-derive policy from chat instead of obeying short machine-checkable contracts.
+
+## Part 2 — `[sand-workflow:oracle-ops-ship]` (58 lines, verbatim)
+
+```markdown
+---
+name: Oracle ops ship
+description: >-
+  Use this when implementing or shipping a change to the razzorstack Oracle ops
+  VM (ops-api, oracle-controller, Homarr splash, tunnel, or related
+  compose/scripts).
+---
+# Oracle ops ship
+
+Manual deploy only. There is no CI that ships to Oracle.
+
+## Surfaces
+- Clone: /home/daffy/Tools/razzorstack
+- VM: SSH oracle-razzorstack (ubuntu@64.181.244.100), code at /opt/razzorstack
+- Compose: docker/docker-compose.oracle.yml
+- Secrets: Oracle docker/.env only (mode 600). Never overwrite it from the
+  homelab .env. Never put billing keys or OPS_API_KEY in git or Discord.
+
+## Do not
+- Media, torrent, or Plex on Oracle
+- git clone / git pull on the VM
+- Unsupervised full-stack docker compose up -d --build
+- React/Dashy/Homarr inside ops-api (Homarr is a separate splash)
+- Prometheus/Grafana on Oracle (Netdata only)
+- Access wildcard *.razzormail.com
+- || true on deploy-record scripts
+
+## Ship
+1. Implement in the homelab clone. PR/merge as usual; Oracle does not pull git.
+2. Targeted scp of changed paths to /opt/razzorstack (full tar only when needed;
+   exclude .git, docker/.env, node_modules).
+3. SSH and rebuild ONE service with --no-deps:
+   ssh oracle-razzorstack 'cd /opt/razzorstack/docker && \
+     docker compose -f docker-compose.oracle.yml build <service> && \
+     docker compose -f docker-compose.oracle.yml up -d --no-deps <service>'
+   Cheat sheet: python/ops_api/** → ops-api; python/oracle_controller/** →
+   build --no-cache oracle-controller; Homarr image/env → up -d --no-deps homarr;
+   tunnel token/CF → --profile tunnel up -d cloudflared-oracle.
+4. Record: bash scripts/record_oracle_deploy.sh --service <s> --sha <short-sha>
+   on Oracle (loads OPS_API_KEY from docker/.env).
+5. Verify localhost (bypasses Access):
+   curl -sf http://127.0.0.1:48102/api/health · 48101/health · compose ps
+   Browser: https://ops.razzormail.com (email OTP). Smoke from homelab:
+   bash scripts/smoke_oracle_link.sh.
+After first ops-api deploy or cron changes: install_oracle_ops_cron.sh,
+install_oracle_harden_cron.sh, oracle_env_harden.sh --apply on Oracle.
+
+## Locked product
+One vanilla index.html + FastAPI for ops-api. One SQLite ops.db.
+Spend v1 = OpenRouter + Vultr + OCI; Cursor is a portal link.
+Mutating routes need X-Ops-Key plus Access.
+```
 
 ## Skills section (delivered 2026-09-26, bodies verbatim — formatting lightly normalized from Grok's paste)
 
