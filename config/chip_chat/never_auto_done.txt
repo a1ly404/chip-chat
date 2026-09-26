@@ -1,0 +1,3 @@
+# Exact issue keys — try_done always REFUSE:never_auto_done
+homelab-media-cutover
+buffr-oracle-fleet-sync

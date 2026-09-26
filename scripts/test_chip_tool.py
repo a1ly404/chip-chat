@@ -90,16 +90,29 @@ def test_task_envelope_run_gated_and_execute(data_dir: Path) -> None:
     assert env["execution_result"] is None
 
     pending = task_mod.run_task(task_id, execute=False)
-    assert pending["status"] == "pending"
+    assert pending["status"] == "open"
     assert pending["execution_result"]["gated"] is True
     assert len(pending["tool_invocations"]) == 1
     assert pending["tool_invocations"][0]["executed"] is False
 
     done = task_mod.run_task(task_id, execute=True, timeout_seconds=5)
-    assert done["status"] == "completed"
-    assert done["execution_result"]["ok"] is True
-    assert len(done["tool_invocations"]) == 2
-    assert done["tool_invocations"][-1]["exit_code"] == 0
+    assert done["status"] == "open"
+    env2 = task_mod.create_task(
+        "echo",
+        args=["chip", "ok"],
+        acceptance=[
+            {
+                "id": "echoed",
+                "text": "chip ok",
+                "evidence_type": "literal_in_tool_output",
+            }
+        ],
+    )
+    finished = task_mod.run_task(env2["id"], execute=True, timeout_seconds=5)
+    assert finished["status"] == "done"
+    assert finished["execution_result"]["ok"] is True
+    assert len(finished["tool_invocations"]) == 1
+    assert finished["tool_invocations"][-1]["exit_code"] == 0
 
 
 def test_task_show_cli(data_dir: Path) -> None:
