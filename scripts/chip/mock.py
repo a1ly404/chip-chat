@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+from chip import config
+from chip_relay.delegate import parse_delegate
+
+_SPECIALISTS = frozenset({"buffrdev", "homelabdev", "opsdev", "chipchatdev", "dev"})
+_PERSONA_DETECT_ORDER = (
+    "chipchatdev",
+    "homelabdev",
+    "buffrdev",
+    "opsdev",
+    "planner",
+    "builder",
+    "pm",
+    "tester",
+    "relay",
+    "selftest",
+    "dev",
+)
+_HOP_OK = re.compile(r"hop-ok[-\w]*", re.IGNORECASE)
 
 
 def mock_auth_key() -> dict[str, Any]:
@@ -12,6 +32,51 @@ def mock_auth_key() -> dict[str, Any]:
         "usage_monthly": 0.42,
         "is_free_tier": False,
     }
+
+
+def _detect_persona(system: str) -> str | None:
+    lower = system.lower()
+    personas = config.load_personas()
+    for pid in _PERSONA_DETECT_ORDER:
+        entry = personas.get(pid)
+        if not entry:
+            continue
+        display = (entry.get("display_name") or pid).strip()
+        if not display:
+            continue
+        if f"you are {display.lower()}" in lower:
+            return pid
+    if "planner" in lower and "you are planner" in lower:
+        return "planner"
+    if "builder" in lower and "you are builder" in lower:
+        return "builder"
+    return None
+
+
+def _persona_label(persona: str) -> str:
+    entry = config.load_personas().get(persona) or {}
+    return (entry.get("display_name") or persona).strip() or persona
+
+
+def _delegate_line_from_user(text: str) -> str | None:
+    request = parse_delegate(text)
+    if request is None:
+        return None
+    return f"delegate:{request.persona} {request.task}"
+
+
+def _specialist_reply(persona: str, task: str) -> str:
+    label = _persona_label(persona)
+    hop = _HOP_OK.search(task)
+    if hop:
+        body = hop.group(0)
+    elif "exactly:" in task.lower():
+        body = task.split("exactly:", 1)[-1].strip().rstrip(".")
+    elif task.strip():
+        body = task.strip()[:80]
+    else:
+        body = "ok"
+    return f"[mock {label}] {body}"
 
 
 def mock_completion(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -26,12 +91,22 @@ def mock_completion(model: str, messages: list[dict[str, str]]) -> dict[str, Any
             system = (msg.get("content") or "").lower()
             break
 
-    if "planner" in system:
+    if "planner" in system and "you are planner" in system:
         text = f"[mock Planner] Steps for «{last[:80]}»: 1) clarify 2) slice 3) ship."
-    elif "builder" in system:
+    elif "builder" in system and "you are builder" in system:
         text = f"[mock Builder] On «{last[:80]}»: implement step 1 with a tiny CLI proof."
     else:
-        text = f"[mock Chip] Echo OK — received {len(last)} chars."
+        persona = _detect_persona(system)
+        delegate_line = _delegate_line_from_user(last)
+        if delegate_line is not None:
+            label = _persona_label(persona or "pm")
+            text = f"[mock {label}] ack.\n{delegate_line}"
+        elif persona in _SPECIALISTS:
+            text = _specialist_reply(persona, last)
+        elif persona:
+            text = f"[mock {_persona_label(persona)}] Echo OK — received {len(last)} chars."
+        else:
+            text = f"[mock Chip] Echo OK — received {len(last)} chars."
 
     return {
         "id": "chip-mock-completion",
