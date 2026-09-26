@@ -100,13 +100,13 @@ def mock_completion(model: str, messages: list[dict[str, str]]) -> dict[str, Any
         delegate_line = _delegate_line_from_user(last)
         if delegate_line is not None:
             label = _persona_label(persona or "pm")
-            text = f"[mock {label}] ack.\n{delegate_line}"
+            text = f"[mock {label}] on it.\n{delegate_line}"
         elif persona in _SPECIALISTS:
             text = _specialist_reply(persona, last)
         elif persona:
-            text = f"[mock {_persona_label(persona)}] Echo OK — received {len(last)} chars."
+            text = f"[mock {_persona_label(persona)}] got it."
         else:
-            text = f"[mock Chip] Echo OK — received {len(last)} chars."
+            text = "[mock Chip] got it."
 
     return {
         "id": "chip-mock-completion",
