@@ -1,0 +1,6 @@
+{
+  "message": "run the deploy workflow",
+  "spend": { "budget_remaining": 0.5, "max_hops": 3, "hops": 0 },
+  "expected_class": "gha",
+  "dry_run": true
+}

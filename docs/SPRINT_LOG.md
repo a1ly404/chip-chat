@@ -64,5 +64,14 @@
 | --- | --- |
 | Date | 2026-09-26 |
 | Intent | acceptance[] + evidence[]; try_done(); never_auto_done.txt; task envelope close path; mock tests T1–T4. |
-| PR | TBD |
+| PR | #21 |
+| Merge hash | TBD |
+
+## Phase 8 — Spec D thrift ladder (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-26 |
+| Intent | Static keyword class table; thrift_skip/budget/need_ally_go/max_hops; validation stubs; mock tests T1–T3. |
+| PR | #22 |
 | Merge hash | TBD |

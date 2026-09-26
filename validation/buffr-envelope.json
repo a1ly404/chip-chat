@@ -1,0 +1,13 @@
+{
+  "issue_key": "buffr-ci-smoke",
+  "tool": "echo",
+  "args": ["https://github.com/a1ly404/chip-chat/actions/runs/1"],
+  "acceptance": [
+    {
+      "id": "ci-run",
+      "text": "GitHub Actions run URL",
+      "evidence_type": "url_regex"
+    }
+  ],
+  "dry_run": true
+}

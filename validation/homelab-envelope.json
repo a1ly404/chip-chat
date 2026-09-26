@@ -1,0 +1,13 @@
+{
+  "room": "pm",
+  "persona": "pm",
+  "acceptance": [
+    {
+      "id": "law-loaded",
+      "text": "HARD constraints present in boot",
+      "evidence_type": "literal_in_tool_output"
+    }
+  ],
+  "spend": { "budget_remaining": 5.0, "max_hops": 3 },
+  "dry_run": true
+}
