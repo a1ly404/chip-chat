@@ -37,6 +37,24 @@ verified-as-of: <YYYY-MM-DD HH:MM> — <machine-checkable proof>
 - Bound per acceptance checkbox. Older than the last change window = stale, not fact.
 - Done requires green CI + verified-as-of on EVERY box; missing one → reopen.
 
+## Fixer wake payload (Grok round 6, Q21 — the MINIMUM a self-heal fixer gets)
+
+1. Alert fingerprint + probe receipt JSON (machine-checkable fail)
+2. Matched runbook id text (steps, rollback, verify)
+3. Live `claim:` / path-lock / SKIP_KEYS excerpt
+4. Latest 1–2 `learning:` lines for that fingerprint
+5. Thrift class + stand-down flag
+
+**Leave out:** Discord scrollback, old sitreps, unrelated RAZ dumps, guessed root cause. Context owed beyond this: port/process map + which profile is live (native vs docker).
+
+## Runbook registry (the graduation gate — `config/chip_chat/runbooks.json`)
+
+- Registry maps runbook id → class: `auto` | `propose` | `blocked`.
+- `auto` = idempotent, named target, one-command rollback (restart-named-service, clear-stale-suppress, re-run-health-probe, post-learning).
+- `blocked` = never autonomous (remux, plex-restart, credential-flip, media-delete — incident classes).
+- **Unknown ids fail-closed to `propose`.** Graduation: propose → (Ally GO + clean history) → auto, one runbook at a time.
+- `authorize(fixer, fingerprint, "fix")` + `runbooks.may_autorun(id)` are the two gates before any live recover; probe receipt + verify-twice still required (law id:auto-heal).
+
 ## handoff (transfer)
 ```
 handoff: <persona> <task> — confirmed by: <persona>
