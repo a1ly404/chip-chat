@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from chip import store
-from chip_relay.config import RelayConfig
+from chip_relay.config import RelayConfig, RoomBinding
 from chip_relay.delegate import (
     MAX_DELEGATE_HOPS,
     DelegateRequest,
+    known_persona_ids,
     max_logged_delegate_hop,
     parse_delegate,
 )
@@ -115,6 +116,84 @@ def _run_chip_shot(
         return None, outcome
     reply = _parse_chip_reply(outcome.stdout)
     return reply, outcome
+
+
+def handle_inbound_delegate(
+    room: RoomBinding,
+    *,
+    from_persona: str,
+    content: str,
+    chip,
+    webhook,
+    environ: dict[str, str],
+    record=None,
+) -> DispatchResult:
+    """Webhook persona posted ``delegate:<target> <task>``; wake the target without a human turn."""
+    logs: list[str] = []
+    text = content.strip()
+    if not text:
+        return _fail(logs, "malformed message")
+    if len(text) > MAX_MESSAGE_CHARS:
+        return _fail(logs, "oversized message")
+    request = parse_delegate(text)
+    if request is None:
+        return _fail(logs, "no delegate line")
+    if from_persona not in known_persona_ids():
+        return _fail(logs, f"unknown webhook persona {from_persona!r}")
+
+    next_hop = max_logged_delegate_hop(room.id) + 1
+    refused = next_hop > MAX_DELEGATE_HOPS
+    log_delegate_handoff(
+        room.id,
+        from_persona=from_persona,
+        request=request,
+        hop=next_hop,
+        refused=refused,
+        reason="hop cap" if refused else "",
+    )
+    chip_calls = 0
+    webhook_calls = 0
+    if refused:
+        logs.append(f"delegate hop cap ({MAX_DELEGATE_HOPS})")
+        return DispatchResult(
+            ok=True,
+            chip_calls=chip_calls,
+            webhook_calls=webhook_calls,
+            logs=logs,
+            delegate_hops=0,
+        )
+
+    follow_reply, follow_outcome = _run_chip_shot(
+        room.id,
+        request.persona,
+        request.task,
+        chip=chip,
+    )
+    chip_calls = 1
+    delegate_hops = 1
+    if follow_outcome.timed_out:
+        return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
+    if follow_outcome.returncode != 0:
+        return _fail(logs, f"chip exit {follow_outcome.returncode}", chip_calls=chip_calls)
+    if follow_reply is None:
+        return _fail(logs, "chip json malformed", chip_calls=chip_calls)
+
+    url = environ.get(room.webhook_env, "")
+    posted: WebhookResult = webhook(url, request.persona, follow_reply)
+    webhook_calls = 1
+    if posted.status >= 400:
+        return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
+    if record is not None:
+        record(room.id, follow_reply, request.persona)
+    logs.append(f"delegated {from_persona} -> {request.persona} hop={next_hop}")
+    logs.append(f"posted {request.persona} to {room.discord_channel}")
+    return DispatchResult(
+        ok=True,
+        chip_calls=chip_calls,
+        webhook_calls=webhook_calls,
+        logs=logs,
+        delegate_hops=delegate_hops,
+    )
 
 
 def handle_message(

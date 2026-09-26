@@ -37,6 +37,10 @@ python3 -m chip task run "$TASK_ID" --execute --json
 
 # Room turn (mock): --once TEXT satisfies the message when --as is set
 python3 -m chip room demo --as pm --once "validation ping" --json --mock
+
+# Relay inject (mock): Ally snowflake → pm via rooms.json speakers map
+export CHIP_WEBHOOK_DEV=https://example.invalid/dev
+bin/chip-relay inject --as-ally -m "validation inject" --mock
 ```
 
 Ledger is checked before any live OpenRouter/Discord call; these flows stay mock-first.

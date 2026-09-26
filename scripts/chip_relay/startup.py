@@ -11,6 +11,7 @@ from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.infisical_rest import missing_boot
 from chip_relay.listener import ListenerNotWired, ListenerStub
 from chip_relay.personas import speakers_maps_effective, speakers_unconfigured_message
+from chip_relay.routing import INJECT_AUTHOR_ID_ENV
 
 
 def check_startup(
@@ -68,8 +69,40 @@ def check_startup(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chip-relay", description="Chip relay startup checks")
-    parser.add_argument("--listen", action="store_true", help="Refused until the gateway is wired")
+    parser.add_argument("--listen", action="store_true", help="Start the live Discord gateway")
+    sub = parser.add_subparsers(dest="command")
+    inject_p = sub.add_parser(
+        "inject",
+        help="Run one dispatch as a mapped human author (no Discord MessageCreate)",
+    )
+    inject_p.add_argument("-m", "--message", required=True, help="Inbound message text")
+    inject_p.add_argument("--room", default="dev", help="Room id from rooms.json (default: dev)")
+    inject_p.add_argument(
+        "--as-author-id",
+        default="",
+        help=f"Discord snowflake for speakers map (default: env {INJECT_AUTHOR_ID_ENV})",
+    )
+    inject_p.add_argument(
+        "--as-ally",
+        action="store_true",
+        help="Use Ally human snowflake mapped to pm in chip-dev",
+    )
+    inject_p.add_argument(
+        "--mock",
+        action="store_true",
+        help="Set CHIP_CHAT_MOCK=1 for this inject (no OpenRouter spend)",
+    )
     args = parser.parse_args(argv)
+    if args.command == "inject":
+        from chip_relay.inject import run_inject
+
+        return run_inject(
+            room_id=args.room,
+            message=args.message,
+            as_ally=args.as_ally,
+            author_id=args.as_author_id,
+            mock_chip=args.mock,
+        )
     if args.listen:
         from chip_relay.infisical_rest import InfisicalAccessError, fetch_runtime_secrets
 

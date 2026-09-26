@@ -75,3 +75,12 @@
 | Intent | Static keyword class table; thrift_skip/budget/need_ally_go/max_hops; validation stubs; mock tests T1–T3. |
 | PR | #22 |
 | Merge hash | `75cc45b` |
+
+## Phase 9 — Discord bot routing + inject (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-26 |
+| Intent | Gateway accepts webhook `delegate:` persona handoffs and trusted-bot inject attribution; `chip-relay inject --as-ally` for mock/GO smoke; loop guards (skip plain webhooks, dedupe message ids, hop cap unchanged). |
+| PR | #25 |
+| Merge hash | — |

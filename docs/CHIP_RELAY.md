@@ -22,7 +22,7 @@ Do not commit those values. The app is not minted in this PR.
 
 ### Personas (stable speakers)
 
-Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps **human** Discord snowflakes (and handles) to persona ids (`pm`, `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` (no human snowflake required for `dev` / `pm`). Example human map:
+Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps Discord snowflakes (and handles) to persona ids (`pm`, `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` (no human snowflake required for `dev` / `pm`). Example human map:
 
 ```json
 "speakers": {
@@ -51,6 +51,30 @@ delegate:<persona> <task>
 
 Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
 
+### Bot ↔ bot (webhook delegate)
+
+When a persona webhook posts a line that starts with `delegate:<persona> <task>` (webhook `username` must match a persona id such as `pm` or `dev`), the live gateway runs **only** the target persona shot — no human author required. Plain webhook chatter without `delegate:` is ignored (loop prevention). The relay bot’s own messages (heartbeats) are always ignored.
+
+### Trusted bot inject (live gateway)
+
+To let an automation bot (for example Grok relay posting Ally GOs) hit the same `speakers` map as a human, set:
+
+- `CHIP_RELAY_INJECT_BOT_IDS` — comma-separated Discord user ids of trusted bots
+- `CHIP_RELAY_INJECT_AUTHOR_ID` — snowflake used for speaker resolution (Ally → `pm` in chip-dev)
+
+Untrusted `APP` / bot authors are still skipped.
+
+### Local inject (no Discord)
+
+```bash
+export CHIP_CHAT_MOCK=1
+export CHIP_WEBHOOK_DEV=https://example.invalid/dev   # required by dispatch even in mock
+bin/chip-relay inject --as-ally -m "GO: validation ping" --mock
+# or: bin/chip-relay inject --as-author-id 187044496872046592 -m "hi" --mock
+```
+
+`inject` runs one `handle_message` turn with the attributed author id; use `--mock` for CI-style proof without OpenRouter spend.
+
 ## Startup
 
 `bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. With `--listen`, boot creds come from `.env` (or the environment), runtime Discord/OpenRouter values are loaded from Infisical, then the live gateway starts. An internal HTTP server answers `GET /health` on port **48082** (env `CHIP_RELAY_HEALTH_PORT`): **503** until Discord `on_ready`, then **200**. Docker deploy: `docs/DOCKER.md`.
@@ -64,5 +88,5 @@ Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=
 Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
 
 ```bash
-python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_selftest.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py scripts/test_chip_relay_selftest.py -q
 ```

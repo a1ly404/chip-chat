@@ -1,4 +1,4 @@
-"""Live Discord gateway. One chip shot per human message. No retries."""
+"""Live Discord gateway. One chip shot per routed message. No retries."""
 
 from __future__ import annotations
 
@@ -14,7 +14,15 @@ from pathlib import Path
 
 from chip.spend import WARN_MONTHLY_USD, ledger_monthly_usd, load_ledger
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
-from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
+from chip_relay.dispatch import (
+    CHIP_TIMEOUT_S,
+    ChipResult,
+    Incoming,
+    WebhookResult,
+    handle_inbound_delegate,
+    handle_message,
+)
+from chip_relay.routing import RouteKind, classify_gateway_message
 from chip_relay.personas import resolve_persona
 from chip_relay.health_server import clear_gateway_ready, set_gateway_ready, start_health_server
 from chip_relay.watchdog import HEARTBEAT_INTERVAL_S, Watchdog, heartbeat_line
@@ -75,6 +83,8 @@ def run_gateway() -> int:
     client = discord.Client(intents=intents)
     dog = Watchdog()
     stats = {"ok": 0, "fail": 0, "last_error": "", "last_message_at": 0.0}
+    seen_message_ids: set[int] = set()
+    max_seen_ids = 2048
 
     def monthly_now() -> float:
         return ledger_monthly_usd(load_ledger())
@@ -118,40 +128,67 @@ def run_gateway() -> int:
 
     @client.event
     async def on_message(message: discord.Message) -> None:
-        if message.webhook_id or message.author.id == client.user.id:
+        if message.id in seen_message_ids:
             return
         try:
             room = config.room_for_channel_id(message.channel.id)
         except KeyError:
             return
-        incoming = Incoming(
-            channel=room.discord_channel,
-            content=message.content or "",
-            author=str(message.author.name),
-            author_id=str(message.author.id),
+        decision = classify_gateway_message(
+            message,
+            relay_bot_user_id=client.user.id,
+            room=room,
+            environ=os.environ,
         )
+        if decision is None:
+            return
+        seen_message_ids.add(message.id)
+        if len(seen_message_ids) > max_seen_ids:
+            seen_message_ids.clear()
+            seen_message_ids.add(message.id)
 
         def _chip(args: list[str], timeout: int) -> ChipResult:
             return run_chip(args, timeout)
 
-        result = await asyncio.to_thread(
-            handle_message,
-            incoming,
-            config,
-            chip=_chip,
-            webhook=post_webhook,
-            environ=os.environ,
-        )
+        def _dispatch() -> object:
+            if decision.kind == RouteKind.WEBHOOK_DELEGATE:
+                return handle_inbound_delegate(
+                    room,
+                    from_persona=decision.from_persona,
+                    content=decision.content,
+                    chip=_chip,
+                    webhook=post_webhook,
+                    environ=os.environ,
+                )
+            assert decision.incoming is not None
+            return handle_message(
+                decision.incoming,
+                config,
+                chip=_chip,
+                webhook=post_webhook,
+                environ=os.environ,
+            )
+
+        result = await asyncio.to_thread(_dispatch)
         stats["last_message_at"] = time.time()
         if result.ok:
             stats["ok"] += 1
             stats["last_error"] = ""
-            persona = resolve_persona(
-                room,
-                author_id=incoming.author_id,
-                author_handle=incoming.author,
-            )
-            print(f"processed channel={room.id} persona={persona}", flush=True)
+            if decision.kind == RouteKind.WEBHOOK_DELEGATE:
+                print(
+                    f"processed channel={room.id} route=webhook_delegate from={decision.from_persona}",
+                    flush=True,
+                )
+            else:
+                incoming = decision.incoming
+                assert incoming is not None
+                persona = resolve_persona(
+                    room,
+                    author_id=incoming.author_id,
+                    author_handle=incoming.author,
+                )
+                route = decision.kind.value
+                print(f"processed channel={room.id} persona={persona} route={route}", flush=True)
         else:
             stats["fail"] += 1
             stats["last_error"] = result.alert
