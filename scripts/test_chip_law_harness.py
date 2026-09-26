@@ -138,3 +138,20 @@ def test_authorize_rejects_unknown_tool_and_wildcard(tmp_path, monkeypatch):
 def test_authorize_human_hot_path_even_under_stand_down():
     ok, _ = authorize("ally", "x", "execute", environ={"CHIP_STAND_DOWN": "1"}, is_human_or_inject=True)
     assert ok is True
+
+
+# round-7 guardrail: service allowlist in the executor
+def test_authorize_blocks_native_profile_targets(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch, [
+        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev restart-plex"},
+    ])
+    ok, reason = authorize("chipchatdev", "restart-plex", "execute", environ={}, room="dev", tool="pytest")
+    assert ok is False and "blocked target" in reason
+
+
+def test_authorize_allows_allowlisted_service_target(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch, [
+        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev restart-discord-bot"},
+    ])
+    ok, reason = authorize("chipchatdev", "restart-discord-bot", "execute", environ={}, room="dev", tool="pytest")
+    assert ok is True
