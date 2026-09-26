@@ -51,9 +51,28 @@ delegate:<persona> <task>
 
 Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
 
-### Bot ↔ bot (webhook delegate)
+### Wake a persona (@mention / `persona:`)
 
-When a persona webhook posts a line that starts with `delegate:<persona> <task>` (webhook `username` must match a persona id such as `pm` or `dev`), the live gateway runs **only** the target persona shot — no human author required. Plain webhook chatter without `delegate:` is ignored (loop prevention). The relay bot’s own messages (heartbeats) are always ignored.
+In addition to speaker-map defaults, the **first line** of an inbound human or inject-bot message can wake a specific persona:
+
+```text
+@dev <task>
+pm: <task>
+```
+
+Relay runs that turn as `<persona>` with `<task>` as `-m` (same ids as `--as`). This is the Grok-style “call someone in the room” shortcut; explicit `delegate:` in an agent **reply** still controls follow-up hops after the primary post.
+
+### Bot ↔ bot (webhook handoff)
+
+When a persona webhook posts a handoff line (webhook `username` must match a persona id such as `pm` or `dev`):
+
+```text
+delegate:<persona> <task>
+@<persona> <task>
+<persona>: <task>
+```
+
+the live gateway runs **only** the target persona shot — no human author required. Plain webhook chatter without a handoff prefix is ignored (loop prevention). Heartbeats and other self-posts from the relay bot are ignored unless they look like inject (`GO:`, `@pm` / `@dev`, or a leading `--inject`); those use `CHIP_RELAY_INJECT_AUTHOR_ID` for speaker resolution.
 
 ### Trusted bot inject (live gateway)
 
@@ -88,5 +107,5 @@ Layer 3 is `bin/chip-selftest`. It refuses to start unless `CHIP_RELAY_SELFTEST=
 Layer 4 watchdog pages on two consecutive failed heartbeats, then stops.
 
 ```bash
-python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py scripts/test_chip_relay_selftest.py -q
+python3 -m pytest scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py scripts/test_chip_relay_wake.py scripts/test_chip_relay_selftest.py -q
 ```

@@ -16,6 +16,7 @@ from chip_relay.delegate import (
     parse_delegate,
 )
 from chip_relay.personas import resolve_persona_for_dispatch
+from chip_relay.wake import apply_wake_to_turn, parse_inbound_handoff
 
 MAX_MESSAGE_CHARS = 2000
 CHIP_TIMEOUT_S = 30
@@ -135,7 +136,7 @@ def handle_inbound_delegate(
         return _fail(logs, "malformed message")
     if len(text) > MAX_MESSAGE_CHARS:
         return _fail(logs, "oversized message")
-    request = parse_delegate(text)
+    request = parse_inbound_handoff(text)
     if request is None:
         return _fail(logs, "no delegate line")
     if from_persona not in known_persona_ids():
@@ -225,6 +226,7 @@ def handle_message(
     )
     if persona_alert:
         return _fail(logs, persona_alert)
+    persona, text = apply_wake_to_turn(text, persona)
     reply, outcome = _run_chip_shot(room.id, persona, text, chip=chip)
     chip_calls = 1
     if outcome.timed_out:

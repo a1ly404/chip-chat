@@ -8,12 +8,26 @@ from enum import Enum
 from typing import Any
 
 from chip_relay.config import RelayConfig, RoomBinding
-from chip_relay.delegate import known_persona_ids, parse_delegate
+from chip_relay.delegate import known_persona_ids
+from chip_relay.wake import parse_inbound_handoff
 from chip_relay.dispatch import Incoming
 
 INJECT_AUTHOR_ID_ENV = "CHIP_RELAY_INJECT_AUTHOR_ID"
 INJECT_BOT_IDS_ENV = "CHIP_RELAY_INJECT_BOT_IDS"
 ALLY_INJECT_AUTHOR_ID = "187044496872046592"
+
+
+def is_relay_self_inject_content(text: str) -> bool:
+    """Markers for chip-relay posting its own GO/inject lines via CreateMessage."""
+    wanted = (text or "").strip()
+    if not wanted:
+        return False
+    if wanted.startswith("--inject"):
+        return True
+    if wanted.upper().startswith("GO:"):
+        return True
+    low = wanted.lower()
+    return low.startswith("@pm") or low.startswith("@dev")
 
 
 class RouteKind(str, Enum):
@@ -82,17 +96,25 @@ def classify_gateway_message(
 ) -> RouteDecision | None:
     """Return a routing decision, or None when the message must be ignored."""
     author = message.author
-    if getattr(author, "id", None) == relay_bot_user_id:
+    author_id = getattr(author, "id", None)
+    content = (message.content or "").strip()
+    if author_id == relay_bot_user_id:
+        if is_relay_self_inject_content(content):
+            override = inject_author_id(environ)
+            if override:
+                return RouteDecision(
+                    kind=RouteKind.INJECT_BOT,
+                    incoming=_inject_incoming(message, room, override),
+                )
         return None
 
-    content = (message.content or "").strip()
     if not content:
         return None
 
     webhook_id = getattr(message, "webhook_id", None)
     if webhook_id:
         from_persona = persona_from_webhook_username(str(getattr(author, "name", "")))
-        if from_persona and parse_delegate(content) is not None:
+        if from_persona and parse_inbound_handoff(content) is not None:
             return RouteDecision(
                 kind=RouteKind.WEBHOOK_DELEGATE,
                 from_persona=from_persona,

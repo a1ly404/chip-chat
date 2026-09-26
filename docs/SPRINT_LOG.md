@@ -83,4 +83,13 @@
 | Date | 2026-09-26 |
 | Intent | Gateway accepts webhook `delegate:` persona handoffs and trusted-bot inject attribution; `chip-relay inject --as-ally` for mock/GO smoke; loop guards (skip plain webhooks, dedupe message ids, hop cap unchanged). |
 | PR | #25 |
+| Merge hash | `cd8ebcbb` |
+
+## Phase 10 — @mention / persona wake (Freeze)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-26 |
+| Intent | Grok-style wake: humans and inject bots can target `pm`/`dev` via `@persona` or `persona:`; webhook personas can hand off with the same prefixes as `delegate:`; relay self-post `GO:` / `@pm` inject when `CHIP_RELAY_INJECT_AUTHOR_ID` is set. |
+| PR | #26 |
 | Merge hash | — |
