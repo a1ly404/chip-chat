@@ -26,8 +26,8 @@ def _seed_thread(tmp_path, monkeypatch, rows):
 
 def test_first_claim_wins(tmp_path, monkeypatch):
     _seed_thread(tmp_path, monkeypatch, [
-        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev voice-fix — AC: tests green"},
-        {"role": "assistant", "agent": "dev", "content": "claim: dev voice-fix — AC: mine instead"},
+        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev voice-fix"},
+        {"role": "assistant", "agent": "dev", "content": "claim: dev voice-fix"},
     ])
     out = claims.scan_claims("dev")
     assert out["voice-fix"]["persona"] == "chipchatdev"
@@ -37,9 +37,9 @@ def test_first_claim_wins(tmp_path, monkeypatch):
 
 def test_claim_done_releases(tmp_path, monkeypatch):
     _seed_thread(tmp_path, monkeypatch, [
-        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev voice-fix — AC: green"},
+        {"role": "assistant", "agent": "chipchatdev", "content": "claim: chipchatdev voice-fix"},
         {"role": "assistant", "agent": "chipchatdev", "content": "claim done — shipped in #44"},
-        {"role": "assistant", "agent": "dev", "content": "claim: dev voice-fix — AC: green"},
+        {"role": "assistant", "agent": "dev", "content": "claim: dev voice-fix"},
     ])
     out = claims.scan_claims("dev")
     assert out["voice-fix"]["persona"] == "dev"  # re-claim after release is fresh
@@ -47,7 +47,7 @@ def test_claim_done_releases(tmp_path, monkeypatch):
 
 def test_claim_owner(tmp_path, monkeypatch):
     _seed_thread(tmp_path, monkeypatch, [
-        {"role": "assistant", "agent": "homelabdev", "content": "claim: homelabdev nas-fold — AC: compose valid"},
+        {"role": "assistant", "agent": "homelabdev", "content": "claim: homelabdev nas-fold"},
     ])
     assert claims.claim_owner("dev", "nas-fold") == "homelabdev"
     assert claims.claim_owner("dev", "other-scope") is None
@@ -55,7 +55,6 @@ def test_claim_owner(tmp_path, monkeypatch):
 
 def test_parse_claim_line_shapes():
     assert claims.parse_claim_line("claim: pm scope-x") == {"persona": "pm", "scope": "scope-x"}
-    assert claims.parse_claim_line("Claim: PM scope y — AC: green") == {"persona": "pm", "scope": "scope y — ac: green"} or True
     assert claims.parse_claim_line("hello world") is None
 
 

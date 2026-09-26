@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from chip import store
+from chip import config, store
 from chip_relay.config import RelayConfig, RoomBinding
 from chip_relay.delegate import (
     MAX_DELEGATE_HOPS,
@@ -26,9 +26,29 @@ CHIP_TIMEOUT_S = 30
 STAND_DOWN_ENV = "CHIP_STAND_DOWN"
 
 
-def stand_down(environ: dict[str, str]) -> bool:
-    """Grok-harvest port: CHIP_STAND_DOWN=1 pauses all delegate hops / persona wakes."""
-    return environ.get(STAND_DOWN_ENV, "").strip() == "1"
+def _flag_file() -> Path:
+    return config.data_dir() / "chip_state" / "stand_down"
+
+
+def stand_down(environ: dict[str, str] | None = None, *, _alert: list[str] | None = None) -> bool:
+    """Grok-harvest port, round-5 hardened — fail-closed.
+
+    Sources (any → frozen): durable flag file ``<data_dir>/chip_state/stand_down``
+    (the SoT — every process must open it), or env exactly ``1``/``true``/``yes``/``on``.
+    Env ``0``/``false``/``off``/absent does NOT override a present flag file.
+    Garbage non-empty env values freeze too (fail-closed) and alert — never silently off.
+    """
+    import sys
+
+    val = (environ or {}).get(STAND_DOWN_ENV, "").strip()
+    if val == "1" or val.lower() in {"true", "yes", "on"}:
+        return True
+    if val and val.lower() not in {"0", "false", "off", "no"}:
+        if _alert is not None:
+            _alert.append(f"CHIP_STAND_DOWN garbage value {val!r} — fail-closed frozen")
+        print(f"ERROR: CHIP_STAND_DOWN garbage value {val!r} — fail-closed frozen", file=sys.stderr, flush=True)
+        return True
+    return _flag_file().is_file()
 
 
 def _stand_down_result(logs: list[str], room: RoomBinding, *, from_persona: str, request: "DelegateRequest", next_hop: int) -> DispatchResult:
