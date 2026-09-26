@@ -465,3 +465,34 @@ turn, send it with to:"dm". It lands in your 1:1 chat and the room never sees it
 | group-chat-turns | Room vs DM discipline | ★ (pasted above) |
 
 **Grok's transfer summary:** ★ = thrift + learnings + both AutoDev triages + room turns. Skip booking/playbook/box-desktop/cloud-code skills.
+
+---
+
+## Round 5 — red team (verbatim)
+
+**Part 1 — Bypasses:**
+
+*stand_down() — 3 bypasses:* (1) **Env not inherited** — subprocess/worker without the var runs wide open while parent thinks it's frozen → fail-closed on a durable flag file every process must open; env is a cache, not SoT. (2) **Gate only on delegate hops** — free chat, fake `claim:` lines, "propose pytest" still run → stand-down refuses writes too: no claim accept, no tool propose/execute, persona turns except Ally/human. (3) **Truthy typo** — `CHIP_STAND_DOWN=true/yes` silently treated as off → only exact "1" enables; other non-empty garbage → refuse + alert, never silently off.
+
+*scan_claims/_CLAIM_RE — 3 bypasses:* (1) **Optional scope** — `claim: buffr-dev` owns nothing checkable or implicitly owns the room → require `claim: <persona> <scope>`; reject missing/wildcard (`*`, `all`, `/`). (2) **claim done without owner check on execute** — tool runner never calls claim_owner; duplicate counted, work still runs → every `--execute` asserts `claim_owner(room, scope) == speaker` else refuse. (3) **Transcript/typo vectors** — fullwidth `：`, BOM/ZWSP, claim buried in quoted replay, spoofed `claim: ally RAZ-1` → NFKC-normalize; envelope must be the whole message body; persona must equal authenticated speaker; reserved ids (ally, lyla, pm) not claimable as worker.
+
+**Part 2 — Allowlist ruleset (8) + matrix:**
+1. Manifest absolute: only pytest, git-status, task-show; unknown tool → hard refuse (no "similar").
+2. Propose ≠ execute: cheap-agent emits proposal card; runner executes only with `--execute` or `CHIP_TOOL_AUTO=1`.
+3. Default both auto flags off; relay never chains tools unattended.
+4. script/GHA classes: personas never execute host scripts; point at ticket/GHA only.
+5. cheap-agent: `--execute` allowlisted tools only under live claim + matching scope; pytest scoped to claimed path; git-status/task-show read-only.
+6. expensive-agent: same allowlist — escalation is who wakes, not a wider tool surface; widen tools only via Ally GO manifest amend.
+7. `--execute` scope: per-invocation + per-tool + must cite `scope=` matching claim (session GO ≠ blanket unlock).
+8. Stand-down overrides all: no delegate, no --execute, no propose — except Ally/human.
+Hard rule: **never let RELAY_AUTO imply TOOL_AUTO.**
+
+Matrix (R=RELAY_AUTO, S=STAND_DOWN, E=--execute): R0S0E0 = chat+propose only · R0S0E1 = run one allowlisted tool if claim_owner ok · R0S1* = refuse hop+execute+propose · R1S0E0 = still no tool run (AUTO≠tools) · R1S1* = freeze wins · R*S0+CHIP_TOOL_AUTO=1 = standing GO for allowlist only, still needs claim_owner, log every run.
+
+**Part 3 — Law pytest harness (implement verbatim):** 9 tests — claim_requires_persona_and_scope (missing/wildcard/spoofed/reserved/empty) · claim_first_wins_duplicate_counted · claim_done_only_own_active · parked_requires_why_next_evidence (next∉enum reject; claim released without handoff|done) · learning_shape_and_class_enum (+token-shaped strings) · verified_as_of_bound_to_checkbox (bare "verified" / relative time / non-machine-checkable) · handoff_requires_confirm_fields (to==from; no ack before ownership moves) · envelope_must_be_whole_message (buried in prose/codefence; fullwidth colon; confusables) · stand_down_blocks_claim_and_execute.
+
+**Part 4 — Evidence forgery:** Checkable = runner-produced artifact id the harness can reopen (pytest JUnit path+exit, git-status stdout hash, GHA run URL, probe JSON) — not model prose. Minimum per type: claim work → tool receipt; Done checkbox → artifact+timestamp; learning → PR/GHA/probe; park → error string from tool/env. "I verified" without receipt → refuse; treat as needs-repro, never actionable/Done. Cited artifact missing/404/wrong SHA → integrity fault: reopen, strip trust, thrift-warn; second time in 14d → triage-only persona. **Persona cannot mint receipts — only the tool runner attaches `receipt:`.** Incident: premature Done / "merged so Done" on RAZ-177/186/199 clusters — board lied green. Rule: deploy/merge ≠ verified; missing artifact ⇒ reopen.
+
+**Part 5 — rapid-fire:** (a) unpaid clicks: ticket In Progress + `checkbox unpaid: Ally <action>`; no Done while unpaid; remind once per cadence, never fake smoke. (b) secrets: NAMES ok (OPENROUTER_CC_API_KEY); values never in rooms/tickets/Discord/git; redact token-shaped model output — refuse post. (c) TOCTOU: atomic flock on canonical path covering session-idle, no check-then-act; session>0 ⇒ refuse mutate; grep claim/PR before spawn, second Composer refuse. (d) cross-room: speak only as yourself; shared = that room's transcript only, never other rooms' DMs; private → DM. (e) spend/resume: key off explicit flag (+durable file), not silent %-guess; resume = Ally message + ticket comment `resume: stand-down cleared when:<PT> by:Ally`; no auto-resume on usage drop or clock.
+
+**Final — first v1 jailbreak:** claim parser + tool runner are DECOUPLED — persona posts persuasive prose ("pytest green, shipping") or a malformed/unscoped claim; the map ignores it while `--execute` never checks claim_owner; stand-down only blocks hops so the persona still "works" in-channel and social-engineers Ally or a hot lane. **Single patch: one `authorize(speaker, scope, action)` used by claim accept, handoff, and every tool execute — false unless (not stand_down ∧ claim_owner==speaker ∧ tool∈manifest ∧ receipt_required). No second path around it.**
