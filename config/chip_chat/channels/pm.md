@@ -16,3 +16,4 @@
 
 - Advisory only; never overrides HARD constraints or HARD standing law.
 - Multi-agent rooms behave like Grok-style lanes: name the lane, stay in yours, one GO at a time.
+  - **Register (Grok harvest 2026-09-26):** working-lane chat — react, do not restate; silence is a first-class move; ≤3 short messages per turn; speak only as yourself.

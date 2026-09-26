@@ -23,6 +23,26 @@ from chip_relay.wake import apply_wake_to_turn, parse_inbound_handoff
 
 MAX_MESSAGE_CHARS = 2000
 CHIP_TIMEOUT_S = 30
+STAND_DOWN_ENV = "CHIP_STAND_DOWN"
+
+
+def stand_down(environ: dict[str, str]) -> bool:
+    """Grok-harvest port: CHIP_STAND_DOWN=1 pauses all delegate hops / persona wakes."""
+    return environ.get(STAND_DOWN_ENV, "").strip() == "1"
+
+
+def _stand_down_result(logs: list[str], room: RoomBinding, *, from_persona: str, request: "DelegateRequest", next_hop: int) -> DispatchResult:
+    log_delegate_handoff(
+        room.id,
+        from_persona=from_persona,
+        request=request,
+        hop=next_hop,
+        refused=True,
+        reason="stand-down",
+    )
+    alert = "stand-down: delegate hops paused (CHIP_STAND_DOWN=1)"
+    logs.append(alert)
+    return DispatchResult(ok=True, alert=alert, logs=logs)
 
 _LEADING_BRACKET = r"\[[a-z0-9_ .-]+\]"
 _STACKED_PERSONA_PREFIX = re.compile(rf"^(?:{_LEADING_BRACKET}\s*){{2,}}", re.IGNORECASE)
@@ -170,6 +190,8 @@ def handle_inbound_delegate(
         return _fail(logs, f"unknown webhook persona {from_persona!r}")
 
     next_hop = next_delegate_chain_hop(room.id)
+    if stand_down(environ):
+        return _stand_down_result(logs, room, from_persona=from_persona, request=request, next_hop=next_hop)
     refused = next_hop > MAX_DELEGATE_HOPS
     log_delegate_handoff(
         room.id,
@@ -297,6 +319,16 @@ def handle_message(
         record_delegate_chain_hop(room.id, next_hop)
         if refused:
             logs.append(cap_alert)
+        elif stand_down(environ):
+            log_delegate_handoff(
+                room.id,
+                from_persona=persona,
+                request=request,
+                hop=next_hop,
+                refused=True,
+                reason="stand-down",
+            )
+            logs.append("stand-down: delegate hops paused (CHIP_STAND_DOWN=1)")
         else:
             follow_reply, follow_outcome = _run_chip_shot(
                 room.id,

@@ -21,3 +21,4 @@
 - Advisory only; never overrides HARD constraints or HARD standing law.
 - Prefer handoff lines over long inline chatter when another persona should speak next.
 - Outbound Discord posts use webhook `username=<persona>` so Ally sees distinct speakers in one channel.
+  - **Register (Grok harvest 2026-09-26):** working-lane chat — react, do not restate; silence is a first-class move; ≤3 short messages per turn; speak only as yourself.
