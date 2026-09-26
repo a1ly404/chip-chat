@@ -100,7 +100,7 @@ def run_gateway() -> int:
     intents.members = True
     client = discord.Client(intents=intents)
     dog = Watchdog()
-    heartbeat_gate = HeartbeatGate(baseline_monthly_usd=monthly_now())
+    heartbeat_gate = HeartbeatGate(baseline_monthly_usd=monthly)
     stats = {"ok": 0, "fail": 0, "last_error": "", "last_message_at": 0.0}
     seen_message_ids: set[int] = set()
     max_seen_ids = 2048

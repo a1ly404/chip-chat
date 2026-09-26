@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 from chip_relay.watchdog import (
     HEARTBEAT_INTERVAL_S,
     HEARTBEAT_MIN_SPEND_DELTA_USD,
@@ -9,6 +12,27 @@ from chip_relay.watchdog import (
     Watchdog,
     should_post_heartbeat,
 )
+
+
+def test_run_gateway_heartbeat_gate_baseline_uses_startup_monthly() -> None:
+    """Regression: baseline must not call nested monthly_now() before its def (UnboundLocalError)."""
+    src = Path(__file__).resolve().parent / "chip_relay" / "gateway.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    run_gateway = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "run_gateway"
+    )
+    heartbeat_assign = next(
+        stmt
+        for stmt in run_gateway.body
+        if isinstance(stmt, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "heartbeat_gate" for t in stmt.targets)
+    )
+    assert isinstance(heartbeat_assign.value, ast.Call)
+    baseline_kw = next(kw for kw in heartbeat_assign.value.keywords if kw.arg == "baseline_monthly_usd")
+    assert isinstance(baseline_kw.value, ast.Name)
+    assert baseline_kw.value.id == "monthly"
 
 
 def test_heartbeat_interval_is_thirty_minutes() -> None:
