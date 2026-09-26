@@ -94,10 +94,18 @@
 | PR | #26 |
 | Merge hash | — |
 
-## Backlog — multi-agent collaboration (docs / prompts only until wired)
+## Phase 11 — Specialist lanes (#chip-dev)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-26 |
+| Intent | Grok Bot-shaped `#chip-dev`: `pm` + `buffrdev` / `homelabdev` / `opsdev` / `chipchatdev` personas; legacy `dev` for hop smokes; `delegate:` / `@persona` unchanged; webhook `username` = persona. |
+| PR | — |
+| Merge hash | — |
+
+## Backlog
 
 | Item | Notes |
 | --- | --- |
-| Lane-collab prompts | Room law + persona system text so `pm` / `dev` ack lanes, one Ally GO, parked-until-GO, `delegate:` / `@persona` handoffs (Grok Bot-style). |
-| Monitoring → Chip Chat | Wire homelab **monitoring-logs API** into relay/Chip Chat so `dev` can wake on incidents (no client in this repo yet). |
+| Monitoring → Chip Chat | Wire homelab **monitoring-logs API** into relay/Chip Chat so specialists can wake on incidents (no client in this repo yet). |
 | Per-persona learnings | Append-only `config/chip_chat/personas/<id>/learnings.md` (stubs present); load on persona wake after ships/digs — runtime loader TBD. |

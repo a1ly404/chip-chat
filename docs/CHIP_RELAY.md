@@ -22,7 +22,7 @@ Do not commit those values. The app is not minted in this PR.
 
 ### Personas (stable speakers)
 
-Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps Discord snowflakes (and handles) to persona ids (`pm`, `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` (no human snowflake required for `dev` / `pm`). Example human map:
+Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps Discord snowflakes (and handles) to persona ids (`pm`, specialist lanes `buffrdev` / `homelabdev` / `opsdev` / `chipchatdev`, legacy `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` set to that persona id (no human snowflake required). In `#chip-dev`, Ally (human) maps to `pm`; specialists appear as distinct webhook usernames in the same channel. Example human map:
 
 ```json
 "speakers": {
@@ -49,7 +49,7 @@ Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the sha
 delegate:<persona> <task>
 ```
 
-Example: `delegate:dev fix the flake in chip-selftest`. The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
+Example: `delegate:chipchatdev fix the flake in chip-selftest` (or `delegate:buffrdev …` / `homelabdev` / `opsdev` for those charters). The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply under the source persona's webhook username, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
 
 ### Wake a persona (@mention / `persona:`)
 
@@ -64,7 +64,7 @@ Relay runs that turn as `<persona>` with `<task>` as `-m` (same ids as `--as`). 
 
 ### Bot ↔ bot (webhook handoff)
 
-When a persona webhook posts a handoff line (webhook `username` must match a persona id such as `pm` or `dev`):
+When a persona webhook posts a handoff line (webhook `username` must match a persona id such as `pm`, `buffrdev`, or `chipchatdev`):
 
 ```text
 delegate:<persona> <task>

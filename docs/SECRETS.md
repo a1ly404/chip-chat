@@ -12,7 +12,7 @@ Production-oriented names live in Infisical project **`chipchat`** (prod), inclu
 
 ### Speaker maps (`config/chip_relay/rooms.json`)
 
-**Humans** typing in Discord are mapped via `speakers` (snowflake ids and optional handles → persona id). **AI personas** (`pm`, `dev`, …) speak outbound through **Discord webhooks** with a webhook `username`; they do not need a human snowflake. The `dev` persona is AI-only (webhook + `delegate:dev` hops); there is no human “dev” Discord account in the map.
+**Humans** typing in Discord are mapped via `speakers` (snowflake ids and optional handles → persona id). **AI personas** (`pm`, specialist lanes `buffrdev` / `homelabdev` / `opsdev` / `chipchatdev`, legacy `dev`, …) speak outbound through **Discord webhooks** with `username=<persona>`; they do not need a human snowflake. Ally maps to `pm` on `#chip-dev`; specialists share the same webhook URL but appear under distinct usernames when relay posts.
 
 | Room (channel) | JSON path | Human speakers (examples) |
 | --- | --- | --- |
