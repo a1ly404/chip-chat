@@ -51,6 +51,8 @@ def default_ledger() -> dict[str, Any]:
         "verified_as_of": None,
         "monthly_usd": 0.0,
         "monthly_source": "ledger",
+        # session_usd snapshot when monthly_usd was last aligned to API (or estimate baseline).
+        "monthly_sync_session_usd": 0.0,
         "session_usd": 0.0,
         "estimated_monthly_usd": 0.0,
         "last_prompt_tokens": 0,
@@ -123,20 +125,34 @@ def cost_from_completion_payload(payload: dict[str, Any], model: str) -> tuple[f
     return 0.0, "token_estimate", prompt_tokens, completion_tokens
 
 
+def monthly_session_delta_usd(ledger: dict[str, Any]) -> float:
+    """Spend since monthly_usd was last synced (OpenRouter key usage can lag behind completions)."""
+    if "monthly_sync_session_usd" not in ledger:
+        return 0.0
+    session = float(ledger.get("session_usd") or 0.0)
+    sync = float(ledger.get("monthly_sync_session_usd") or 0.0)
+    return max(0.0, session - sync)
+
+
+def ledger_monthly_baseline_usd(ledger: dict[str, Any]) -> float:
+    stored = _parse_usd(ledger.get("monthly_usd"))
+    if stored is not None and stored > 0:
+        return stored
+    return float(ledger.get("estimated_monthly_usd") or 0.0)
+
+
 def effective_monthly_usd(ledger: dict[str, Any], api_monthly: float | None) -> float:
+    """Gate/monthly figure: max(OpenRouter key usage, ledger baseline + session delta since sync)."""
+    local = ledger_monthly_baseline_usd(ledger) + monthly_session_delta_usd(ledger)
     if api_monthly is not None and api_monthly > 0:
-        return api_monthly
+        return max(api_monthly, local)
+    if local > 0:
+        return local
     return float(ledger.get("estimated_monthly_usd") or 0.0)
 
 
 def ledger_monthly_usd(ledger: dict[str, Any]) -> float:
     """Monthly spend from on-disk ledger (relay heartbeats, selftest, gates without a fresh auth call)."""
-    stored = _parse_usd(ledger.get("monthly_usd"))
-    source = str(ledger.get("monthly_source") or "")
-    if source == "api" and stored is not None and stored > 0:
-        return effective_monthly_usd(ledger, stored)
-    if stored is not None and stored > 0:
-        return stored
     return effective_monthly_usd(ledger, None)
 
 
@@ -161,14 +177,24 @@ def enforce_cutoff(monthly_usd: float) -> None:
         )
 
 
+def _apply_api_monthly_to_ledger(ledger: dict[str, Any], api_monthly: float) -> None:
+    """Refresh API baseline when usage moves; keep sync point so session deltas accrue until then."""
+    prev = _parse_usd(ledger.get("monthly_usd")) or 0.0
+    source = str(ledger.get("monthly_source") or "")
+    session = float(ledger.get("session_usd") or 0.0)
+    if source != "api" or api_monthly > prev:
+        ledger["monthly_usd"] = api_monthly
+        ledger["monthly_sync_session_usd"] = session
+    ledger["monthly_source"] = "api"
+
+
 def refresh_from_auth(key: str) -> tuple[dict[str, Any], float | None]:
     info = openrouter.auth_key_info(key)
     api_monthly = monthly_usd_from_auth(info)
     ledger = load_ledger()
     ledger["verified_as_of"] = _ts()
     if api_monthly is not None and api_monthly > 0:
-        ledger["monthly_usd"] = api_monthly
-        ledger["monthly_source"] = "api"
+        _apply_api_monthly_to_ledger(ledger, api_monthly)
     save_ledger(ledger)
     return ledger, api_monthly
 
@@ -210,14 +236,14 @@ def record_after_live_completion(
             ledger = load_ledger()
 
     if api_monthly is not None and api_monthly > 0:
-        ledger["monthly_usd"] = api_monthly
-        ledger["monthly_source"] = "api"
+        _apply_api_monthly_to_ledger(ledger, api_monthly)
     elif cost_usd > 0:
         ledger["estimated_monthly_usd"] = float(ledger.get("estimated_monthly_usd") or 0.0) + cost_usd
         current = _parse_usd(ledger.get("monthly_usd"))
         if current is None or current <= 0:
             ledger["monthly_usd"] = ledger["estimated_monthly_usd"]
             ledger["monthly_source"] = "token_estimate"
+            ledger["monthly_sync_session_usd"] = float(ledger.get("session_usd") or 0.0)
 
     save_ledger(ledger)
 
@@ -238,9 +264,10 @@ def record_after_live_completion(
 
 
 def format_summary(ledger: dict[str, Any]) -> str:
+    monthly = ledger_monthly_usd(ledger)
     return (
         f"tokens prompt={ledger.get('last_prompt_tokens')} completion={ledger.get('last_completion_tokens')} "
-        f"monthly_usd={ledger.get('monthly_usd')} session_usd={ledger.get('session_usd')} "
+        f"monthly_usd={monthly} session_usd={ledger.get('session_usd')} "
         f"source={ledger.get('monthly_source')}"
     )
 

@@ -16,7 +16,7 @@
 | Date | 2026-09-25 |
 | Intent | Populate `rooms.json` `speakers` for `#chip-dev` / `#chip-relay` (TODO placeholders until ops paste Discord ids); loud failure when maps are unset; selftest resolves `--as` from speakers (deprecate forced `pm`); unit tests + `docs/SECRETS.md` restart policy. |
 | PR | #14 |
-| Merge hash | TBD |
+| Merge hash | `10899ab` |
 
 **2026-09-25:** Real `pm` Discord id in `rooms.json`; `chip-selftest` bot id → `selftest` speaker on `#chip-selftest`; selftest author defaults documented (`SECRETS.md`, `.env.example`).
 
@@ -38,7 +38,7 @@
 | Date | 2026-09-25 |
 | Intent | Allowlisted tool manifest (`config/chip_tools.json`) with risk tiers; `chip tool` / `chip task` CLI and `chip.tool.run`; execution gated on `--execute` / `CHIP_TOOL_AUTO` (default off); task envelopes with `tool_invocations` + `execution_result`; 30s timeout kill; JSONL audit trail; offline tests. |
 | PR | #16 |
-| Merge hash | TBD |
+| Merge hash | `033568c` |
 
 ## Phase 5 — Path A local UI (Freeze)
 
@@ -47,7 +47,7 @@
 | Date | 2026-09-25 |
 | Intent | Thin localhost UI scaffolding: room list, JSONL transcript view, send via `./bin/chip room … --once` (mock unless `CHIP_CHAT_UI_LIVE=1`); `bin/chip-ui` entrypoint; design doc `docs/UI_PATH_A.md`; WSL run notes in README. No auth, no Cloudflare. |
 | PR | #18 |
-| Merge hash | TBD |
+| Merge hash | `816bc62` |
 
 ## Phase 6 — Spec A standing law bundle (Freeze)
 
@@ -56,7 +56,7 @@
 | Date | 2026-09-26 |
 | Intent | law.md + constraints.jsonl on `/data/chip-chat`; session_boot inject order; BLOCKED/NEED_TOOL semantics; OPERATING_LAW 1–20; pm/dev channel law; mock tests T1–T4. |
 | PR | #20 |
-| Merge hash | TBD |
+| Merge hash | `13171f2` |
 
 ## Phase 7 — Spec B evidence-gated done (Freeze)
 
@@ -65,7 +65,7 @@
 | Date | 2026-09-26 |
 | Intent | acceptance[] + evidence[]; try_done(); never_auto_done.txt; task envelope close path; mock tests T1–T4. |
 | PR | #21 |
-| Merge hash | TBD |
+| Merge hash | `0ede43e` |
 
 ## Phase 8 — Spec D thrift ladder (Freeze)
 
@@ -74,4 +74,4 @@
 | Date | 2026-09-26 |
 | Intent | Static keyword class table; thrift_skip/budget/need_ally_go/max_hops; validation stubs; mock tests T1–T3. |
 | PR | #22 |
-| Merge hash | TBD |
+| Merge hash | `75cc45b` |

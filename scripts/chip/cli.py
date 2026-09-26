@@ -346,7 +346,7 @@ def _shot_usage(payload: dict, ledger: dict) -> tuple[int, int, float, float]:
     prompt = int(usage.get("prompt_tokens") or ledger.get("last_prompt_tokens") or 0)
     completion = int(usage.get("completion_tokens") or ledger.get("last_completion_tokens") or 0)
     session = float(ledger.get("session_usd") or 0.0)
-    monthly = float(ledger.get("monthly_usd") or 0.0)
+    monthly = spend.ledger_monthly_usd(ledger)
     return prompt, completion, session, monthly
 
 

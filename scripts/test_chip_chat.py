@@ -248,6 +248,52 @@ def test_refresh_from_auth_does_not_zero_token_estimate(
     assert spend.ledger_monthly_usd(updated) == pytest.approx(0.001467)
 
 
+def test_effective_monthly_includes_session_delta_when_api_lags(tmp_path: Path) -> None:
+    from chip import spend
+
+    ledger = spend.default_ledger()
+    ledger["monthly_usd"] = 0.00100806
+    ledger["monthly_source"] = "api"
+    ledger["monthly_sync_session_usd"] = 0.0
+    ledger["session_usd"] = 0.0
+    assert spend.effective_monthly_usd(ledger, 0.00100806) == pytest.approx(0.00100806)
+    ledger["session_usd"] = 0.00045921
+    assert spend.effective_monthly_usd(ledger, 0.00100806) == pytest.approx(0.00146727)
+
+
+def test_record_after_live_completion_accrues_monthly_when_api_flat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chip import spend
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    ledger = spend.default_ledger()
+    ledger["monthly_usd"] = 0.00100806
+    ledger["monthly_source"] = "api"
+    ledger["monthly_sync_session_usd"] = 0.0
+    ledger["session_usd"] = 0.0
+    spend.save_ledger(ledger)
+
+    api_calls = {"n": 0}
+
+    def fake_auth(_key: str) -> dict:
+        api_calls["n"] += 1
+        return {"usage_monthly": 0.00100806}
+
+    monkeypatch.setattr(spend.openrouter, "auth_key_info", fake_auth)
+    payload = {
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_cost": 0.00045921,
+        }
+    }
+    updated = spend.record_after_live_completion("room", "deepseek/deepseek-v4.1-flash", payload, key="sk-test")
+    assert api_calls["n"] == 1
+    assert updated["session_usd"] == pytest.approx(0.00045921)
+    assert spend.ledger_monthly_usd(updated) == pytest.approx(0.00146727)
+
+
 def test_require_api_key_rejects_owui_env_names_only() -> None:
     """Chip module must not read OWUI key from env."""
     from chip.openrouter import ENV_KEY, require_api_key
