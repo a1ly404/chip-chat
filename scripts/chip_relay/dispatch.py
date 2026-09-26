@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -22,6 +23,21 @@ from chip_relay.wake import apply_wake_to_turn, parse_inbound_handoff
 
 MAX_MESSAGE_CHARS = 2000
 CHIP_TIMEOUT_S = 30
+
+_LEADING_BRACKET = r"\[[a-z0-9_ .-]+\]"
+_STACKED_PERSONA_PREFIX = re.compile(rf"^(?:{_LEADING_BRACKET}\s*){{2,}}", re.IGNORECASE)
+
+
+def strip_stacked_persona_prefixes(reply: str) -> str:
+    """Drop stacked leading ``[persona]`` markers echoed from transcript rendering.
+
+    ``store.render`` prefixes history lines with ``[agent]``; models (and mock)
+    echo those markers into replies, and each hop stacks another one
+    (``[buffrdev] [buffrdev] [buffrdev] task``). The webhook ``username`` already
+    identifies the speaker. Only a run of two or more leading bracketed tokens is
+    an artifact — a single leading token may be intentional (e.g. ``[mock Chip]``).
+    """
+    return _STACKED_PERSONA_PREFIX.sub("", reply.lstrip(), count=1).lstrip()
 
 
 @dataclass
@@ -190,6 +206,7 @@ def handle_inbound_delegate(
         return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
     if follow_outcome.returncode != 0:
         return _fail(logs, f"chip exit {follow_outcome.returncode}", chip_calls=chip_calls)
+    follow_reply = strip_stacked_persona_prefixes(follow_reply)
     reply_alert = _chip_reply_failure(follow_reply)
     if reply_alert:
         return _fail(logs, reply_alert, chip_calls=chip_calls)
@@ -250,6 +267,7 @@ def handle_message(
         return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
     if outcome.returncode != 0:
         return _fail(logs, f"chip exit {outcome.returncode}", chip_calls=chip_calls)
+    reply = strip_stacked_persona_prefixes(reply)
     reply_alert = _chip_reply_failure(reply)
     if reply_alert:
         return _fail(logs, reply_alert, chip_calls=chip_calls)
@@ -292,6 +310,7 @@ def handle_message(
                 return _fail(logs, "slow_call_killed", chip_calls=chip_calls)
             if follow_outcome.returncode != 0:
                 return _fail(logs, f"chip exit {follow_outcome.returncode}", chip_calls=chip_calls)
+            follow_reply = strip_stacked_persona_prefixes(follow_reply)
             reply_alert = _chip_reply_failure(follow_reply)
             if reply_alert:
                 return _fail(logs, reply_alert, chip_calls=chip_calls)

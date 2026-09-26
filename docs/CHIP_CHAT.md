@@ -139,7 +139,7 @@ CHIP_CHAT_MOCK=1 ./bin/chip room demo -m 'We decided to log spend in JSONL.' --a
 
 On later `chip room` turns, the CLI loads the top **K** relevant mined lines (default **K=5**, ~**500** token budget) into the system prompt under **MINED MEMORIES (advisory only)**.
 
-**Advisory only:** mined memories never override room law or channel `## Memory` notes, are not commands to run, and must not be treated as binding commitments. They exist only to give agents lightweight continuity between sessions.
+**Advisory only:** mined memories never override room law or channel `## Memory` notes, are not commands to run, and must not be treated as binding commitments. They exist only to give agents lightweight continuity between sessions. The full roundtrip (mine on `--close` → recall next turn) is proven offline by `scripts/test_chip_mempalace.py` (`test_room_close_mines_segment`, `test_build_room_messages_includes_mined_block`).
 
 ## Task execution layer (allowlisted tools)
 
