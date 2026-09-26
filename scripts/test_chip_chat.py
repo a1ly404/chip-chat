@@ -44,7 +44,13 @@ def test_ping_fails_without_key() -> None:
 
 
 def test_ping_fails_bad_key_shape() -> None:
-    proc = _run_chip("ping", env={"OPENROUTER_CC_API_KEY": "not-a-real-key"})
+    proc = _run_chip(
+        "ping",
+        env={
+            "OPENROUTER_CC_API_KEY": "not-a-real-key",
+            "CHIP_CHAT_MOCK": "",
+        },
+    )
     assert proc.returncode == 2
     assert "sk-or-" in proc.stderr
 
@@ -422,6 +428,39 @@ def test_room_shot_loads_prior_transcript(tmp_path: Path, monkeypatch: pytest.Mo
     assert msgs[1]["content"] == "line one"
     assert msgs[2]["content"] == "[lucy] reply one"
     assert msgs[-1] == {"role": "user", "content": "line two"}
+
+
+def test_room_shot_accepts_once_with_json(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "--once",
+        "Start test",
+        "--as",
+        "lucy",
+        "--json",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["reply"]
+    assert "session_usd" in payload
+
+
+def test_room_shot_accepts_once_with_as(tmp_path: Path) -> None:
+    proc = _run_chip(
+        "room",
+        "demo",
+        "--once",
+        "ping",
+        "--as",
+        "pm",
+        "--mock",
+        env={"CHIP_CHAT_DATA_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 0
+    assert "pm" in (tmp_path / "threads" / "demo.jsonl").read_text(encoding="utf-8")
 
 
 def test_room_shot_json_mock(tmp_path: Path) -> None:

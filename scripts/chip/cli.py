@@ -350,12 +350,26 @@ def _shot_usage(payload: dict, ledger: dict) -> tuple[int, int, float, float]:
     return prompt, completion, session, monthly
 
 
+def _room_turn_message(args: argparse.Namespace) -> str:
+    """User text for a non-interactive room turn (-m/--message or --once TEXT)."""
+    return (getattr(args, "message", None) or getattr(args, "once", None) or "").strip()
+
+
+def _room_uses_shot_path(args: argparse.Namespace) -> bool:
+    """Shot path: -m/--message, --json output, or --as with an explicit turn message."""
+    if getattr(args, "message", None) or getattr(args, "json", False):
+        return True
+    if getattr(args, "as_agent", None) and _room_turn_message(args):
+        return True
+    return False
+
+
 def cmd_room_shot(args: argparse.Namespace) -> int:
     """Non-interactive room turn. --json prints one object and nothing else."""
-    message = (getattr(args, "message", None) or "").strip()
+    message = _room_turn_message(args)
     agent_err = _validate_agent(getattr(args, "as_agent", None))
     if not message:
-        print("ERROR: -m/--message is required", file=sys.stderr)
+        print("ERROR: -m/--message or --once TEXT is required", file=sys.stderr)
         return 1
     if agent_err:
         print(f"ERROR: {agent_err}", file=sys.stderr)
@@ -453,7 +467,7 @@ def cmd_room(args: argparse.Namespace) -> int:
     if getattr(args, "close", False):
         return cmd_room_close(args)
     use_mock = args.mock or config.mock_mode()
-    if getattr(args, "message", None) or getattr(args, "json", False):
+    if _room_uses_shot_path(args):
         return cmd_room_shot(args)
     if args.once:
         persona = args.persona or "default"
