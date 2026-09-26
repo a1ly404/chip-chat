@@ -78,7 +78,9 @@ export OPENROUTER_CC_API_KEY='sk-or-v1-…'
 
 ## Room law (Amendment 5)
 
-Channel files live at `config/chip_chat/channels/<room>.md` (`demo.md`, `example.md`).
+Channel files live at `config/chip_chat/channels/<room>.md` (`demo.md`, `example.md`, `pm.md`, `dev.md`).
+
+`pm` / `dev` channel law encodes **lane collaboration** (named ownership, one Ally GO per turn, parked-until-GO, `delegate:` / `@persona` handoffs). Persona wording in `config/chip_chat_personas.json` aligns but **room law wins** when they differ.
 
 `chip room <name>` loads that file into the system prompt:
 

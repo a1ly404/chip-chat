@@ -93,3 +93,11 @@
 | Intent | Grok-style wake: humans and inject bots can target `pm`/`dev` via `@persona` or `persona:`; webhook personas can hand off with the same prefixes as `delegate:`; relay self-post `GO:` / `@pm` inject when `CHIP_RELAY_INJECT_AUTHOR_ID` is set. |
 | PR | #26 |
 | Merge hash | — |
+
+## Backlog — multi-agent collaboration (docs / prompts only until wired)
+
+| Item | Notes |
+| --- | --- |
+| Lane-collab prompts | Room law + persona system text so `pm` / `dev` ack lanes, one Ally GO, parked-until-GO, `delegate:` / `@persona` handoffs (Grok Bot-style). |
+| Monitoring → Chip Chat | Wire homelab **monitoring-logs API** into relay/Chip Chat so `dev` can wake on incidents (no client in this repo yet). |
+| Per-persona learnings | Append-only `config/chip_chat/personas/<id>/learnings.md` (stubs present); load on persona wake after ships/digs — runtime loader TBD. |
