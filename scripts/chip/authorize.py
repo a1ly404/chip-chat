@@ -17,6 +17,13 @@ from chip import claims
 MANIFEST_TOOLS = {"pytest", "git-status", "task-show"}
 RESERVED_WORKER_IDS = claims.RESERVED_IDS
 
+# Round-7 guardrail: hard service allowlist IN THE EXECUTOR (not the model).
+# Auto runbooks may touch ONLY these units; anything naming a blocked pattern
+# (native-profile services, compose up, NAS paths) refuses at authorize even if
+# the registry says auto.
+SERVICE_ALLOWLIST = {"discord-bot", "monitoring-api"}
+BLOCKED_TARGET_PATTERNS = ("plex", "sonarr", "radarr", "qbittorrent", "gluetun", "compose up", "/mnt/nas")
+
 
 def authorize(
     speaker: str,
@@ -56,6 +63,9 @@ def authorize(
             return False, "no room context"
         if not scope or scope.strip().lower() in {"*", "all", "/"}:
             return False, "wildcard/empty scope"
+        target_text = f"{scope or ''} {tool or ''}".lower()
+        if any(pat in target_text for pat in BLOCKED_TARGET_PATTERNS):
+            return False, f"blocked target (native-profile/compose/NAS): {target_text!r}"
         owner = claims.claim_owner(room, scope)
         if owner != speaker_norm:
             return False, f"claim_owner={owner or 'none'} ≠ speaker {speaker_norm}"

@@ -513,3 +513,17 @@ Matrix (R=RELAY_AUTO, S=STAND_DOWN, E=--execute): R0S0E0 = chat+propose only · 
 **Q22 Prompt injection via logs:** (1) Fence: wrap log/ticket body as untrusted data; law never reads instructions from inside. (2) Sanitize: strip/escape `^(claim:|handoff:|ignore previous|system:|TOOL_|CHIP_|sudo )`; truncate; structured JSON probes preferred over raw paste. (3) Model sees the script-built summary, not raw Discord paste. (4) authorize() still required — injection can't mint `--execute`. (5) Cited "instruction" in a log → dead-letter + alert Ally once, never obey. Seen/expected: "restart all containers" / "disable stand-down" / fake `claim: ally …`. Likely miss: unicode lookalikes inside a legitimate field copied verbatim into system prompt — fix: never concatenate raw strings into law/tool instructions.
 
 **Final (1 line):** Implement 19 (noise floor + SKIP_KEYS/dedup) first — without it self-heal amplifies false storms; still missed: graduated runbook registry (id → auto vs propose) + authorize() wired to monitoring fingerprints.
+
+---
+
+## Round 7 — go-live review (verbatim, FINAL)
+
+**1 — Safe rollout order:** Phase A: ingest→noise floor→fingerprint→ticket/learning draft, **dark** (log-only) until skip/dedup/flap rates sane on real feed (≥3 quiet days). Phase B: + triage class + matched runbook id + propose card — **propose-only**, Ally ack each distinct runbook ≥1×, no false actionable storms. Phase C: + claim + verify receipts on **human-approved** runs; 3 clean propose→GO→verify cycles **same runbook id**. Phase D: graduate **one** runbook to auto — evidence: 3× auto would-have-matched Ally GO, 0 sideways, verify×2 green, learning posted. **Dark forever:** remux/media/credentials/execute walls/mutate-band L2. Ally ack for EVERY new runbook id until it graduates — not a calendar "2 weeks then all auto."
+
+**2 — First auto runbook:** `rb.monitoring.discord-bot-loop-restart` — /health up but loops_ok=false / standup loop dead → restart ONLY the named discord-bot unit → re-probe loops_ok. Idempotent, reversible, no NAS/Plex/Arr. **First incident class:** missed Homelab/GymLog standup after Discord login race. **Never first-auto:** Plex, docker compose stack, qB, Arr restarts.
+
+**3 — Worst week-one failure + the guardrail beyond current law:** false "Plex/Arr down" → auto restart/recreate **Docker** Plex/Arr (or SYSTEM Restart-Plex) while **native** household services were fine — session kill, library locks, Session-0 relapse, dual-stack brain damage. **Guardrail: a hard service allowlist IN THE EXECUTOR (not the model)** — auto runbooks may touch only an explicit set of unit/container names (discord-bot, monitoring-api); any step naming plex/sonarr/radarr/qbittorrent, compose up, or /mnt/nas paths → refuse at authorize even if registry says auto. Pair with SKIP_KEYS.
+
+**4 — First signal to feed:** monitoring-api structured health for `discord-bot` + standup loops (/health / loops_ok — not free-text #plex-fix chat). Second wave: caddy/monitoring-api host probes. Defer raw #plex-fix text + Arr/Plex container health until SKIP_KEYS + native-vs-docker map proven in Phase A.
+
+**Go line:** Phase A dark on discord-bot health today → Phase B propose → three Ally-matched cycles → auto ONLY that one runbook. Everything else propose-or-blocked.

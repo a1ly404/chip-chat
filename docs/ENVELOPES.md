@@ -55,6 +55,18 @@ verified-as-of: <YYYY-MM-DD HH:MM> — <machine-checkable proof>
 - **Unknown ids fail-closed to `propose`.** Graduation: propose → (Ally GO + clean history) → auto, one runbook at a time.
 - `authorize(fixer, fingerprint, "fix")` + `runbooks.may_autorun(id)` are the two gates before any live recover; probe receipt + verify-twice still required (law id:auto-heal).
 
+## Go-live phases (Grok round 7 — the rollout law)
+
+| Phase | Stages | Mode | Graduate when |
+| --- | --- | --- | --- |
+| A | ingest → noise floor → fingerprint → ticket/learning draft | **dark** (log-only) | ≥3 quiet days of sane skip/dedup/flap rates on the real feed |
+| B | + triage class + runbook id + propose card | **propose-only** | Ally acks each distinct runbook ≥1×; no false storms |
+| C | + claim + verify receipts on human-approved runs | human presses execute | 3 clean propose→GO→verify cycles, same runbook id |
+| D | graduate ONE runbook to `auto` | auto, that id only | 3× would-have-matched Ally GO + 0 sideways + verify×2 + learning posted |
+
+Dark forever: remux / media / credentials / execute walls / mutate-band L2. Ally ack for EVERY new runbook id — graduation is evidence-based, never calendar-based.
+First signal: monitoring-api structured health for `discord-bot` (`/health` / `loops_ok`). First auto candidate: `discord-bot-loop-restart` (currently `propose` in the registry until Phase C evidence).
+
 ## handoff (transfer)
 ```
 handoff: <persona> <task> — confirmed by: <persona>
