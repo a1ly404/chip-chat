@@ -15,6 +15,10 @@ UPSTREAM = "https://openrouter.ai/api/v1"
 ENV_KEY = "OPENROUTER_CC_API_KEY"
 KEY_PREFIX = "sk-or-"
 
+# GLM 5.3 family spends completion budget on reasoning; small max_tokens starves content.
+MAX_COMPLETION_TOKENS_CAP = 4096
+_REASONING_EFFORT_MODEL_PREFIX = "z-ai/glm-"
+
 
 class ChipConfigError(Exception):
     """Missing or invalid Chip Chat OpenRouter configuration."""
@@ -75,6 +79,13 @@ def auth_key_info(key: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _openrouter_reasoning_options(model: str) -> dict[str, Any] | None:
+    """Lower reasoning effort on cheap GLM defaults (reasoning cannot be disabled)."""
+    if model.startswith(_REASONING_EFFORT_MODEL_PREFIX):
+        return {"effort": "low"}
+    return None
+
+
 def chat_completion(
     key: str,
     *,
@@ -82,11 +93,14 @@ def chat_completion(
     messages: list[dict[str, str]],
     max_tokens: int = 256,
 ) -> dict[str, Any]:
-    body = {
+    body: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
     }
+    reasoning = _openrouter_reasoning_options(model)
+    if reasoning is not None:
+        body["reasoning"] = reasoning
     data = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{UPSTREAM}/chat/completions",
@@ -108,10 +122,59 @@ def chat_completion(
     return payload if isinstance(payload, dict) else {"raw": payload}
 
 
-def extract_assistant_text(payload: dict[str, Any]) -> str:
+def _choice(payload: dict[str, Any]) -> dict[str, Any]:
     choices = payload.get("choices") or []
-    if not choices:
+    if not choices or not isinstance(choices[0], dict):
+        return {}
+    return choices[0]
+
+
+def finish_reason(payload: dict[str, Any]) -> str:
+    reason = _choice(payload).get("finish_reason")
+    return (reason or "").strip() if isinstance(reason, str) else ""
+
+
+def _message_field_text(message: dict[str, Any], field: str) -> str:
+    raw = message.get(field)
+    if raw is None:
         return ""
-    message = choices[0].get("message") or {}
-    content = message.get("content")
-    return (content or "").strip()
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, dict) and item.get("type") in (None, "text"):
+                parts.append(str(item.get("text") or ""))
+        return "".join(parts).strip()
+    return str(raw).strip()
+
+
+def _assistant_message(payload: dict[str, Any]) -> dict[str, Any]:
+    message = _choice(payload).get("message")
+    return message if isinstance(message, dict) else {}
+
+
+def reasoning_token_starvation(payload: dict[str, Any]) -> bool:
+    """Completion budget exhausted on reasoning with no assistant content."""
+    message = _assistant_message(payload)
+    if _message_field_text(message, "content"):
+        return False
+    if not _message_field_text(message, "reasoning"):
+        return False
+    return finish_reason(payload) == "length"
+
+
+def retry_max_tokens_if_reasoning_starved(payload: dict[str, Any], max_tokens: int) -> int | None:
+    """One-shot higher budget when GLM-style reasoning consumed the completion cap."""
+    if not reasoning_token_starvation(payload):
+        return None
+    bumped = min(max(max_tokens * 2, 1024), MAX_COMPLETION_TOKENS_CAP)
+    if bumped <= max_tokens:
+        return None
+    return bumped
+
+
+def extract_assistant_text(payload: dict[str, Any]) -> str:
+    """Assistant reply for Discord/transcript — message.content only (never reasoning)."""
+    message = _assistant_message(payload)
+    return _message_field_text(message, "content")

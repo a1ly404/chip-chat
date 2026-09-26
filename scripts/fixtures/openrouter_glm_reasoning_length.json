@@ -1,0 +1,22 @@
+{
+  "id": "gen-live-sample",
+  "model": "z-ai/glm-5.3-flash",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "reasoning": "The user wants a short ack. I should answer in one line after thinking through the room law."
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 77,
+    "completion_tokens": 512,
+    "total_tokens": 589,
+    "completion_tokens_details": {
+      "reasoning_tokens": 512
+    }
+  }
+}

@@ -323,7 +323,11 @@ def _room_demo_turn(
     messages = build_room_messages(room, agent_name, user_text, history_limit=history_limit)
     store.log_message(room, "user", user_text, agent=agent_name)
     reply, _, routed, ledger = runtime.complete(
-        messages, model=config.default_model(), max_tokens=200, use_mock=use_mock, command="room"
+        messages,
+        model=config.default_model(),
+        max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
+        use_mock=use_mock,
+        command="room",
     )
     store.log_message(room, "assistant", reply, agent=agent_name, model=routed)
     print(f"{agent_name}> {reply}")
@@ -418,7 +422,7 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
         text, payload, routed, ledger = runtime.complete(
             messages,
             model=config.default_model(),
-            max_tokens=512,
+            max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
             use_mock=use_mock,
             command="room",
         )
@@ -479,7 +483,7 @@ def cmd_room(args: argparse.Namespace) -> int:
             text, _, routed, ledger = runtime.complete(
                 messages,
                 model=config.default_model(),
-                max_tokens=400,
+                max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
                 use_mock=use_mock,
                 command="room",
             )

@@ -13,6 +13,8 @@ MODELS_FILE = REPO_ROOT / "config" / "chip_chat_models.json"
 DOTENV_FILE = REPO_ROOT / ".env"
 
 DEFAULT_MODEL = "z-ai/glm-5.3-flash"
+# Room turns (large system+history): GLM 5.3 can spend completion budget on reasoning first.
+ROOM_COMPLETION_MAX_TOKENS = 1024
 ESCALATE_MODEL = "deepseek/deepseek-v4.1-flash"
 PING_MODEL = DEFAULT_MODEL
 BLOCKED_MODELS = frozenset({"deepseek/deepseek-chat"})

@@ -43,6 +43,19 @@ The CLI loads `repo/.env` if present (keys already in the shell are not overridd
 
 Config: `config/chip_chat_personas.json`, `config/chip_chat_models.json`.
 
+### GLM 5.3 Flash and reasoning tokens
+
+The default model (`z-ai/glm-5.3-flash`) is a **reasoning** model on OpenRouter: completion budget can be spent in `message.reasoning` before `message.content` appears. With a small `max_tokens`, you may see `finish_reason=length`, `content=null`, and `usage.completion_tokens_details.reasoning_tokens` ≈ all completion tokens — which looks like an empty Chip reply.
+
+Chip Chat mitigations (live path):
+
+- Requests to `z-ai/glm-*` pass OpenRouter `reasoning: { "effort": "low" }` (reasoning cannot be disabled on this family).
+- `chip room` live completions use `ROOM_COMPLETION_MAX_TOKENS` (1024); short prompts often succeed at 256+, but large room system+history can still burn a 512-token budget on reasoning alone.
+- If the first completion is reasoning-starved (`length`, reasoning present, no content), `runtime.complete` **retries once** with a higher `max_tokens` (2×, floor 1024, cap 4096 — e.g. 1024 → 2048).
+- `extract_assistant_text` reads **`message.content` only**; reasoning is never posted to Discord.
+
+Empty replies after retry still fail closed in chip-relay (#30 / #31).
+
 ## Commands
 
 ```bash

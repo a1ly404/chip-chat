@@ -29,6 +29,13 @@ def complete(
     key = openrouter.require_api_key()
     spend.guard_before_live_completion(command, key)
     payload = openrouter.chat_completion(key, model=chosen, messages=messages, max_tokens=max_tokens)
+    retry_max = openrouter.retry_max_tokens_if_reasoning_starved(payload, max_tokens)
+    if retry_max is not None:
+        routed_retry = (payload.get("model") or chosen) if isinstance(payload.get("model"), str) else chosen
+        spend.record_after_live_completion(command, routed_retry, payload, key=key)
+        payload = openrouter.chat_completion(
+            key, model=chosen, messages=messages, max_tokens=retry_max
+        )
     routed = (payload.get("model") or chosen) if isinstance(payload.get("model"), str) else chosen
     ledger = spend.record_after_live_completion(command, routed, payload, key=key)
     return openrouter.extract_assistant_text(payload), payload, routed, ledger

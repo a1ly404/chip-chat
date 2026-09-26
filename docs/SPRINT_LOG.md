@@ -103,6 +103,8 @@
 | PR | — |
 | Merge hash | — |
 
+**2026-09-26:** GLM 5.3 Flash reasoning token starvation — room/relay empty replies when `max_tokens` exhausted on `message.reasoning`; OpenRouter `reasoning.effort=low`, room `max_tokens=1024`, one retry with higher budget, content-only `extract_assistant_text`; fixture + unit tests.
+
 ## Backlog
 
 | Item | Notes |
