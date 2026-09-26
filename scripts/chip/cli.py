@@ -7,7 +7,7 @@ import json
 import re
 import sys
 
-from chip import config, constraints, law, mempalace, mock, openrouter, runtime, spend, store, task, tool
+from chip import config, constraints, law, learnings, mempalace, mock, openrouter, runtime, spend, store, task, tool
 from chip import standing_law
 from chip.need_tool import NeedToolError
 from chip.tools_manifest import list_tools
@@ -288,6 +288,7 @@ def build_room_messages(
         _persona_system(persona),
         law.load_room_law(room),
         session_boot_prefix=boot,
+        learnings_block=learnings.render_learnings_block(persona),
     )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)

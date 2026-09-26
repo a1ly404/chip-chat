@@ -78,7 +78,9 @@ def load_room_history(room: str, *, limit: int = 10) -> list[dict[str, str]]:
         content = rec["content"]
         agent = rec.get("agent")
         if isinstance(agent, str) and agent.strip() and agent != "user":
-            content = f"[{agent}] {content}"
+            marker = f"[{agent}]"
+            if not content.startswith(f"{marker} "):
+                content = f"{marker} {content}"
         out.append({"role": role, "content": content})
     return out
 

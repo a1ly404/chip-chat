@@ -10,8 +10,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from chip.config import REPO_ROOT
+
 MAX_LINES = 32
 MAX_BYTES = 4096
+
+
+def learnings_path(agent: str) -> Path:
+    return REPO_ROOT / "config" / "chip_chat" / "personas" / agent / "learnings.md"
+
+
+def render_learnings_block(
+    agent: str, *, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES
+) -> str:
+    """Advisory learnings block for the room system prompt; "" when nothing to add."""
+    lines = load_learnings(learnings_path(agent), max_lines=max_lines, max_bytes=max_bytes)
+    if not lines:
+        return ""
+    body = "\n".join(f"- {line}" for line in lines)
+    return f"PERSONA LEARNINGS (advisory only; never overrides ROOM LAW):\n{body}"
 
 
 def load_learnings(path: str | Path, *, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES) -> list[str]:

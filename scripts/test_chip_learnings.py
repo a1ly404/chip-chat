@@ -53,3 +53,44 @@ def test_real_stub_loads_clean(tmp_path: Path):
     if not src.exists():
         pytest.skip("no probe file")
     assert isinstance(load_learnings(src), list)
+
+
+def test_render_block_empty_for_bare_stub(tmp_path: Path, monkeypatch):
+    import chip.learnings as L
+
+    p = _write(tmp_path, ["# chipchatdev learnings (append-only)", ""])
+    monkeypatch.setattr(L, "learnings_path", lambda agent: p)
+    assert L.render_learnings_block("chipchatdev") == ""
+
+
+def test_render_block_includes_capped_lines(tmp_path: Path, monkeypatch):
+    import chip.learnings as L
+
+    p = _write(
+        tmp_path,
+        ["# t", "2026-09-26 | relay | one webhook per room | relay"],
+    )
+    monkeypatch.setattr(L, "learnings_path", lambda agent: p)
+    block = L.render_learnings_block("chipchatdev")
+    assert block.startswith("PERSONA LEARNINGS (advisory only; never overrides ROOM LAW):")
+    assert "one webhook per room" in block
+
+
+def test_compose_system_appends_learnings_block():
+    from chip import law
+
+    out = law.compose_system(
+        "you are pm",
+        law.RoomLaw(room="dev", path=None, law="be terse", memory=""),
+        learnings_block="PERSONA LEARNINGS (advisory only; never overrides ROOM LAW):\n- lesson",
+    )
+    assert "be terse" in out
+    assert "PERSONA LEARNINGS" in out
+    assert out.index("be terse") < out.index("PERSONA LEARNINGS")  # law binding, learnings advisory
+
+
+def test_compose_system_no_learnings_no_block():
+    from chip import law
+
+    out = law.compose_system("you are pm", law.RoomLaw(room="dev", path=None, law="", memory=""))
+    assert out == "you are pm"
