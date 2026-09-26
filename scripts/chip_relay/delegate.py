@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from chip import config, store
 
 MAX_DELEGATE_HOPS = 3
+# Nested ``delegate:`` hops within one handoff chain (one human/inject turn → webhook follow-ups).
+_chain_depth: dict[str, int] = {}
 _DELEGATE_LINE = re.compile(
     r"^delegate:(?P<persona>[A-Za-z0-9][A-Za-z0-9_.-]{0,31})\s+(?P<task>.+)$",
     re.IGNORECASE,
@@ -53,8 +55,23 @@ def parse_delegate(text: str) -> DelegateRequest | None:
     return None
 
 
+def reset_delegate_chain(room_id: str) -> None:
+    """Start a new handoff chain (call at the beginning of each human/inject turn)."""
+    _chain_depth[room_id] = 0
+
+
+def next_delegate_chain_hop(room_id: str) -> int:
+    """1-based hop index for the next delegate in the current chain."""
+    return _chain_depth.get(room_id, 0) + 1
+
+
+def record_delegate_chain_hop(room_id: str, hop: int) -> None:
+    """Mark that ``hop`` was consumed (logged whether or not chip ran)."""
+    _chain_depth[room_id] = hop
+
+
 def max_logged_delegate_hop(room_id: str) -> int:
-    """Highest ``relay_handoff.hop`` recorded in the room transcript."""
+    """Highest ``relay_handoff.hop`` recorded in the room transcript (lifetime peak)."""
     path = store.thread_path(room_id)
     if not path.is_file():
         return 0

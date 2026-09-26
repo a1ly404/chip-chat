@@ -105,6 +105,7 @@ def test_delegate_follow_empty_reply_skips_second_webhook(tmp_path, monkeypatch:
 
 def test_dispatch_error_channel_visibility() -> None:
     assert dispatch_error_visible_in_channel("empty chip reply")
+    assert dispatch_error_visible_in_channel("delegate hop cap (3)")
     assert dispatch_error_visible_in_channel("webhook 400")
     assert not dispatch_error_visible_in_channel("slow_call_killed")
     assert not dispatch_error_visible_in_channel("malformed message")

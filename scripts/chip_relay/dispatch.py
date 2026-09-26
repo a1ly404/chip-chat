@@ -12,8 +12,10 @@ from chip_relay.delegate import (
     MAX_DELEGATE_HOPS,
     DelegateRequest,
     known_persona_ids,
-    max_logged_delegate_hop,
+    next_delegate_chain_hop,
     parse_delegate,
+    record_delegate_chain_hop,
+    reset_delegate_chain,
 )
 from chip_relay.personas import resolve_persona_for_dispatch
 from chip_relay.wake import apply_wake_to_turn, parse_inbound_handoff
@@ -151,7 +153,7 @@ def handle_inbound_delegate(
     if from_persona not in known_persona_ids():
         return _fail(logs, f"unknown webhook persona {from_persona!r}")
 
-    next_hop = max_logged_delegate_hop(room.id) + 1
+    next_hop = next_delegate_chain_hop(room.id)
     refused = next_hop > MAX_DELEGATE_HOPS
     log_delegate_handoff(
         room.id,
@@ -161,12 +163,15 @@ def handle_inbound_delegate(
         refused=refused,
         reason="hop cap" if refused else "",
     )
+    record_delegate_chain_hop(room.id, next_hop)
     chip_calls = 0
     webhook_calls = 0
+    cap_alert = f"delegate hop cap ({MAX_DELEGATE_HOPS})"
     if refused:
-        logs.append(f"delegate hop cap ({MAX_DELEGATE_HOPS})")
+        logs.append(cap_alert)
         return DispatchResult(
             ok=True,
+            alert=cap_alert,
             chip_calls=chip_calls,
             webhook_calls=webhook_calls,
             logs=logs,
@@ -229,6 +234,8 @@ def handle_message(
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
 
+    reset_delegate_chain(room.id)
+
     persona, persona_alert = resolve_persona_for_dispatch(
         room,
         author_id=incoming.author_id,
@@ -257,8 +264,9 @@ def handle_message(
 
     delegate_hops = 0
     request = parse_delegate(reply)
+    cap_alert = f"delegate hop cap ({MAX_DELEGATE_HOPS})"
     if request is not None:
-        next_hop = max_logged_delegate_hop(room.id) + 1
+        next_hop = next_delegate_chain_hop(room.id)
         refused = next_hop > MAX_DELEGATE_HOPS
         log_delegate_handoff(
             room.id,
@@ -268,8 +276,9 @@ def handle_message(
             refused=refused,
             reason="hop cap" if refused else "",
         )
+        record_delegate_chain_hop(room.id, next_hop)
         if refused:
-            logs.append(f"delegate hop cap ({MAX_DELEGATE_HOPS})")
+            logs.append(cap_alert)
         else:
             follow_reply, follow_outcome = _run_chip_shot(
                 room.id,
@@ -295,8 +304,10 @@ def handle_message(
             logs.append(f"delegated {persona} -> {request.persona} hop={next_hop}")
 
     logs.append(f"posted {persona} to {incoming.channel}")
+    hop_cap_alert = cap_alert if request is not None and refused else ""
     return DispatchResult(
         ok=True,
+        alert=hop_cap_alert,
         chip_calls=chip_calls,
         webhook_calls=webhook_calls,
         logs=logs,

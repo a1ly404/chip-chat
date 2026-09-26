@@ -17,7 +17,14 @@ from chip_relay.delegate import (
 )
 
 _SPECIALIST_PERSONAS = ("buffrdev", "homelabdev", "opsdev", "chipchatdev")
-from chip_relay.dispatch import CHIP_TIMEOUT_S, ChipResult, Incoming, WebhookResult, handle_message
+from chip_relay.dispatch import (
+    CHIP_TIMEOUT_S,
+    ChipResult,
+    Incoming,
+    WebhookResult,
+    handle_inbound_delegate,
+    handle_message,
+)
 
 
 def _dev_config() -> RelayConfig:
@@ -168,36 +175,118 @@ def test_no_delegate_means_single_chip_call(tmp_path: Path, monkeypatch: pytest.
     assert not path.is_file() or "relay_handoff" not in path.read_text(encoding="utf-8")
 
 
-def test_hop_cap_refuses_fourth_delegate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lifetime_transcript_peak_does_not_block_new_human_delegate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old JSONL hop peaks must not cap delegates on a fresh human/inject turn."""
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     path = store.thread_path("dev")
     path.parent.mkdir(parents=True, exist_ok=True)
-    for hop in (1, 2, 3):
-        store.log_message(
-            "dev",
-            "relay",
-            f"delegate:dev task{hop}",
-            extra={"relay_handoff": {"from": "pm", "to": "dev", "task": f"t{hop}", "hop": hop}},
-        )
+    store.log_message(
+        "dev",
+        "relay",
+        "delegate:chipchatdev old chain",
+        extra={
+            "relay_handoff": {
+                "from": "pm",
+                "to": "chipchatdev",
+                "task": "old",
+                "hop": 11,
+            }
+        },
+    )
     config = _dev_config()
-    calls: list[int] = []
+    calls: list[list[str]] = []
 
     def chip(args: list[str], timeout: int) -> ChipResult:
-        del args, timeout
-        calls.append(1)
-        return ChipResult(0, '{"reply": "delegate:dev one more"}')
+        del timeout
+        calls.append(args)
+        if len(calls) == 1:
+            body = '{"reply": "routing\\ndelegate:chipchatdev add relay test"}'
+        else:
+            body = '{"reply": "chip lane ok"}'
+        return ChipResult(0, body)
 
     result = handle_message(
-        Incoming("chip-dev", "again", "member"),
+        Incoming("chip-dev", "please delegate", "member"),
         config,
         chip=chip,
         webhook=lambda *a: WebhookResult(204),
         environ=_env(),
     )
     assert result.ok
-    assert calls == [1]
-    assert result.delegate_hops == 0
-    assert any("hop cap" in line for line in result.logs)
+    assert result.chip_calls == 2
+    assert result.delegate_hops == 1
+    assert calls[1][calls[1].index("--as") + 1] == "chipchatdev"
+    last = json.loads(path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert last["relay_handoff"]["hop"] == 1
+    assert not last["relay_handoff"].get("refused")
+
+
+def test_hop_cap_refuses_fourth_delegate_in_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    room = RoomBinding(
+        id="dev",
+        as_agent="pm",
+        webhook_env="CHIP_WEBHOOK_DEV",
+        discord_channel="chip-dev",
+        speakers_by_id={"1": "pm"},
+    )
+    config = RelayConfig(channel="chip-relay", turn_limit=1, auto=False, rooms=(room,))
+    path = store.thread_path("dev")
+    chip_calls: list[int] = []
+    personas = iter(["tester", "dev", "tester", "dev"])
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del timeout
+        chip_calls.append(1)
+        if len(chip_calls) == 1:
+            body = '{"reply": "chain start\\ndelegate:tester hop 1"}'
+        else:
+            body = '{"reply": "done"}'
+        return ChipResult(0, body)
+
+    def webhook(*_a) -> WebhookResult:
+        return WebhookResult(204)
+
+    result = handle_message(
+        Incoming("chip-dev", "kickoff", "ally", author_id="1"),
+        config,
+        chip=chip,
+        webhook=webhook,
+        environ=_env(),
+    )
+    assert result.ok
+    assert chip_calls == [1, 1]
+    assert result.delegate_hops == 1
+
+    for expected_hop in (2, 3):
+        persona = next(personas)
+        got = handle_inbound_delegate(
+            room,
+            from_persona="pm",
+            content=f"delegate:{persona} hop {expected_hop}",
+            chip=chip,
+            webhook=webhook,
+            environ=_env(),
+        )
+        assert got.ok
+        assert got.delegate_hops == 1
+        assert len(chip_calls) == expected_hop + 1
+
+    refused_persona = next(personas)
+    capped = handle_inbound_delegate(
+        room,
+        from_persona="pm",
+        content=f"delegate:{refused_persona} one too many",
+        chip=chip,
+        webhook=webhook,
+        environ=_env(),
+    )
+    assert capped.ok
+    assert capped.delegate_hops == 0
+    assert capped.alert == f"delegate hop cap ({MAX_DELEGATE_HOPS})"
+    assert len(chip_calls) == MAX_DELEGATE_HOPS + 1
     last = json.loads(path.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert last["relay_handoff"]["refused"] is True
     assert last["relay_handoff"]["hop"] == MAX_DELEGATE_HOPS + 1

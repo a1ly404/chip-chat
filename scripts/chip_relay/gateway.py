@@ -39,8 +39,10 @@ RELAY_ERROR_PREFIX = "[chip-relay] ERROR: "
 
 
 def dispatch_error_visible_in_channel(alert: str) -> bool:
-    """In-channel ERROR for empty chip replies and webhook failures only."""
+    """In-channel ERROR for empty chip replies, delegate hop cap, and webhook failures."""
     if alert == "empty chip reply":
+        return True
+    if alert.startswith("delegate hop cap"):
         return True
     return alert.startswith("webhook ")
 
@@ -221,6 +223,15 @@ def run_gateway() -> int:
                 )
                 route = decision.kind.value
                 print(f"processed channel={room.id} persona={persona} route={route}", flush=True)
+            if result.alert and dispatch_error_visible_in_channel(result.alert):
+                try:
+                    await message.channel.send(format_channel_dispatch_error(result.alert)[:2000])
+                except Exception as exc:
+                    print(
+                        f"ERROR: failed to post delegate hop cap notice: {exc.__class__.__name__}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
         else:
             stats["fail"] += 1
             stats["last_error"] = result.alert

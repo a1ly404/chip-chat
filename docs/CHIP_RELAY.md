@@ -49,7 +49,7 @@ Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the sha
 delegate:<persona> <task>
 ```
 
-Example: `delegate:chipchatdev fix the flake in chip-selftest` (or `delegate:buffrdev …` / `homelabdev` / `opsdev` for those charters). The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply under the source persona's webhook username, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch. At most **3** logged handoff hops per room transcript; a fourth `delegate:` is recorded as refused and does not call chip.
+Example: `delegate:chipchatdev fix the flake in chip-selftest` (or `delegate:buffrdev …` / `homelabdev` / `opsdev` for those charters). The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply under the source persona's webhook username, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch; the next hop is handled when that persona's webhook posts `delegate:…`. At most **3** nested delegate hops **per handoff chain** (reset on each human or inject-bot turn); a fourth `delegate:` in the same chain is recorded as refused, surfaces `[chip-relay] ERROR: delegate hop cap (3)` in-channel, and does not call chip.
 
 ### Wake a persona (@mention / `persona:`)
 
