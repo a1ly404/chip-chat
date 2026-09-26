@@ -112,6 +112,26 @@ def test_infisical_login_stops_on_html(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("expected stop")
 
 
+def test_inject_main_fetches_runtime_secrets_before_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+
+    def fake_fetch() -> dict[str, str]:
+        order.append("fetch")
+        return {"DISCORD_CHIP_RELAY_TOKEN": "from-infisical"}
+
+    def fake_run_inject(**_kwargs: object) -> int:
+        order.append("inject")
+        return 0
+
+    monkeypatch.setattr("chip_relay.infisical_rest.fetch_runtime_secrets", fake_fetch)
+    monkeypatch.setattr("chip_relay.inject.run_inject", fake_run_inject)
+    from chip_relay.startup import main
+
+    code = main(["inject", "-m", "hi", "--as-ally", "--mock"])
+    assert code == 0
+    assert order == ["fetch", "inject"]
+
+
 def test_post_webhook_sets_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     from chip_relay.gateway import post_webhook
 

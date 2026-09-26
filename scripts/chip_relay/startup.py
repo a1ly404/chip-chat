@@ -67,6 +67,36 @@ def check_startup(
     return errors
 
 
+def apply_runtime_secrets() -> int | None:
+    """Load Infisical runtime secrets into os.environ. Returns exit code on failure."""
+    from chip_relay.infisical_rest import InfisicalAccessError, fetch_runtime_secrets
+
+    try:
+        fetched = fetch_runtime_secrets()
+    except InfisicalAccessError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    infisical_key = fetched.pop("OPENROUTER_CC_API_KEY", "")
+    os.environ.update(fetched)
+    if infisical_key:
+        try:
+            openrouter.key_health(infisical_key)
+        except openrouter.ChipConfigError:
+            print(
+                "ERROR: OPENROUTER_CC_API_KEY from Infisical failed key health; keeping boot key",
+                file=sys.stderr,
+            )
+            from chip.config import DOTENV_FILE
+
+            for line in DOTENV_FILE.read_text(encoding="utf-8").splitlines():
+                if line.startswith("OPENROUTER_CC_API_KEY="):
+                    os.environ["OPENROUTER_CC_API_KEY"] = line.split("=", 1)[1].strip().strip("'").strip('"')
+                    break
+        else:
+            os.environ["OPENROUTER_CC_API_KEY"] = infisical_key
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chip-relay", description="Chip relay startup checks")
     parser.add_argument("--listen", action="store_true", help="Start the live Discord gateway")
@@ -96,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inject":
         from chip_relay.inject import run_inject
 
+        secret_rc = apply_runtime_secrets()
+        if secret_rc is not None:
+            return secret_rc
         return run_inject(
             room_id=args.room,
             message=args.message,
@@ -104,28 +137,9 @@ def main(argv: list[str] | None = None) -> int:
             mock_chip=args.mock,
         )
     if args.listen:
-        from chip_relay.infisical_rest import InfisicalAccessError, fetch_runtime_secrets
-
-        try:
-            fetched = fetch_runtime_secrets()
-        except InfisicalAccessError as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 2
-        infisical_key = fetched.pop("OPENROUTER_CC_API_KEY", "")
-        os.environ.update(fetched)
-        if infisical_key:
-            try:
-                openrouter.key_health(infisical_key)
-            except openrouter.ChipConfigError:
-                print("ERROR: OPENROUTER_CC_API_KEY from Infisical failed key health; keeping boot key", file=sys.stderr)
-                from chip.config import DOTENV_FILE
-
-                for line in DOTENV_FILE.read_text(encoding="utf-8").splitlines():
-                    if line.startswith("OPENROUTER_CC_API_KEY="):
-                        os.environ["OPENROUTER_CC_API_KEY"] = line.split("=", 1)[1].strip().strip("'").strip('"')
-                        break
-            else:
-                os.environ["OPENROUTER_CC_API_KEY"] = infisical_key
+        secret_rc = apply_runtime_secrets()
+        if secret_rc is not None:
+            return secret_rc
     config = load_config()
     try:
         key = openrouter.require_api_key()
