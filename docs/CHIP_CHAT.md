@@ -1,5 +1,7 @@
 # Chip Chat (CLI)
 
+**Agents / bots:** operator entrypoint [AGENTS.md](../AGENTS.md) at repo root.
+
 CLI-first multi-agent chat against **OpenRouter only**, using a dedicated API key (`OPENROUTER_CC_API_KEY`). Source of truth for Chip Chat is **this repository** — not razzorstack, not docker homelab `.env`.
 
 Runs on **WSL2 Ubuntu** or native **Ubuntu** with Python 3.11+ and bash. No razzorstack checkout, no Hyper-V flip, no Open WebUI dependency.

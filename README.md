@@ -4,6 +4,8 @@ Cheap multi-agent chat CLI for **WSL2 Ubuntu** and native **Ubuntu**. Talks to *
 
 **Source of truth:** this repo (`a1ly404/chip-chat`).
 
+**Automated agents (OpenCode, bots, CI):** start with [AGENTS.md](AGENTS.md), then [docs/CHIP_CHAT.md](docs/CHIP_CHAT.md).
+
 ## Quick start
 
 ```bash
