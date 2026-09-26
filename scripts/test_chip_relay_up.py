@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,14 @@ from chip_relay_deploy import (
     health_exec_python,
     wait_for_container_health,
 )
+
+
+def test_chip_relay_up_sh_does_not_read_unset_pull_directly() -> None:
+    """Pull gate must use PULL (defaulted), not bare CHIP_RELAY_PULL under nounset."""
+    path = Path(__file__).resolve().parent / "chip_relay_up.sh"
+    text = path.read_text(encoding="utf-8")
+    without_default_assign = text.replace("${CHIP_RELAY_PULL:-0}", "")
+    assert "${CHIP_RELAY_PULL}" not in without_default_assign
 
 
 def test_container_is_stuck() -> None:

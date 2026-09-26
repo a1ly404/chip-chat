@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Reliable chip-relay bring-up on Hyper-V Docker (clears Created/Exited, waits for /health).
 # Run from repo root: ./scripts/chip_relay_up.sh
+#
+# Optional env (unset is safe with set -u; defaults applied below):
+#   CHIP_RELAY_SERVICE      compose service name (default: chip-relay)
+#   CHIP_RELAY_UP_TIMEOUT   health wait seconds (default: 300)
+#   CHIP_RELAY_PULL         1 to pull image before up (default: 0)
+#   CHIP_RELAY_BUILD        1 to build before up (default: 1)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +18,7 @@ TIMEOUT="${CHIP_RELAY_UP_TIMEOUT:-300}"
 PULL="${CHIP_RELAY_PULL:-0}"
 BUILD="${CHIP_RELAY_BUILD:-1}"
 
-if [[ "${CHIP_RELAY_PULL}" == "1" ]]; then
+if [[ "${PULL}" == "1" ]]; then
   "${COMPOSE[@]}" pull "$SERVICE" 2>/dev/null || docker pull chip-relay:latest 2>/dev/null || true
 fi
 
