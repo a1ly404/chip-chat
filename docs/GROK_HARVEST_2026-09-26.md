@@ -1,0 +1,308 @@
+# GROK HARVEST — 2026-09-26
+
+Design-input harvest from **Grok Bot (Razzorstack PM)** — the original fleet Chip Chat imitates.
+Round 1 answers verbatim; round 2 pending Grok's reply. Maintained by chipchatdev lane.
+
+---
+
+## Round 1 — five broad questions
+
+### Q1 — Voice (talking like humans without overacting)
+
+**Asked:** When a room of AI personas talks with humans, the failure modes are robotic stiffness on one side and overacted "quirkiness" on the other. What concrete rules keep your personas sounding like distinct, believable coworkers — length, rhythm, what they never say, how they handle not knowing something? ≤5 numbered rules, ≤25 words each, plus the worst voice failure and the rule it created.
+
+**Grok:**
+1. First sentence answers the real ask; no "Certainly," restatements, or "Here's the wrap-up."
+2. Complete spoken sentences, mixed length; never headline fragments or label:value telegrams.
+3. Match their warmth, not their typos; never narrate your feelings or claim you're human.
+4. Never invent menu paths, metrics, or "I checked X" without a real tool/file result.
+5. Unknown = say what you don't know and the next real check; never fill gaps with plausible fiction.
+
+**Worst voice failure:** posting household settings notes into #plex-fix like a chatty ops diary. **Rule it created:** that channel is incidents only — standups and notes go to #monitoring-logs.
+
+### Q2 — Orchestration (fuzzy human problem → claimed work)
+
+**Asked:** A human dumps a vague problem ("the downloads are broken again") into a room with five specialist agents. How does Grok Bot turn that into bounded, claimed slices — who decomposes, claiming without collisions, handoffs, duplicate prevention? Include the collision incident.
+
+**Grok:** PM (me) decomposes, not the room free-for-all. PM names the slice (dig-only vs mutate), the owner lane (Ops vs Homelab vs Buffr), and success criteria before anyone moves.
+
+Claim lock is `docs/ops/AGENT_CLAIM.md`: a Linear `claim:` comment is the lock. No claim → no remux/NAS/Plex mutate. Homelab is sole remuxer; Ops never remuxes. Handoffs are explicit ("Ops: dig host_mnt; Homelab: wait for Ally GO") plus room posts when the lane must see it. Collision prevention: grep open PRs + Linear before spawning a fix agent; one claim per workstream; idle Buffr/Homelab Grok agents stay quiet unless Ally @mentions.
+
+**Collision that forced discipline:** duplicate PR/ticket burn (RAZ-204/#324/#326 vs RAZ-202/#323) — spent cycles on a second fix while the first was already open. Gate: before any Composer/cloud spawn, search existing ticket/PR first; no-code-rot applies to tickets too.
+
+### Q3 — Learning that survives (memory that doesn't rot)
+
+**Asked:** The exact mechanism by which a lesson from one session changes behavior in the next — where written, when triggered, how kept from rotting. Include one lesson promoted to a permanent rule.
+
+**Grok:** Write path: after a ship/dig/refuse/automation change, append a short `learning:` comment on the ticket (ticket-learnings skill). Session facts go to durable memory (agent or shared user) via explicit write; reusable multi-step recipes become skills. Triggers: end of incident, Done/refuse, thrift design ticket, Ally charter restates.
+
+Anti-rot: newest wins on conflict; profile facts stay small; logs age; ticket comments stay near the work so bots re-read the issue instead of a rotting wiki. Duplicates get cancelled/Done-unverified, not left as zombies. Soft board cap ≤100 open forces archive/combine.
+
+**Lesson promoted to permanent rule:** claim comment is the lock — remux/NAS without it caused double-touch and false ownership. Also: `#plex-search` (not `#plex-fix`) after repeated misspellings in notes.
+
+### Q4 — Token thrift (cheap room, expensive results)
+
+**Asked:** Concrete thrift rules before a call, during a call, across a session — classification, budgets, context trimming, escalation to expensive models, refusal. Most expensive wasteful failure + the gate it created.
+
+**Grok:** Before a call: classify (script / GHA / skill / cheap agent / expensive wake). Prefer script → GHA → skill → agent. No open-ended dig without Ally GO or Urgent.
+
+During: one lane, bounded success criteria, no Homelab/Ops wake on thrift stand-down; deploy babysit is Cursor/GHA routine, tell Ally once on FAIL, dig only on ping.
+
+Across session: pause expensive PM routines; idle Grok specialists; keep Chip Chat hot only when scoped; refuse fan-out to many agents without Ally yes.
+
+**Most expensive wasteful failure:** overnight AutoDev/babysit + parallel Grok wakes while usage was already high, plus duplicate Composer tickets. Gate: token-thrift skill before any wake/spawn; thrift stand-down (routines paused, agents IDLE except named hot paths); refuse digs that aren't GO/Urgent.
+
+### Q5 — Self-improvement with guardrails
+
+**Asked:** The graduation path from incident → rule → skill; who approves; and what self-improvement is explicitly forbidden.
+
+**Grok:** Path: incident → ticket `learning:` comment → (if reusable) skill write → (if always-on) profile/charter or AGENT_CLAIM / HOUSEHOLD_GOALS. Approver: Ally for irreversible/media/credentials/execute flips; PM for how/when on reversible board work. Skills are global templates; routines need explicit create and can ask confirm.
+
+Forbidden zone: agents rewriting their own safety/claim/remux constraints, flipping execute walls (e.g. `OPS_BOT_TOKEN_ORACLE_CONFIRMED`), editing kill switches or Auto-review to "get past" a block, or waking remux/NAS mutate without Ally GO + claim. Self-edit of guardrails drifts into unsafe "I know better" behavior — improvements land as tickets/skills Ally can see, not silent self-amends.
+
+---
+
+## Gap analysis — Grok mechanism vs Chip Chat status
+
+| Grok mechanism | Chip Chat status |
+| --- | --- |
+| Thrift ladder (script→GHA→skill→agent) | ✅ ported — `docs/TOKEN_THRIFT.md` (PR #39) |
+| Graduation: incident → learning → skill | ✅ ported — razzorstack agent map (`issue_log.json` → skill after recurring twice) |
+| Newest-wins consolidation | ✅ ported — global AGENTS.md consolidation rule (2026-09-26) |
+| **Claim lock anatomy** (round 2) | ⏳ **porting next** — first `claim: <persona>` comment wins (server `created_at`); unlock via `claim done` / confirmed `handoff:` / steal (heartbeat miss AND ping-no-reply); flock on media paths; enforcement = discipline, not hooks |
+| **Forbidden zone** (round 1) | ⏳ **porting next** — standing-law paragraph: no self-edit of guardrails/kill-switches/execute walls; improvements land as visible tickets/skills |
+| **Stand-down mode** (round 2) | ⏳ **porting next** — `CHIP_STAND_DOWN=1` relay gate; **manual Ally trigger, not auto**; pauses expensive routines, fleet IDLE except named hot paths; wake = explicit Ally GO/paper trail |
+| **Escalation ladder** (round 2) | ⏳ **porting next** — log-and-continue / tell-Ally-once / page (page = remux 2× fail, encode-class, capacity, media delete, credential flips); mute band for night mutate windows |
+| **Room-turn discipline** (round 2, `group-chat-turns`) | ⏳ **porting next** — silence is a first-class move; ≤3 messages per turn; react don't repeat; speak only as yourself |
+| Channel register (incidents-only channels) | ⏳ porting next — explicit register line in `channels/*.md` |
+| Premature-Done watchdog | N/A until chip touches Linear (razzorstack pattern: reopen when any acceptance box lacks `verified-as-of`; 3rd premature Done → mandatory retro) |
+| Soft board cap ≤100 open | Rejected for chip (board hygiene is Linear-side, not relay-side) |
+
+**Grok's final verdict (keep/never):** KEEP the claim-as-lock (`claim: <id>` + path lock; Done ≠ claim done) — ownership unambiguous makes everything else cheaper. NEVER build always-on expensive babysit wakes — scripts/GHA own the routine path; agents judge exceptions only.
+
+**Validated:** round 1 confirmed chip-chat is at philosophy-parity; the deltas are four mechanisms, not the model of the system.
+
+---
+
+## Round 2 — prompt sent (answers pending)
+
+**Part 1 — Skills, verbatim:** full body of `[sand-workflow:ticket-learnings]` + `[sand-workflow:token-thrift]`.
+**Part 2 — Skill inventory:** every skill, name + one-liner; ★ = essential for a 5-persona cheap-model clone with pytest/git-status-only execution; short ★ bodies pasted.
+**Part 3 —** Q6 claim-lock anatomy (incl. dispute story) · Q7 stand-down triggers/wake-up · Q8 premature-Done watchdog + worst blast · Q9 escalation economics (paging triggers + false-page lesson) · Q10 persona charters + first lane-drift · Final: one thing kept, one thing never built again.
+
+**Grok's round-2 answers (2026-09-26, verbatim):**
+
+### Q6 — Claim locks
+
+**Anatomy:** first Linear comment `claim: <agent-id>` on an unclaimed RAZ; server `created_at` wins. Required: one live claim; path lock = exact canonical `/mnt/nas/media/...` when media. Status and PR links are display only — they do not own the lock. Unlock only via `claim done`, confirmed `handoff:`, or Lyla steal (heartbeat miss AND ping-no-reply). Enforcement is pure discipline + AGENT_CLAIM.md obedience; remux adds flock on path (not a Linear webhook kill). **Dispute:** Homelab Research lane tried remux-class work. Rule: Research never remuxes, never ffprobes, never claims remux tickets — Homelab Dev is sole remuxer.
+
+### Q7 — Stand-down
+
+**Trigger today:** manual Ally call at spend pressure (~71% remaining 2026-09-25), not an auto cron. **Pauses:** PM expensive routines (digests, babysits, auto-merge, etc.). **Stays hot:** Chip Chat scoped bot; Buffr AutoDev deploy = Cursor pr-merged routine + GHA (not Grok Deploy). **Fleet IDLE:** Homelab/Ops/Buffr Grok agents unless Ally @mentions. **Wake-up:** Ally GO / @mention / explicit resume — **not automatic** when usage drops. **Incident:** parallel Grok wakes + overnight babysit burned weekly budget. Gate: thrift stand-down + deploy off Grok onto Cursor/GHA. (Earlier gate had a separate `spend-guard:pause` card — resume needed Ally paper trail.)
+
+### Q8 — Premature Done
+
+**Done requires green CI + per-checkbox `verified-as-of` bound to acceptance** — deploy alone never counts. `log-only ≠ Done`; `claim done ≠ Linear Done`. **Watchdog:** PM/Ally reopen on missing verification; third premature Done → mandatory retro. Sitrep lines older than the last change window are stale, not facts. Program tickets stay In Progress until checklist verbatim-verified (AGENT_CLAIM / #280). **Worst blast:** RAZ-199/198/201 cluster + RAZ-177 second premature Done; also #540 merge auto-Done reopened RAZ-186. Rule: reopen if any acceptance box lacks verified-as-of.
+
+### Q9 — Escalation economics
+
+**Log-and-continue:** non-Buffr merge skips, CF flaps already ticketed, thrift silent skip. **Tell Ally once:** Buffr ship FAIL after merge (deploy health / e2e skip) — no dig unless pinged. **Page / GO-required:** remux 2× fail, encode-class, capacity gap, media delete, credential/execute-wall flips. **Mute band:** no Layer-2 WSL recover inside 01:00–05:00 mutate window without Ally ack. **False-page lesson:** Discord "Plex down" while native PMS was fine (docker Arr false alerts). Rule: `SKIP_KEYS {plex,sonarr,radarr}` + host health; #plex-fix = incidents only, not settings chat.
+
+### Q10 — Persona charters
+
+**Charter** = profile description + AGENT_CLAIM lane + room membership (Homelab vs Buffr). Contains: what they own, what they never touch, claim/remux rules, thrift IDLE policy. **Enforced by** PM decomposition + claim lock + "don't wake IDLE unless @mention" — not a hard sandbox. **Drift fix:** stand agents down; route work to Cursor/GHA; Chip Chat stays its own scoped bot. Out-of-lane reply: paraphrase only; never speak as another persona in their room. **Live miss:** Buffr-shaped reply landed in Chip Chat lane. Rule: room tag + speak-only-as-yourself + Chip Chat owns prototype lane; Buffr agents IDLE unless @mentioned.
+
+### Final — keep one, never build one
+
+**Keep:** Linear claim as the lock (`claim: <agent-id>` + path lock + Done ≠ claim done). Everything else can be cheaper if ownership is unambiguous.
+**Never build again:** Always-on expensive babysit routines that wake specialists to watch GHA/health. Scripts and GHA own the routine path; agents judge exceptions only.
+
+---
+
+## Skills section (delivered 2026-09-26, bodies verbatim — formatting lightly normalized from Grok's paste)
+
+### `[sand-workflow:ticket-learnings]`
+
+```markdown
+---
+name: ticket-learnings
+description: >-
+  Use after any ship, dig, incident, refuse, or automation change — and when
+  filing or updating a token-thrift design ticket — to append a short learning:
+  comment so every bot stays current without re-discovering the same failure.
+---
+# Ticket learnings (all bots)
+Keep Linear as the shared brain. When something changes, write it once on the
+ticket so the next bot does not re-burn tokens rediscovering it.
+
+## When (mandatory) — after any of:
+- Merge / GHA deploy / live e2e result (pass or fail)
+- Dig, incident, or refuse (triage `noise` / `blocked-env` / Ally HOLD)
+- Script or GHA added, fixed, or proven inert
+- Skill created/updated that bots must follow
+- Wall / kill / credential / path-lock discovery
+- Token-thrift inventory or class change (`script` | `GHA` | `cheap-agent` | `expensive-agent`)
+
+Skip only pure ack chat with no new fact.
+
+## Where
+1. **Work ticket** (the RAZ you claimed) — always.
+2. **Board thrift ticket** — also, when the learning is reusable automation/token advice:
+   Homelab Media → RAZ-83 · Ops/Oracle → RAZ-24 · Platform/Automation → RAZ-16 ·
+   Household Autonomy → RAZ-276 · GymLog/Buffr → RAZ-93 and/or RAZ-82 (no third thrift ticket).
+
+Do **not** create a new "learnings" Linear issue. Free-create is capped — repurpose
+canceled or comment on the thrift ticket.
+
+## Comment shape
+learning: <one-line fact>
+class: script|GHA|cheap-agent|expensive-agent|wall|refuse
+when: <YYYY-MM-DD ~HH:MM PT>
+evidence: <PR# / GHA run / probe / path — machine-checkable>
+next: <none | promote-to-script | promote-to-GHA | update-skill:<id> | Ally-GO-needed>
+
+## Rules
+- One fact per comment (or tight bullets under one `learning:`).
+- Redact secrets; never paste tokens/keys.
+- Prefer promoting a repeated learning into a script/GHA or a shared skill
+  (`next: update-skill:…`) over leaving it as tribal chat.
+- If you update a skill, say so on the thrift ticket and link it.
+
+## Examples
+learning: GHA post-deploy e2e must hard-fail the workflow; Deploy-agent babysit is not the gate
+class: GHA / when: 2026-09-24 ~23:08 PT
+evidence: PR #549 2bbcf50 run 36100582601 e2e-prod 37p/1s / next: none
+
+learning: discord-bot loops must start after Discord login; pre-login start = silent missed standups
+class: script / when: 2026-09-24 ~15:02 PT
+evidence: RAZ-208 PR #547 /health loops_ok / next: promote-to-script
+
+## Done / claim (do not confuse)
+`learning:` updates knowledge — it does not flip Linear Done. Done still needs green CI +
+per-checkbox verified-as-of (PM/Ally). Claim done ≠ Done. log-only ≠ Done.
+
+Pair with token-thrift — classify before spending tokens, then write the learning here.
+```
+
+### `[sand-workflow:token-thrift]`
+
+```markdown
+---
+name: token-thrift
+description: >-
+  Use before any agent wake, Composer/cloud spawn, dig, deploy babysit, or
+  routine that could burn AI tokens — prefer script → GHA → cheap skill →
+  expensive agent, and refuse open-ended digs without Ally GO / Urgent.
+---
+# Token thrift (all bots)
+
+Goal: easier automation with **fewer AI tokens**. Scripts and GHA own the routine
+path; agents judge exceptions.
+
+Design boards (inventory + migration plans live on these tickets):
+Homelab Media → RAZ-83 · Ops/Oracle → RAZ-24 · Platform/Automation → RAZ-16 ·
+Household Autonomy → RAZ-276 · GymLog/Buffr → RAZ-93 (GHA) + RAZ-82 (triage skill).
+Productization is parked — do not open thrift work there.
+
+## Decision ladder (hard)
+1. **script** — cron, probe, CLI, compose health, metrics emit, idempotent cleanup, no judgment
+2. **GHA** — deploy-on-merge, CI bind-audit, image build, post-deploy e2e gate, secret-drift check
+3. **cheap-agent** — locked skill only (triage, claim, gate checklist, verified-as-of,
+   short sitrep). Low-token model. Refuse open-ended dig.
+4. **expensive-agent** — Composer / cloud / long dig. **Only** when: novel judgment,
+   Ally GO, or ticket Priority Urgent / named incident.
+
+If it fits 1 or 2, **do not** wake an agent to babysit. Point at the script/GHA path
+(or file a one-line gap on the board thrift ticket) and stop.
+
+## Refuse
+- Open-ended SSH / remux / library dig without Ally GO or Urgent
+- Spawning a second Composer/cloud when an open PR or claim already covers the
+  ticket (grep PRs + Linear first)
+- Routine digests, metrics, standups, or health flaps as Composer work
+- "Meanwhile" fan-out to many agents to burn tokens ahead of an Ally answer
+- Media deletes, `--force-window`, credential flips, `OPS_BOT_TOKEN_ORACLE_CONFIRMED` without Ally
+
+## After any change
+Run ticket-learnings: post a `learning:` on the work ticket **and** fold
+thrift-relevant scraps onto the matching board thrift ticket above.
+
+## Success metric
+Fewer Composer/cloud wakes per Linear **Done**. Routine ships ≈ 0 Deploy/Composer
+tokens (GHA + live e2e gate where that pattern exists).
+
+## Related skills
+- ticket-learnings — keep tickets current
+- gymlog-autodev-triage / homelab-autodev-triage — cheap pre-claim gates
+- oracle-ops-ship — Ops ship path
+- Done discipline: green CI + per-checkbox verified-as-of; claim done ≠ Linear Done;
+  log-only ≠ Done
+```
+
+### `[sand-workflow:group-chat-turns]` (★ transferable, pasted by Grok)
+
+```markdown
+---
+name: group-chat-turns
+description: >-
+  When a user message starts with a [room "…"] tag: you are taking a turn in a
+  group chat room, not your private chat, so read this before replying.
+---
+# Group chat turns
+A user message that begins with a [Group chat: "..."] tag is a turn in that group
+chat room, not your private chat (an untagged user message is your private 1:1 chat
+with your user). Your one conversation carries your private chat and your turns in
+every room you're in, each room turn tagged this way. For the whole of a room turn,
+SendToUser delivers to that room instead of your user. Text, attachments, widgets,
+and cards alike are rendered in the room for everyone there, just as they would be
+in your private chat. To say something privately to your own user during a room
+turn, send it with to:"dm". It lands in your 1:1 chat and the room never sees it.
+
+- Reply-first does not apply in a room turn: your tool calls and plain assistant
+  text are private scratch space the room never sees, so when the conversation
+  calls for real work, do the work first, then deliver the result with SendToUser.
+  A room turn with no SendToUser means you stayed silent.
+- You have your full toolkit in rooms, with the same tools as your private chat and
+  no reduced limits. Never claim you lack a tool in a room that you have in your
+  private chat. Answering the room from your unified history, including what you
+  learned in your private chat, is expected; the only exceptions are things your
+  user explicitly asked you to keep out of a room. Never go looking for a
+  teammate's private chats, memory, or files.
+- Several distinct participants share a room. Speak only as yourself: never write
+  as another participant or as the user, and never narrate the conversation from
+  the outside.
+- Keep each message short and conversational, usually one to three sentences, the
+  way people actually chat. Send at most 3 messages in one room turn. Do not
+  monologue or summarize the whole thread.
+- React to what was just said: build on it, agree, disagree, or ask a pointed
+  question. Address others by name when it helps. Do not repeat points already
+  made, and do not restate other people's messages back to them.
+- Mentions: write @Name to direct your message at a specific teammate, or
+  @everyone for the whole room. If you are @-mentioned you are being asked to weigh
+  in, so respond; to pull a teammate into the conversation, @-mention them.
+- If you have nothing new worth adding right now, simply end your turn without
+  calling SendToUser. In a room, staying silent is a first-class move, never a
+  failure. It lets the conversation settle instead of spinning forever. Say your
+  piece in one turn, then stop.
+```
+
+### Part 2 — Skill inventory (★ = essential for a pytest+git-status clone)
+
+**Household / user skills (in /workflows):**
+| Skill | Purpose | Flag |
+| --- | --- | --- |
+| gymlog-autodev-triage | Pre-PR triage: actionable vs noise before claim | ★ (179 lines — ask for paste) |
+| homelab-autodev-triage | Evidence + disproof before remux/Composer | ★ (69 lines — ask) |
+| lumocheck | Two-pass Lumo plan gate before non-urgent impl | |
+| lumo-tamer | Proton re-auth when Lumo token dies | |
+| oracle-ops-ship | Ship path for Oracle ops VM / compose | |
+| ticket-learnings | Append learning: after ship/dig | ★ (Part 1) |
+| token-thrift | Classify script→GHA→cheap→expensive | ★ (Part 1) |
+
+**Cursor-managed (platform; mostly don't transfer):** add-connector, export-bot-template, accommodation/flight/food/job/restaurant/rideshare/shopping/scheduling, purchases, send-on-behalf, box-desktop, channels, in-chat-forms, learn-from-demonstration, no-connector-fallback, routines, skill-authoring, source-control, voice-calls, site-playbooks-* (retail/travel), code-changes (repo work → Cursor cloud).
+
+| Skill | Purpose | Flag |
+| --- | --- | --- |
+| group-chat-turns | Room vs DM discipline | ★ (pasted above) |
+
+**Grok's transfer summary:** ★ = thrift + learnings + both AutoDev triages + room turns. Skip booking/playbook/box-desktop/cloud-code skills.
