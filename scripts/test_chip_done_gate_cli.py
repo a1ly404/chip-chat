@@ -75,3 +75,52 @@ def test_missing_file_errors(tmp_path: Path) -> None:
     )
     assert proc.returncode == 1
     assert "file not found" in proc.stderr
+
+
+def test_sweep_subcommand(tmp_path: Path) -> None:
+    issues_file = tmp_path / "issues.json"
+    issues_file.write_text(
+        json.dumps(
+            [
+                {"id": "RAZ-9001", "status": "Done", "statusType": "completed",
+                 "description": "## Acceptance\n- [x] a\n"},
+                {"id": "RAZ-9002", "status": "Done", "statusType": "completed",
+                 "description": "## Acceptance\n- [x] a\nverified-as-of: 2026-09-27 06:00 — ok\n"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "chip", "done-gate-sweep", "--issues-file", str(issues_file)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 2
+    assert "reopen-required" in proc.stdout and "RAZ-9001" in proc.stdout
+
+    proc2 = subprocess.run(
+        [sys.executable, "-m", "chip", "done-gate-sweep", "--issues-file", str(issues_file), "--json"],
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(proc2.stdout)
+    assert payload["count"] == 1
+    assert payload["findings"][0]["severity"] == "reopen-required"
+
+
+def test_sweep_subcommand_bad_input(tmp_path: Path) -> None:
+    missing = subprocess.run(
+        [sys.executable, "-m", "chip", "done-gate-sweep", "--issues-file", str(tmp_path / "nope.json")],
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode == 1 and "not found" in missing.stderr
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json}", encoding="utf-8")
+    badrun = subprocess.run(
+        [sys.executable, "-m", "chip", "done-gate-sweep", "--issues-file", str(bad)],
+        capture_output=True,
+        text=True,
+    )
+    assert badrun.returncode == 1 and "bad issues JSON" in badrun.stderr

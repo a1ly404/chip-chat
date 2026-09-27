@@ -113,3 +113,50 @@ def reopen_required(issue_markdown: str) -> tuple[bool, str]:
 
 def now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+# ---------------------------------------------------------------------------
+# Board sweep (RAZ-199 class) — severity-ranked findings from an issues export
+# ---------------------------------------------------------------------------
+
+_SEVERITY_ORDER = {"reopen-required": 0, "flipping-risk": 1, "vague-done": 2}
+
+
+def sweep_one(issue: dict[str, Any]) -> dict[str, Any] | None:
+    """One Linear issue export → finding dict, or None when clean/not-a-Done-claim."""
+    ident = str(issue.get("id") or "")
+    status = str(issue.get("status") or "")
+    statusType = str(issue.get("statusType") or "")
+    desc = str(issue.get("description") or "")
+    is_done_claim = statusType == "completed" or status.lower() in {"done", "closed", "complete"}
+
+    scan = parse_done_state(desc, declare_done=is_done_claim)
+    checked = [b for b in scan.boxes if b.checked]
+    stamps = sum(1 for b in checked if b.verified)
+
+    if is_done_claim and not scan.boxes:
+        return {
+            "id": ident, "status": status, "severity": "vague-done",
+            "checked": 0, "stamps": 0,
+            "reason": "Done with zero acceptance boxes (vague AC)",
+        }
+    if is_done_claim and checked and stamps < len(checked):
+        return {
+            "id": ident, "status": status, "severity": "reopen-required",
+            "checked": len(checked), "stamps": stamps,
+            "reason": f"{len(checked) - stamps} checked box(es) without verified-as-of receipts",
+        }
+    if not is_done_claim and checked and stamps < len(checked):
+        return {
+            "id": ident, "status": status, "severity": "flipping-risk",
+            "checked": len(checked), "stamps": stamps,
+            "reason": "boxes checked without receipts — will refuse at Done",
+        }
+    return None
+
+
+def sweep(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Whole-export scan → findings ranked reopen-required > flipping-risk > vague-done."""
+    findings = [f for f in (sweep_one(i) for i in issues) if f is not None]
+    findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f["severity"], 9), f["id"]))
+    return findings

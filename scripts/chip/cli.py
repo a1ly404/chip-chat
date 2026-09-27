@@ -768,6 +768,14 @@ def build_parser() -> argparse.ArgumentParser:
     done_gate_p.add_argument("--json", action="store_true")
     done_gate_p.set_defaults(func=cmd_done_gate)
 
+    sweep_p = sub.add_parser(
+        "done-gate-sweep",
+        help="Board sweep over a Linear issues JSON export — severity-ranked Done-discipline findings (read-only)",
+    )
+    sweep_p.add_argument("--issues-file", required=True, help="JSON array of {id,status,statusType,description}")
+    sweep_p.add_argument("--json", action="store_true")
+    sweep_p.set_defaults(func=cmd_done_gate_sweep)
+
     return parser
 
 
@@ -797,6 +805,36 @@ def cmd_done_gate(args: argparse.Namespace) -> int:
         mark = "✅" if (b.checked and b.verified) else "❌"
         print(f"  {mark} [{'x' if b.checked else ' '}] {b.text[:70]} (section={b.section[:30]!r})")
     return 0 if allow else 2
+
+
+def cmd_done_gate_sweep(args: argparse.Namespace) -> int:
+    import sys
+
+    from chip.done_gate import sweep
+
+    path = Path(args.issues_file).expanduser()
+    if not path.is_file():
+        print(f"ERROR: issues file not found: {path}", file=sys.stderr)
+        return 1
+    try:
+        issues = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: bad issues JSON: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(issues, list):
+        print("ERROR: issues file must be a JSON array", file=sys.stderr)
+        return 1
+    findings = sweep(issues)
+    if args.json:
+        print(json.dumps({"count": len(findings), "findings": findings}, ensure_ascii=False))
+        return 0 if not findings else 2
+    print(f"DONE-GATE SWEEP: {len(findings)} finding(s)")
+    for f in findings:
+        print(
+            f"  [{f['severity']}] {f['id']} status={f['status']} "
+            f"checked={f['checked']} stamps={f['stamps']} — {f['reason']}"
+        )
+    return 0 if not findings else 2
 
 
 def main(argv: list[str] | None = None) -> int:
