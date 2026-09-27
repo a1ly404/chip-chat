@@ -157,7 +157,13 @@ def derive_alerts(healths: dict[str, dict[str, object]]) -> list[dict[str, objec
         detail: str | None = None
         err = h.get("error")
         if err:
-            detail = f"transport: {str(err)[:110]}"
+            err_text = str(err)
+            # _fetch_health already records transport failures as "transport: ...";
+            # never double-prefix (soak-hardening: alert detail is fingerprinted,
+            # a duplicated prefix would fork fingerprints for the same failure)
+            if err_text.startswith("transport: "):
+                err_text = err_text[len("transport: "):]
+            detail = f"transport: {err_text[:110]}"
         else:
             body = h.get("json") if isinstance(h.get("json"), dict) else {}
             status = str(body.get("status") or "").lower()
