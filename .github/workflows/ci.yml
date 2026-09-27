@@ -16,7 +16,7 @@ jobs:
       - name: Install test deps
         run: pip install -e '.[dev]'
       - name: Mock tests
-        run: python3 -m pytest scripts/test_chip_chat.py scripts/test_chip_mock.py scripts/test_chip_mempalace.py scripts/test_chip_tool.py scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py scripts/test_chip_relay_wake.py scripts/test_chip_relay_selftest.py scripts/test_chip_relay_up.py -q
+        run: python3 -m pytest scripts/test_chip_chat.py scripts/test_chip_mock.py scripts/test_chip_mempalace.py scripts/test_chip_tool.py scripts/test_chip_relay.py scripts/test_chip_relay_health.py scripts/test_chip_relay_harness.py scripts/test_chip_relay_personas.py scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py scripts/test_chip_relay_wake.py scripts/test_chip_relay_selftest.py scripts/test_chip_relay_up.py scripts/test_chip_relay_monitor_feed.py scripts/test_chip_authorize_wiring.py -q
       - name: Launcher smoke
         run: |
           chmod +x bin/chip

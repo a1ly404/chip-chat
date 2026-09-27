@@ -86,6 +86,12 @@ def run_gateway() -> int:
 
     clear_gateway_ready()
     start_health_server()
+    from chip_relay.monitor_feed import feed_enabled, start_feed_polling
+
+    if feed_enabled():
+        thread = start_feed_polling()
+        if thread is not None:
+            print("[chip-relay] monitor feed running (dark: log-only)", flush=True)
 
     config = load_config()
     token = os.environ.get(TOKEN_ENV, "").strip()

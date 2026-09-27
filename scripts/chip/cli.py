@@ -567,6 +567,7 @@ def cmd_tool_run(args: argparse.Namespace) -> int:
             execute=bool(args.execute),
             timeout_seconds=args.timeout,
             cwd=args.cwd,
+            is_human_or_inject=True,  # CLI keyboard = the human/inject hot path (Phase C mode)
         )
     except NeedToolError as exc:
         print(exc.token(), file=sys.stderr)
