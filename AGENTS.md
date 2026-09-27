@@ -38,6 +38,29 @@ Personas for `#chip-dev`: `pm`, specialist lanes `buffrdev`, `homelabdev`, `opsd
 
 **Routing law for agents:** Chip Chat triage and GO traffic stay in this lane (`#chip-dev`, `chip-relay inject`, or `chip room`). **Never** route Chip Chat work through Grok Razzorstack **PM SendToAgent** or razzorstack docker paths.
 
+### Repo boundaries (non-negotiable)
+
+| Repo | SoT | WSL edits? | Commit location |
+|------|-----|------------|-----------------|
+| a1ly404/chip-chat | No SoT policy | Yes (`~/Tools/chip-chat` or any clone) | Same as edit location |
+| a1ly404/razzorstack | Windows only ([PR #567](https://github.com/a1ly404/razzorstack/pull/567)) | No legacy WSL clone (`/home/daffy/Tools/razzorstack` — hooks block). `/mnt/c/.../HyperV-flip/...` passes hooks; **OCgo still must not use** | Windows SoT only (`C:\Users\17783\HyperV-flip\repos\razzorstack`) |
+| Oracle / ops | Per-repo policy | Varies | Per-repo `AGENTS.md` |
+
+**Failure-flow law:** Razzorstack-adjacent findings → **park + lane-flag**; never self-execute from chip-chat or OCgo.
+
+1. **Primary:** Linear comment on the relevant ticket (`lane: razzorstack`, state what is blocked on).
+2. **Secondary:** Receipt row in [docs/PARKED_FINDINGS.md](docs/PARKED_FINDINGS.md) (not Discord/Slack — those are not durable receipts).
+
+**Lane assignments**
+
+| Lane | Repo | Operators |
+|------|------|-----------|
+| Chip Chat | chip-chat (this repo) | OCgo, chip personas |
+| Homelab / Cursor | razzorstack | Cursor agents on Windows SoT |
+| Ops | Oracle / ops repos | opsdev; per-repo policy |
+
+**OCgo:** Your deliverables land in **chip-chat** only. Do not open, edit, or commit in razzorstack from WSL or Windows.
+
 ---
 
 ## 3. Secrets
