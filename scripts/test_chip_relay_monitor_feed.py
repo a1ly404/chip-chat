@@ -135,7 +135,11 @@ def test_derive_alerts_transport_failure() -> None:
         }
     }
     alerts = monitor_feed.derive_alerts(healths)
-    assert any(a["key"] == "monitoring-api-probe" for a in alerts)
+    # soak fix: ONE alert per target — transport detail rides the main key,
+    # no duplicated "<name>-probe" line
+    assert len(alerts) == 1
+    assert alerts[0]["key"] == "monitoring-api"
+    assert "transport:" in str(alerts[0]["detail"])
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +174,11 @@ def test_tick_and_snapshot_written(feed_env: Path, monkeypatch: pytest.MonkeyPat
     assert len(receipt["verdicts"]) == 1
     assert receipt["verdicts"][0]["verdict"] == "actionable"
     assert (feed_env / "monitor_state.json").is_file()
+
+
+def _fast_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    # kill the ≥5s interval clamp in synchronous loop tests; loop logic unchanged
+    monkeypatch.setattr(threading.Event, "wait", lambda self, timeout=None: False)
 
 
 def test_run_feed_loop_one_tick_then_stop(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,3 +355,80 @@ def test_post_alerts_failed_post_not_counted(feed_env: Path, monkeypatch: pytest
     # a later success (cooldown not yet stamped) posts again
     hook2 = _RecordingWebhook(status=204)
     assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook2, now=1010.0) == 1
+
+
+def test_post_alerts_verify_twice_filter(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    receipt = _receipt_actionable(key="monitoring-api", detail="transport: TimeoutError")
+
+    # only_fps given (consecutive-tick gating): unknown fingerprint stays silent
+    assert monitor_feed.post_alerts(
+        receipt, environ=dict(os.environ), webhook=hook, now=1000.0,
+        only_fps={monitor_feed.monitor.fingerprint_for("monitoring-api", "other")},
+    ) == 0
+    assert hook.posts == []
+    # confirmation tick (same fingerprint present in previous tick) posts once
+    fp = monitor_feed.monitor.fingerprint_for("monitoring-api", "transport: TimeoutError")
+    assert monitor_feed.post_alerts(
+        receipt, environ=dict(os.environ), webhook=hook, now=1400.0, only_fps={fp},
+    ) == 1
+    assert len(hook.posts) == 1
+
+
+def test_run_feed_loop_posts_only_after_second_consecutive_tick(
+    feed_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import chip_relay.gateway as gw
+    import os as os_mod
+
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    monkeypatch.setattr(gw, "post_webhook", hook)
+
+    seq_counter = {"n": 0}
+    stop = threading.Event()
+    alert = {"key": "monitoring-api", "detail": "transport: TimeoutError", "ok": False, "verdict": "actionable"}
+
+    def fake_tick(**kwargs):
+        seq_counter["n"] += 1
+        if seq_counter["n"] >= 2:
+            stop.set()  # two alert ticks: tick1 silent (transient to the loop), tick2 confirms → post
+        return {"ts": "t", "stand_down": False, "results": {}, "verdicts": [alert]}
+
+    monkeypatch.setattr(monitor_feed, "tick", fake_tick)
+    monkeypatch.setenv("CHIP_FEED_INTERVAL_S", "60")
+    _fast_wait(monkeypatch)
+    monitor_feed.run_feed_loop(stop)
+    # tick1: alert but NO post (transient); tick2: same alert persists → confirm → post once
+    assert len(hook.posts) == 1
+    assert "monitoring-api" in hook.posts[0][1]
+
+
+def test_run_feed_loop_transient_never_posts(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chip_relay.gateway as gw
+
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    monkeypatch.setattr(gw, "post_webhook", hook)
+
+    seq_counter = {"n": 0}
+    stop = threading.Event()
+
+    def fake_tick(**kwargs):
+        seq_counter["n"] += 1
+        if seq_counter["n"] >= 2:
+            stop.set()  # single blip tick then recovered tick (no verdicts)
+        if seq_counter["n"] == 1:
+            alert = {"key": "monitoring-api", "detail": "transport: TimeoutError", "ok": False, "verdict": "actionable"}
+            return {"ts": "t", "stand_down": False, "results": {}, "verdicts": [alert]}
+        return {"ts": "t", "stand_down": False, "results": {}, "verdicts": []}
+
+    monkeypatch.setattr(monitor_feed, "tick", fake_tick)
+    monkeypatch.setenv("CHIP_FEED_INTERVAL_S", "60")
+    _fast_wait(monkeypatch)
+    monitor_feed.run_feed_loop(stop)
+    assert hook.posts == []  # transient: one tick only → verify-twice keeps it silent

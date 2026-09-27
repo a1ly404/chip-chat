@@ -148,26 +148,31 @@ def derive_alerts(healths: dict[str, dict[str, object]]) -> list[dict[str, objec
     - monitoring-api: alert unless /health says status == "healthy".
     - discord-bot: alert unless status == "ok" AND loops_ok is True (the gold
       signal ENVELOPES.md predicted; it never flaps silently).
-    - A probe that failed entirely (transport error) alerts on "<name>-probe".
+    - ONE alert per target per tick: a transport failure carries
+      ``transport: <error>`` in the detail (no duplicated "<name>-probe" key —
+      soak 2026-09-27: double lines amplified every real outage).
     """
     alerts: list[dict[str, object]] = []
     for name, h in healths.items():
-        body = h.get("json") if isinstance(h.get("json"), dict) else {}
-        status = str(body.get("status") or "").lower()
-        if name == "monitoring-api":
-            if status != "healthy":
-                alerts.append({"key": name, "detail": f"status={status or 'missing'}", "ok": False})
+        detail: str | None = None
+        err = h.get("error")
+        if err:
+            detail = f"transport: {str(err)[:110]}"
         else:
-            # real payload nests the gold signal: {"standup_schedule": {"loops_ok": true, ...}}
-            sched = body.get("standup_schedule") if isinstance(body.get("standup_schedule"), dict) else {}
-            loops_ok = body.get("loops_ok", sched.get("loops_ok"))
-            # alert unless status == "ok" AND the gold signal is True
-            if loops_ok is not True or status != "ok":
-                alerts.append(
-                    {"key": name, "detail": f"status={status or 'missing'} loops_ok={loops_ok}", "ok": False}
-                )
-        if h.get("error"):
-            alerts.append({"key": f"{name}-probe", "detail": str(h["error"])[:120], "ok": False})
+            body = h.get("json") if isinstance(h.get("json"), dict) else {}
+            status = str(body.get("status") or "").lower()
+            if name == "monitoring-api":
+                if status != "healthy":
+                    detail = f"status={status or 'missing'}"
+            else:
+                # real payload nests the gold signal: {"standup_schedule": {"loops_ok": true, ...}}
+                sched = body.get("standup_schedule") if isinstance(body.get("standup_schedule"), dict) else {}
+                loops_ok = body.get("loops_ok", sched.get("loops_ok"))
+                # alert unless status == "ok" AND the gold signal is True
+                if loops_ok is not True or status != "ok":
+                    detail = f"status={status or 'missing'} loops_ok={loops_ok}"
+        if detail is not None:
+            alerts.append({"key": name, "detail": detail, "ok": False})
     return alerts
 
 
@@ -247,12 +252,16 @@ def post_alerts(
     environ: dict[str, str] | None = None,
     webhook: Any | None = None,
     now: float | None = None,
+    only_fps: set[str] | None = None,
 ) -> int:
     """Verdict-transition lines to #chip-dev (Ally GO 2026-09-27 routing slice).
 
     Law kept intact:
     - actionable/dead-letter verdicts only; dedup/flap/skip stay log-only.
     - max one line per fingerprint per POST_COOLDOWN_S (noise floor + Discord law).
+    - verify-twice (soak 2026-09-27): when ``only_fps`` is given, ONLY fingerprints
+      present in the PREVIOUS tick may post — single-tick transients stay silent;
+      a real outage posts once, ≤1 interval late.
     - stand-down → no posts (pauses feed tell-tier; never wakes fixers either).
     - system line, no LLM spend: ``[chip-feed] <key> <verdict> (<detail>)``.
     Returns the number of posts actually sent.
@@ -274,6 +283,8 @@ def post_alerts(
         if verdict.get("verdict") not in _POSTABLE_VERDICTS:
             continue
         fp = monitor.fingerprint_for(str(verdict.get("key", "")), str(verdict.get("detail", "")))
+        if only_fps is not None and fp not in only_fps:
+            continue
         last = state.get(fp)
         if last is not None and now - float(last) < _POST_COOLDOWN_S:
             continue
@@ -296,13 +307,18 @@ def run_feed_loop(stop_event: threading.Event, *, environ: dict[str, str] | None
     after `interval` seconds. Exits when `stop_event` is set."""
     interval = _poll_interval(environ)
     _log("start", f"interval={interval:.0f}s targets={_targets(environ)} host={_env(FEED_HOST_ENV, DEFAULT_HOST)}")
+    prev_alert_fps: set[str] = set()
     while not stop_event.is_set():
         started = time.time()
         try:
             receipt = tick(persist=True, environ=environ)
             verdicts = receipt.get("verdicts") or []
-            _log("tick", f"{len(verdicts)} verdict(s)")
-            post_count = post_alerts(receipt, environ=environ)
+            _log("tick", f"{len(verdicts)} alert(s)")
+            # verify-twice: only alerts that persisted from the previous tick post
+            current_fps = {monitor.fingerprint_for(str(v.get("key", "")), str(v.get("detail", ""))) for v in verdicts}
+            confirmed = current_fps & prev_alert_fps
+            prev_alert_fps = current_fps
+            post_count = post_alerts(receipt, environ=environ, only_fps=confirmed)
             if post_count:
                 _log("post", f"{post_count} alert line(s) -> #chip-dev")
         except Exception as exc:  # noqa: BLE001 — log-only; never crash the gateway
