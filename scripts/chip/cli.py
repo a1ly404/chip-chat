@@ -760,10 +760,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     done_gate_p = sub.add_parser(
         "done-gate",
-        help="Done-discipline gate: Checked Progress boxes must carry verified-as-of stamps (offline, no network)",
+        help="Done-discipline gate: checked acceptance boxes must carry verified-as-of stamps (offline, no network). Strict by default; --scan skips the declared-Done assumption.",
     )
     done_gate_p.add_argument("--file", default=None, help="Markdown file to check (defaults to stdin)")
-    done_gate_p.add_argument("--declare-done", action="store_true", help="Ticket claims Done (strict receipts required)")
+    done_gate_p.add_argument("--scan", action="store_true", help="Informational scan only (do not assume Done was declared)")
+    done_gate_p.add_argument("--declare-done", action="store_true", help="Explicitly mark the ticket as declaring Done")
     done_gate_p.add_argument("--json", action="store_true")
     done_gate_p.set_defaults(func=cmd_done_gate)
 
@@ -783,8 +784,9 @@ def cmd_done_gate(args: argparse.Namespace) -> int:
         text = path.read_text(encoding="utf-8")
     else:
         text = sys.stdin.read()
-    scan = parse_done_state(text, declare_done=args.declare_done)
-    allow, reason = may_flip_done(text)
+    scan = parse_done_state(text, declare_done=(args.declare_done or not args.scan))
+    allow = not scan.premature_done
+    reason = "all boxes verified-as-of (or none checked)" if allow else "premature-Done: " + "; ".join(scan.reasons[:3])
     payload = {"allow_done": allow, "reason": reason, **scan.to_dict()}
     if args.json:
         print(json.dumps(payload, ensure_ascii=False))
