@@ -106,6 +106,15 @@ def test_derive_alerts_discord_bot_status_not_ok() -> None:
     assert alerts and alerts[0]["key"] == "discord-bot"
 
 
+def test_derive_alerts_discord_bot_loops_ok_nested_payload_silent() -> None:
+    # SOAK BUG #2: real payload nests loops_ok under standup_schedule — top-level
+    # .get() returned None and false-alerted every tick. Both spellings must stay clean."""
+    nested = _feeder_receipt("discord-bot", "ok", {"standup_schedule": {"loops_ok": True}})
+    top_level = _feeder_receipt("discord-bot", "ok", {"loops_ok": True})
+    assert monitor_feed.derive_alerts({"discord-bot": nested}) == []
+    assert monitor_feed.derive_alerts({"discord-bot": top_level}) == []
+
+
 def test_derive_alerts_monitoring_api_unhealthy() -> None:
     healths = {"monitoring-api": _feeder_receipt("monitoring-api", "degraded")}
     alerts = monitor_feed.derive_alerts(healths)

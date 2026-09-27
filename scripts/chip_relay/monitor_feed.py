@@ -158,7 +158,9 @@ def derive_alerts(healths: dict[str, dict[str, object]]) -> list[dict[str, objec
             if status != "healthy":
                 alerts.append({"key": name, "detail": f"status={status or 'missing'}", "ok": False})
         else:
-            loops_ok = body.get("loops_ok")
+            # real payload nests the gold signal: {"standup_schedule": {"loops_ok": true, ...}}
+            sched = body.get("standup_schedule") if isinstance(body.get("standup_schedule"), dict) else {}
+            loops_ok = body.get("loops_ok", sched.get("loops_ok"))
             # alert unless status == "ok" AND the gold signal is True
             if loops_ok is not True or status != "ok":
                 alerts.append(
