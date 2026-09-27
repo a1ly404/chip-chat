@@ -20,6 +20,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,9 +38,23 @@ FEED_ENABLED_ENV = "CHIP_FEED_ENABLED"
 FEED_HOST_ENV = "CHIP_FEED_HOST"
 FEED_INTERVAL_ENV = "CHIP_FEED_INTERVAL_S"
 FEED_TARGETS_ENV = "CHIP_FEED_TARGETS"
+FEED_TIMEOUT_ENV = "CHIP_FEED_TIMEOUT_S"
+WEBHOOK_ENV = "CHIP_WEBHOOK_DEV"
+
+_POST_COOLDOWN_S = 4 * 3600  # one #chip-dev line per fingerprint per 4h
+_POSTABLE_VERDICTS = ("actionable", "dead-letter")
+
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off", ""}
+
+
+def _probe_timeout() -> float:
+    try:
+        return max(1.0, float(os.environ.get(FEED_TIMEOUT_ENV, "") or 5.0))
+    except ValueError:
+        return 5.0
 
 _DEFAULT_TARGETS: dict[str, int] = {**DEFAULT_PORT_POLICY, **DEFAULT_PORT_BOT}
-_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _env(name: str, default: str) -> str:
@@ -82,26 +97,46 @@ def receipts_dir() -> Path:
 
 
 def _fetch_health(host: str, port: int, name: str) -> dict[str, object]:
-    """One probe receipt. Never raises: failures are structured receipt data."""
+    """One probe receipt. Never raises: failures are structured receipt data.
+
+    Bug fix (soak 2026-09-27): transient transport blips produced false
+    actionable verdicts — retry transport errors once (HTTPError status codes
+    are real app responses, never retried).
+    """
     receipt: dict[str, object] = {
         "target": name,
         "host": host,
         "port": port,
     }
-    try:
-        timeout = 5
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=timeout) as resp:
-            raw = resp.read()
-            http_status = int(getattr(resp, "status", 0))
-        receipt["http_status"] = http_status
-        receipt["raw"] = raw.decode("utf-8", errors="replace")
+    last_error: Exception | None = None
+    for attempt in range(2):
         try:
-            receipt["json"] = json.loads(receipt["raw"])
-        except json.JSONDecodeError:
-            receipt["parse"] = "raw-kept"
-    except Exception as exc:  # noqa: BLE001 — any failure becomes a receipt field
+            with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=_probe_timeout()) as resp:
+                raw = resp.read()
+                http_status = int(getattr(resp, "status", 0))
+            receipt["http_status"] = http_status
+            receipt["raw"] = raw.decode("utf-8", errors="replace")
+            receipt["attempts"] = attempt + 1
+            try:
+                receipt["json"] = json.loads(receipt["raw"])
+            except json.JSONDecodeError:
+                receipt["parse"] = "raw-kept"
+            last_error = None
+            break
+        except urllib.error.HTTPError as exc:
+            receipt["http_status"] = int(exc.code)
+            receipt["error"] = f"HTTPError: {exc.code}"
+            receipt["json"] = {}
+            last_error = None
+            break
+        except Exception as exc:  # noqa: BLE001 — transport blip: retry once
+            last_error = exc
+            receipt["attempts"] = attempt + 1
+            if attempt == 0:
+                time.sleep(1.0)
+    if last_error is not None:
         receipt["http_status"] = 0
-        receipt["error"] = f"{exc.__class__.__name__}: {exc}"[:160]
+        receipt["error"] = f"{last_error.__class__.__name__}: {last_error}"[:160]
         receipt["json"] = {}
     receipt["ts"] = datetime.now(timezone.utc).isoformat()
     return receipt
@@ -179,6 +214,81 @@ def save_snapshot(receipt: dict[str, object]) -> None:
     snapshot_path().write_text(json.dumps(receipt, indent=1), encoding="utf-8")
 
 
+def _post_state_path() -> Path:
+    return config.data_dir() / "chip_state" / "feed_posts.json"
+
+
+def _load_post_state() -> dict[str, float]:
+    p = _post_state_path()
+    if not p.is_file():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_post_state(state: dict[str, float]) -> None:
+    p = _post_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(state, indent=1), encoding="utf-8")
+
+
+def _truthy(env: dict[str, str]) -> bool:
+    return (env.get(FEED_ENABLED_ENV, "") or "").strip().lower() in _TRUE_VALUES
+
+
+def post_alerts(
+    receipt: dict[str, object],
+    *,
+    environ: dict[str, str] | None = None,
+    webhook: Any | None = None,
+    now: float | None = None,
+) -> int:
+    """Verdict-transition lines to #chip-dev (Ally GO 2026-09-27 routing slice).
+
+    Law kept intact:
+    - actionable/dead-letter verdicts only; dedup/flap/skip stay log-only.
+    - max one line per fingerprint per POST_COOLDOWN_S (noise floor + Discord law).
+    - stand-down → no posts (pauses feed tell-tier; never wakes fixers either).
+    - system line, no LLM spend: ``[chip-feed] <key> <verdict> (<detail>)``.
+    Returns the number of posts actually sent.
+    """
+    env = environ if environ is not None else os.environ
+    now = time.time() if now is None else now
+    if not _truthy(env) or stand_down(env):
+        return 0
+    url = (env.get(WEBHOOK_ENV, "") or "").strip()
+    if not url:
+        return 0
+    if webhook is None:
+        from chip_relay.gateway import post_webhook
+
+        webhook = post_webhook
+    state = _load_post_state()
+    posted = 0
+    for verdict in receipt.get("verdicts", []):
+        if verdict.get("verdict") not in _POSTABLE_VERDICTS:
+            continue
+        fp = monitor.fingerprint_for(str(verdict.get("key", "")), str(verdict.get("detail", "")))
+        last = state.get(fp)
+        if last is not None and now - float(last) < _POST_COOLDOWN_S:
+            continue
+        line = (
+            f"[chip-feed] {verdict.get('key')} {verdict.get('verdict')} "
+            f"({str(verdict.get('detail', ''))[:120]}) — dark: log-only, no recover without Ally ack"
+        )
+        result = webhook(url, "chip-relay", line[:1900])
+        status = int(getattr(result, "status", 0))
+        if 200 <= status < 300:
+            state[fp] = now
+            posted += 1
+    if posted:
+        _save_post_state(state)
+    return posted
+
+
 def run_feed_loop(stop_event: threading.Event, *, environ: dict[str, str] | None = None) -> None:
     """Log-only loop. First tick runs immediately; every subsequent tick runs
     after `interval` seconds. Exits when `stop_event` is set."""
@@ -187,8 +297,12 @@ def run_feed_loop(stop_event: threading.Event, *, environ: dict[str, str] | None
     while not stop_event.is_set():
         started = time.time()
         try:
-            tick(persist=True, environ=environ)
-            _log("tick", f"interval elapsed step ok")
+            receipt = tick(persist=True, environ=environ)
+            verdicts = receipt.get("verdicts") or []
+            _log("tick", f"{len(verdicts)} verdict(s)")
+            post_count = post_alerts(receipt, environ=environ)
+            if post_count:
+                _log("post", f"{post_count} alert line(s) -> #chip-dev")
         except Exception as exc:  # noqa: BLE001 — log-only; never crash the gateway
             _log("error", f"feed tick failed: {exc.__class__.__name__}: {exc}"[:200])
         elapsed = time.time() - started

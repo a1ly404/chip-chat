@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -175,3 +176,164 @@ def test_run_feed_loop_one_tick_then_stop(feed_env: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("CHIP_FEED_INTERVAL_S", "60")
     monitor_feed.run_feed_loop(stop)
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# probe retry (soak fix: transient transport blips)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, payload: bytes = b'{"status": "healthy"}') -> None:
+        self.status = 200
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+def test_fetch_health_retries_transport_blip(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request as ur
+
+    calls = {"n": 0}
+
+    def flaky_urlopen(url: str, timeout: float) -> _FakeResp:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("timed out")
+        return _FakeResp()
+
+    monkeypatch.setattr(ur, "urlopen", flaky_urlopen)
+    h = monitor_feed._fetch_health("h", 48082, "monitoring-api")
+    assert h["http_status"] == 200
+    assert not h.get("error")
+    assert calls["n"] == 2
+    assert h["attempts"] == 2
+
+
+def test_fetch_health_http_error_not_retried(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    import urllib.request as ur
+
+    calls = {"n": 0}
+
+    def always_503(url: str, timeout: float) -> _FakeResp:
+        calls["n"] += 1
+        raise urllib.error.HTTPError(url, 503, "unavailable", None, None)
+
+    monkeypatch.setattr(ur, "urlopen", always_503)
+    h = monitor_feed._fetch_health("h", 48080, "discord-bot")
+    assert h["http_status"] == 503
+    assert calls["n"] == 1
+
+
+def test_fetch_health_persistent_transport_error(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request as ur
+
+    calls = {"n": 0}
+
+    def dead(url: str, timeout: float) -> _FakeResp:
+        calls["n"] += 1
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(ur, "urlopen", dead)
+    h = monitor_feed._fetch_health("h", 48080, "discord-bot")
+    assert h["http_status"] == 0
+    assert calls["n"] == 2
+    assert "ConnectionError" in str(h["error"])
+
+
+# ---------------------------------------------------------------------------
+# #chip-dev routing (verdict-transition lines, cooldown, stand-down)
+# ---------------------------------------------------------------------------
+
+
+def _receipt_actionable(key: str = "monitoring-api", detail: str = "status=degraded") -> dict:
+    return {
+        "ts": "t",
+        "stand_down": False,
+        "results": {},
+        "verdicts": [{"key": key, "detail": detail, "ok": False, "verdict": "actionable"}],
+    }
+
+
+class _RecordingWebhook:
+    def __init__(self, status: int = 204) -> None:
+        self.status = status
+        self.posts: list[tuple[str, str]] = []
+
+    def __call__(self, url: str, username: str, content: str):
+        self.posts.append((username, content))
+        return type("R", (), {"status": self.status})()
+
+
+def test_post_alerts_posts_new_fingerprint(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook) == 1
+    username, content = hook.posts[0]
+    assert username == "chip-relay"
+    assert content.startswith("[chip-feed] monitoring-api actionable")
+
+
+def test_post_alerts_cooldowns_repeat(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    receipt = _receipt_actionable()
+    assert monitor_feed.post_alerts(receipt, environ=dict(os.environ), webhook=hook, now=1000.0) == 1
+    assert monitor_feed.post_alerts(receipt, environ=dict(os.environ), webhook=hook, now=1100.0) == 0
+    assert len(hook.posts) == 1  # cooldown honed at 4h per fingerprint
+
+
+def test_post_alerts_dedup_flap_skip_never_post(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import time as time_mod
+
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    receipt = {
+        "ts": "t",
+        "stand_down": False,
+        "results": {},
+        "verdicts": [
+            {"key": "monitoring-api", "detail": "status=degraded", "ok": False, "verdict": "dedup"},
+            {"key": "discord-bot", "detail": "loops_ok=False", "ok": False, "verdict": "flap"},
+            {"key": "plex", "detail": "down", "ok": False, "verdict": "skip-key"},
+        ],
+    }
+    assert monitor_feed.post_alerts(receipt, environ=dict(os.environ), webhook=hook, now=1000.0) == 0
+    assert hook.posts == []
+
+
+def test_post_alerts_stand_down_frozen(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    monkeypatch.setenv("CHIP_STAND_DOWN", "1")
+    hook = _RecordingWebhook()
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook) == 0
+    assert hook.posts == []
+
+
+def test_post_alerts_requires_webhook_env(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.delenv("CHIP_WEBHOOK_DEV", raising=False)
+    hook = _RecordingWebhook()
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook) == 0
+
+
+def test_post_alerts_failed_post_not_counted(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook(status=500)
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook, now=1000.0) == 0
+    # a later success (cooldown not yet stamped) posts again
+    hook2 = _RecordingWebhook(status=204)
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook2, now=1010.0) == 1
