@@ -7,6 +7,8 @@ import json
 import re
 import sys
 
+from pathlib import Path
+
 from chip import config, constraints, law, learnings, mempalace, mock, openrouter, runtime, spend, store, task, tool
 from chip import standing_law
 from chip.need_tool import NeedToolError
@@ -756,7 +758,43 @@ def build_parser() -> argparse.ArgumentParser:
     task_run.add_argument("--json", action="store_true")
     task_run.set_defaults(func=cmd_task_run)
 
+    done_gate_p = sub.add_parser(
+        "done-gate",
+        help="Done-discipline gate: Checked Progress boxes must carry verified-as-of stamps (offline, no network)",
+    )
+    done_gate_p.add_argument("--file", default=None, help="Markdown file to check (defaults to stdin)")
+    done_gate_p.add_argument("--declare-done", action="store_true", help="Ticket claims Done (strict receipts required)")
+    done_gate_p.add_argument("--json", action="store_true")
+    done_gate_p.set_defaults(func=cmd_done_gate)
+
     return parser
+
+
+def cmd_done_gate(args: argparse.Namespace) -> int:
+    import sys
+
+    from chip.done_gate import may_flip_done, parse_done_state
+
+    if args.file:
+        path = Path(args.file).expanduser()
+        if not path.is_file():
+            print(f"ERROR: file not found: {path}", file=sys.stderr)
+            return 1
+        text = path.read_text(encoding="utf-8")
+    else:
+        text = sys.stdin.read()
+    scan = parse_done_state(text, declare_done=args.declare_done)
+    allow, reason = may_flip_done(text)
+    payload = {"allow_done": allow, "reason": reason, **scan.to_dict()}
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0 if allow else 2
+    ok_stats = "DONE-GATE ALLOW" if allow else "DONE-GATE REFUSE"
+    print(f"{ok_stats}: {reason}")
+    for b in scan.boxes:
+        mark = "✅" if (b.checked and b.verified) else "❌"
+        print(f"  {mark} [{'x' if b.checked else ' '}] {b.text[:70]} (section={b.section[:30]!r})")
+    return 0 if allow else 2
 
 
 def main(argv: list[str] | None = None) -> int:
