@@ -83,15 +83,16 @@ handoff: <persona> <task> — confirmed by: <persona>
 
 ## Spec-first edge cases (Grok round 4 — these bite before anything else)
 
-### 1. Stale-claim break (expiry / steal) — parameters DRAFT(libc 2026-09-27), Ally to review; the HARD rule below is unchanged until Ally acks
-- Heartbeat interval: **DRAFT proposal** — a claim "misses" after **90 min** with no owner-activity evidence in the room transcript for that scope (any owner turn touching the scope, a progress envelope, or a bare `touch: <scope>` line). 90 min = 3× the relay watchdog heartbeat (30 min) — one real miss tolerates two false-absent ticks.
-- What counts as a ping: **DRAFT proposal** — an in-room **@mention of the owner persona that names the claim scope** (tick-scope keyword or the scope string itself). inject lines count (visible lane). **DMs do NOT count** (no-reading-private law). A ping valid for the steal gate must land **after** the heartbeat miss begins; a ping before the miss proves nothing about post-miss responsiveness.
-- Who may steal: **DRAFT reaffirm Grok default** — PM only, with a paper-trail envelope:
+### 1. Stale-claim break (expiry / steal) — parameters **ACKED by Ally 2026-09-27**; HARD rule unchanged
+- Heartbeat interval: **ACK** — a claim "misses" after **90 min** with no owner-activity evidence in the room transcript for that scope (any owner turn touching the scope, a progress envelope, or a bare `touch: <scope>` line). 90 min = 3× the relay watchdog heartbeat (30 min) — one real miss tolerates two false-absent ticks.
+- What counts as a ping: **ACK** — an in-room **@mention of the owner persona that names the claim scope** (tick-scope keyword or the scope string itself). inject lines count (visible lane). **DMs do NOT count** (no-reading-private law). A ping valid for the steal gate must land **after** the heartbeat miss begins; a ping before the miss proves nothing about post-miss responsiveness.
+- Who may steal: **ACK (Grok default)** — PM only, with a paper-trail envelope:
   ```
   reclaim: <persona> <scope> — reason: heartbeat-miss <ts> + ping-no-reply <receipt link>
   ```
   Lyla/automation may *draft* the reclaim card; only PM (or another persona on explicit Ally GO in-line) may post it. Ally always may steal directly.
-- Does park pause the heartbeat? **DRAFT reaffirm Grok default — NO**: a parked claim still ages. `parked:` is an evidence state, not a liveness shield.
+  **PM-outage amendment (ACK 2026-09-27):** if the dead agent IS the PM and the PM claim exceeds the miss threshold, any observer drafts the steal envelope to #chip-dev **tagged for Ally — do not self-post**. Converts a PM outage from a silent stall into a visible queued action. This path never grants steal authority — `id:claim-unlock` stays out of its reach; only Ally executes it.
+- Does park pause the heartbeat? **ACK — NO**: a parked claim still ages. `parked:` is an evidence state, not a liveness shield; parked claims decay visibly, never zombie.
 - **Phase C strict-flip parking note (Ally NO-GO 2026-09-27):** `CHIP_TOOL_STRICT=1` stays OFF until the Phase B propose-gate passes; sequence is A soak → B propose cards → strict flip, each with its own GO. Rationale: strict authorize changes agent failure behavior — a Phase C regression must not hide in transition noise.
 - Steal rule (HARD law `id:claim-unlock`): steal requires heartbeat miss AND ping-no-reply.
 
