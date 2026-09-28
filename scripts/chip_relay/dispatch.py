@@ -115,8 +115,8 @@ def _fail(logs: list[str], alert: str, chip_calls: int = 0) -> DispatchResult:
     return DispatchResult(ok=False, alert=alert, chip_calls=chip_calls, logs=logs)
 
 
-def _chip_room_args(room_id: str, persona: str, text: str) -> list[str]:
-    return [
+def _chip_room_args(room_id: str, persona: str, text: str, *, task_brief_opts: dict | None = None) -> list[str]:
+    args = [
         "room",
         room_id,
         "-m",
@@ -127,6 +127,11 @@ def _chip_room_args(room_id: str, persona: str, text: str) -> list[str]:
         "--turn-limit",
         "1",
     ]
+    if task_brief_opts:
+        args += ["--task-id", str(task_brief_opts["task_id"])]
+        if task_brief_opts.get("task_type"):
+            args += ["--task-type", str(task_brief_opts["task_type"])]
+    return args
 
 
 def _parse_chip_reply(stdout: str) -> str | None:
@@ -178,8 +183,12 @@ def _run_chip_shot(
     text: str,
     *,
     chip: Callable[..., ChipResult],
+    task_brief_opts: dict | None = None,
 ) -> tuple[str | None, ChipResult]:
-    outcome: ChipResult = chip(_chip_room_args(room_id, persona, text), timeout=CHIP_TIMEOUT_S)
+    outcome: ChipResult = chip(
+        _chip_room_args(room_id, persona, text, task_brief_opts=task_brief_opts),
+        timeout=CHIP_TIMEOUT_S,
+    )
     if outcome.timed_out or outcome.returncode != 0:
         return None, outcome
     reply = _parse_chip_reply(outcome.stdout)
@@ -208,6 +217,25 @@ def handle_inbound_delegate(
         return _fail(logs, "no delegate line")
     if from_persona not in known_persona_ids():
         return _fail(logs, f"unknown webhook persona {from_persona!r}")
+    from chip import taskflow as _taskflow
+    from chip_relay import delegate as _dl
+    import os as _os
+
+    brief_opts: dict = {}
+    if (_os.environ.get("CHIP_TASKBRIEF", environ.get("CHIP_TASKBRIEF", "")) or "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            brief_opts = _dl.task_brief_opts(text, request.persona, environ)
+        except _taskflow.TaskPalaceUnavailable as exc:
+            # fail-visible: REFUSE the delegation, log-only alert, no silent downgrade
+            alert = f"delegation refused: {exc}"
+            log_delegate_handoff(room.id, from_persona=from_persona, request=request,
+                                 hop=next_delegate_chain_hop(room.id), refused=True,
+                                 reason="palace-gate-fail-visible")
+            record_delegate_chain_hop(room.id, next_delegate_chain_hop(room.id))
+            logs.append(alert)
+            return DispatchResult(ok=False, alert=alert, logs=logs)
+        if brief_opts:
+            text = f"{_dl.brief_text_for(request.persona, room.id, text, environ)}\n\n(channel task line: {text})"
 
     next_hop = next_delegate_chain_hop(room.id)
     if stand_down(environ):
@@ -239,8 +267,9 @@ def handle_inbound_delegate(
     follow_reply, follow_outcome = _run_chip_shot(
         room.id,
         request.persona,
-        request.task,
+        text if brief_opts else request.task,
         chip=chip,
+        task_brief_opts=brief_opts or None,
     )
     chip_calls = 1
     delegate_hops = 1

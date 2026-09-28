@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"signal: {sig['note']}" + (f" -> {sig['wrote']}" if sig["wrote"] else ""))
     if args.post:
         # --post gates the SITREP; the URL exposure is env-presence-gated
-        post = standup_signal.post_signal_url()
+        post = standup_signal.post_signal_url(signal)
         if post["url"]:
             print(f"signal-url: {post['note']}")
         ok, note = post_to_monitoring(window)

@@ -91,3 +91,44 @@ def max_logged_delegate_hop(room_id: str) -> int:
         if isinstance(hop, int) and hop > peak:
             peak = hop
     return peak
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 brief wiring (Lyla 2026-09-28): delegate hops anchored to a RAZ id
+# get the brief-builder (goal + budget + memory pulls + claim discipline).
+# Opt-in via CHIP_TASKBRIEF=1; the palace gate is FAIL-VISIBLE — an unreachable
+# palace REFUSES the delegation (alert line, log-only) instead of silently
+# downgrading to a raw hop (golden 5 — the refusal is the honest move).
+# ---------------------------------------------------------------------------
+
+TASK_ANCHOR_RE = re.compile(r"\bRAZ-\d+\b")
+
+
+def task_brief_opts(task: str, persona: str, environ: dict[str, str] | None = None) -> dict:
+    """Return ``{"task_id","task_type"}`` for anchored tasks, else ``{}``.
+
+    Raises TaskPalaceUnavailable (fail-visible) when the gate fails — the
+    caller refuses the hop; never silently forwards the raw task string.
+    """
+    env = environ if environ is not None else os.environ
+    if (env.get("CHIP_TASKBRIEF", "") or "").strip().lower() not in {"1", "true", "yes"}:
+        return {}  # not opted in — legacy delegate shape, zero behavior change
+    import os as _os
+
+    anchor = TASK_ANCHOR_RE.search(task or "")
+    if not anchor:
+        return {}
+    from chip import taskflow
+
+    taskflow.preflight(environ)
+    return {"task_id": anchor.group(0), "task_type": "diagnosis"}
+
+
+def brief_text_for(persona: str, room_id: str, task: str, environ: dict[str, str] | None = None) -> str:
+    """The brief body for an anchored hop (used when opted in)."""
+    from chip import taskflow
+
+    m = TASK_ANCHOR_RE.search(task or "")
+    task_id = m.group(0) if m else ""
+    return taskflow.build_brief(task_id, persona, room_id, task.strip(),
+                                environ=environ).text

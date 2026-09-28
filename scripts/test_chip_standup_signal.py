@@ -72,9 +72,13 @@ def test_kind_absent_from_run_is_received_false():
     assert gym == {"received": False}  # verified_as_of/missed omitted per contract
 
 
-def test_garbage_receipt_honest_no():
-    sig = sg.build_signal([{}], verified_as_of=TS, pt_date="2026-09-28")
-    assert sig["2026-09-28"]["homelab"] == {"received": False}
+def test_garbage_receipt_signals_miss_not_absence():
+    garbage = {"standup": "homelab", "payload": {"source": "weird"}, "skills_commanded": False}
+    sig = sg.build_signal([garbage], verified_as_of=TS, pt_date="2026-09-28")
+    homelab = sig["2026-09-28"]["homelab"]
+    assert homelab["received"] is True
+    assert homelab["missed_payload"] is True
+    assert homelab["verified_as_of"] == TS
     assert sig["source"] == "chip_chat"
 
 

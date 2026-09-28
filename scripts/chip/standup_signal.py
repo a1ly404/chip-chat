@@ -89,8 +89,14 @@ def build_signal(
             continue
         fin = standup.finalize_receipt(dict(rec))
         if fin["_schema_errors"]:
-            # garbage receipt is NOT a completed digest for this kind: honest no
-            day[lane] = {"received": False}
+            # Digest job ran but lane receipt garbage — still signal (anti-silence).
+            day[lane] = {
+                "received": True,
+                "verified_as_of": verified_as_of,
+                "missed_payload": True,
+            }
+            if lane == "gymlog":
+                day[lane]["collectors_live"] = False
             continue
         if not verified_as_of:
             raise ValueError(
