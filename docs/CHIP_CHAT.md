@@ -1,6 +1,6 @@
 # Chip Chat (CLI)
 
-**Agents / bots:** operator entrypoint [AGENTS.md](../AGENTS.md) at repo root.
+**Agents / bots:** operator entrypoint [AGENTS.md](../AGENTS.md) at repo root. Homelab-bound findings → park per [PARKED_FINDINGS.md](PARKED_FINDINGS.md).
 
 CLI-first multi-agent chat against **OpenRouter only**, using a dedicated API key (`OPENROUTER_CC_API_KEY`). Source of truth for Chip Chat is **this repository** — not razzorstack, not docker homelab `.env`.
 
