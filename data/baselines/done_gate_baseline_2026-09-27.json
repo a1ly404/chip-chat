@@ -1,0 +1,174 @@
+{
+  "collected": "2026-09-27",
+  "collected_by": "chip done-gate-sweep (Linear MCP read-only export)",
+  "count_findings": 32,
+  "counts": {
+    "reopen-required": 7,
+    "vague-done": 25
+  },
+  "crontab": "cron run #1 compares live sweep vs THIS frozen map -- baseline compare law: Ally wall item 2026-09-27",
+  "findings_state": {
+    "RAZ-102": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-109": {
+      "checked": 3,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-110": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-125": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-138": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-14": {
+      "checked": 5,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-140": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-141": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-143": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-176": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-182": {
+      "checked": 5,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-199": {
+      "checked": 4,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-225": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-231": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-255": {
+      "checked": 5,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-282": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-287": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-288": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-290": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-291": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-293": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-294": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-299": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-301": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-32": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-35": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-43": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-45": {
+      "checked": 4,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-51": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-60": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    },
+    "RAZ-82": {
+      "checked": 5,
+      "severity": "reopen-required",
+      "stamps": 0
+    },
+    "RAZ-92": {
+      "checked": 0,
+      "severity": "vague-done",
+      "stamps": 0
+    }
+  },
+  "note": "frozen day-0; regeneration is a NEW artifact file with a new date, never an overwrite (gray area: no silent self-amends / golden 13)",
+  "schema": "done-gate-baseline-v1"
+}

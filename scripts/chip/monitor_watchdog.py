@@ -9,6 +9,12 @@ Consumes the same Linear issues export shape as `chip done-gate-sweep`
   state file emits ONLY the delta vs the previous run (new / resolved / changed
   / unchanged). P2: one glance, zero noise. Determinism: findings are already
   severity-then-id ordered by sweep(); no timestamps appear in table output.
+- `--baseline FILE`: day-0 compare vs the committed baseline artifact
+  (`data/baselines/done_gate_baseline_2026-09-27.json`; Ally's wall item for
+  cron run #1). Prints per-class shrinkage (vague-done / reopen-required,
+  day0 -> dayN) and resolved/new/changed lists vs day-0. Composes
+  independently with `--state-file` (run-to-run delta). Fail-closed: missing
+  or malformed baseline exits 1 — never silently skipped off (golden 5).
 
 The export itself is produced by the Linear MCP side (agent lane); this script
 is intentionally offline so cron can run it without Linear credentials.
@@ -127,6 +133,80 @@ def _save_state(p: Path, state: dict[str, dict]) -> None:
     p.write_text(json.dumps(state, sort_keys=True, indent=1), encoding="utf-8")
 
 
+def load_baseline(p: Path) -> tuple[str, dict[str, dict]]:
+    """Load a day-0 baseline artifact. Fail-closed (golden 5) on any garbage.
+
+    Returns (collected_date, findings_state map). Baseline shape:
+    {"schema": "done-gate-baseline-v1", "collected": "<date>",
+     "...": provenance, "findings_state": {id: {severity, checked, stamps}}}.
+    """
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"baseline JSON malformed: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("baseline: not a JSON object")
+    collected = raw.get("collected")
+    state = raw.get("findings_state")
+    if not isinstance(collected, str) or not collected.strip():
+        raise ValueError("baseline: missing 'collected' date")
+    if not isinstance(state, dict) or "findings_state" not in raw:
+        raise ValueError("baseline: missing 'findings_state' map")
+    for ident, v in state.items():
+        if not isinstance(ident, str) or not isinstance(v, dict) or not (
+            isinstance(v.get("severity"), str)
+            and isinstance(v.get("checked"), int) and v["checked"] >= 0
+            and isinstance(v.get("stamps"), int) and v["stamps"] >= 0
+        ):
+            raise ValueError(f"baseline: malformed findings_state entry for {ident!r}")
+    return collected, state
+
+
+def class_counts(state: dict[str, dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for v in state.values():
+        sev = v.get("severity", "unknown")
+        counts[sev] = counts.get(sev, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def baseline_report(current: dict[str, dict], baseline_state: dict[str, dict], collected: str) -> str:
+    """Day-0 compare vs current findings_state (cron run #1's measure).
+
+    Deterministic: severity names sorted; id lists sorted; no run timestamps.
+    """
+    b_counts = class_counts(baseline_state)
+    c_counts = class_counts(current)
+    lines = [f"BASELINE COMPARE (day-0 {collected})"]
+    for sev in sorted(set(b_counts) | set(c_counts)):
+        b, c = b_counts.get(sev, 0), c_counts.get(sev, 0)
+        lines.append(f"{sev}: {b} \u2192 {c} (\u0394 {c - b:+d})")
+    resolved = sorted(i for i in baseline_state if i not in current)
+    new = sorted(i for i in current if i not in baseline_state)
+    changed = sorted(
+        i for i in current if i in baseline_state and current[i] != baseline_state[i]
+    )
+    unchanged = sorted(i for i in current if i in baseline_state and current[i] == baseline_state[i])
+    if resolved:
+        lines.append(_moved_line("resolved-since-day0", resolved))
+    if new:
+        lines.append(_moved_line("new-since-day0", new))
+    if changed:
+        lines.append(_moved_line("changed-since-day0", changed))
+    if unchanged:
+        listing = f": {', '.join(unchanged)}" if len(unchanged) <= 8 else " (ids omitted \u2014 see table above)"
+        lines.append(f"(unchanged: {len(unchanged)}{listing})")
+    elif not (resolved or new or changed):
+        lines.append("(clean)")
+    return "\n".join(lines)
+
+
+def _moved_line(label: str, ids: list[str]) -> str:
+    if len(ids) <= 8:
+        return f"{label} ({len(ids)}): {', '.join(ids)}"
+    return f"{label} ({len(ids)} — ids omitted: {', '.join(ids[:8])}, \u2026)"
+
+
 def run_table(issues: list) -> str:
     return build_table(sweep(issues if isinstance(issues, list) else []))
 
@@ -149,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--issues-file", required=True)
     parser.add_argument("--state-file", default=None,
                         help="persist per-run findings map here; later runs emit ONLY the delta")
+    parser.add_argument("--baseline", default=None,
+                        help="day-0 baseline artifact JSON; prints class-shrinkage compare (cron run #1)")
     parser.add_argument("--post", action="store_true",
                         help="post the table to CHIP_WEBHOOK_MONITORING if set (dry-run default)")
     args = parser.parse_args(argv)
@@ -166,6 +248,20 @@ def main(argv: list[str] | None = None) -> int:
     table = build_table(findings)
     print(table)
     rc = 0 if not findings else 2
+
+    baseline_collected = None
+    if args.baseline:
+        bp = Path(args.baseline).expanduser()
+        if not bp.is_file():
+            print(f"ERROR: baseline file not found: {bp}", file=sys.stderr)
+            return 1
+        try:
+            baseline_collected, baseline_state = load_baseline(bp)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        print()
+        print(baseline_report(findings_state(findings), baseline_state, baseline_collected))
 
     if args.state_file:
         state_path = Path(args.state_file).expanduser()
