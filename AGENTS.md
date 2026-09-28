@@ -243,3 +243,27 @@ docker compose exec chip-relay python3 -c \
 pip install -e '.[dev]'
 python3 -m pytest scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py -q
 ```
+
+---
+
+## Single writable checkout — agents (RAZ-330+, permanent)
+
+**Mirrors razzorstack Windows-SoT discipline:** one place may receive git writes; every other checkout is read-only.
+
+| Role | Path | Git writes |
+|------|------|------------|
+| **Main clone (WSL)** | `~/Tools/chip-chat` with **`main` checked out** | **Forbidden** — `git pull` / read / reference only |
+| **Agent worktree** | `~/Tools/chip-chat-worktrees/<ticket-or-branch>` | **Required** for all chip-chat code, docs, and commits |
+| **Hyper-V deploy tree** | `C:\Users\17783\chip-chat` | Deploy lane only; not agent edit SoT unless ticket says so |
+
+### Rules (Cursor, OCgo, cloud agents)
+
+1. **Never** edit, `git add`, `git commit`, or `git push` from `~/Tools/chip-chat` when `main` is checked out.
+2. **Always** create or reuse a worktree: `git worktree add ~/Tools/chip-chat-worktrees/raz-XXX -b raz-XXX-short-description origin/main` (from the main clone, read-only ops only).
+3. Branch name should match the Linear ticket or agreed branch slug; one active write worktree per ticket slice.
+4. If the task cannot be scoped to a worktree (e.g. no disk path, policy conflict), **stop** and comment on the Linear ticket — do not fall back to editing `main`.
+5. Pre-commit from a worktree is fine; verify with `git rev-parse --show-toplevel` — must **not** be `~/Tools/chip-chat` for agent commits.
+
+**Violation recovery:** `git status` on main must stay clean; park accidental main edits via stash/patch into the correct worktree branch before push.
+
+**SoT doc cross-ref:** razzorstack [DEVELOPMENT.md](https://github.com/a1ly404/razzorstack/blob/main/docs/setup/DEVELOPMENT.md#single-writable-clone-raz-237) (Windows SoT); this section is the chip-chat equivalent.

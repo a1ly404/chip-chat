@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# RAZ-330 morning digest + Chip Chat standup signal (dry-run default).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m chip.standup_morning "$@"
