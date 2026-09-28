@@ -21,6 +21,9 @@ def test_two_templates_present() -> None:
     names = [p.name for p in _templates()]
     assert "internal-loop-degrade.template.md" in names
     assert "transport-blip.template.md" in names  # generalization proof
+    # family completed 2026-09-28 (queue item 4): remaining taxonomy drops 5+6
+    assert "skill-runner-fault.template.md" in names
+    assert "suppression-saturation.template.md" in names
 
 
 def _read(p: Path) -> str:
@@ -94,3 +97,34 @@ def test_gold_signal_down_contract() -> None:
     assert "discord-bot-loop-restart" in text  # registry-bound rollback id
     assert '"loops_ok": false' in text or '"loops_ok" : false' in text
     assert "standup_schedule.loops_ok" in text
+
+
+def test_family_wide_base_contract() -> None:
+    # every template in the dir satisfies the base contract — no exempt members
+    for p in _templates():
+        check_template_contract(p)
+
+
+def test_skill_runner_fault_contract() -> None:
+    p = next(x for x in _templates() if x.name == "skill-runner-fault.template.md")
+    check_template_contract(p)
+    text = _read(p)
+    assert "skill_id: skill-runner-fault" in text
+    assert "skill-runner-restart" in text  # registry-bound rollback tier
+    assert "runner-attached" in text  # evidence receipts never agent-fabricated
+    assert "timed_out|contract_drift|hang|recovered" in text  # fault classes enumerated
+    assert '"source": "runner-receipt"' in text
+    assert "lane: chip" in text
+
+
+def test_suppression_saturation_contract() -> None:
+    p = next(x for x in _templates() if x.name == "suppression-saturation.template.md")
+    check_template_contract(p)
+    text = _read(p)
+    assert "skill_id: suppression-saturation" in text
+    assert "clear-stale-suppress" in text
+    assert "DEADLETTER_AFTER=10" in text
+    assert "human_reopen" in text and '"required": true' in text  # never automated clear
+    assert "SKIP_KEYS" in text
+    assert "Warn-only" in text  # posts once per 4h tier
+    assert "lane: chip" in text
