@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from chip import config, monitor
+from chip import config, monitor, text_sources
 from chip_relay.dispatch import stand_down
 
 DEFAULT_HOST = "host.docker.internal"
@@ -35,6 +35,7 @@ DEFAULT_PORT_BOT = {"discord-bot": 48080}
 DEFAULT_INTERVAL_S = 300.0
 
 FEED_ENABLED_ENV = "CHIP_FEED_ENABLED"
+TEXT_SOURCES_ENV = text_sources.TEXT_SOURCES_ENV
 FEED_HOST_ENV = "CHIP_FEED_HOST"
 FEED_INTERVAL_ENV = "CHIP_FEED_INTERVAL_S"
 FEED_TARGETS_ENV = "CHIP_FEED_TARGETS"
@@ -187,9 +188,15 @@ def classify_receipts(
     *,
     environ: dict[str, str] | None = None,
     persist: bool = False,
+    extra_alerts: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """One feed tick: derive alerts → noise floor → log-only receipt."""
-    alerts = derive_alerts(healths)
+    """One feed tick: derive alerts → noise floor → log-only receipt.
+
+    ``extra_alerts`` (text-source ingestion, chip.text_sources) joins the
+    health-derived alerts and flows through the SAME noise floor — no new
+    classification or posting path.
+    """
+    alerts = derive_alerts(healths) + [a for a in (extra_alerts or []) if isinstance(a, dict) and a.get("key")]
     verdicts: list[dict[str, object]] = []
     for alert in alerts:
         verdict, _ = monitor.classify(alert, persist=persist)
@@ -203,12 +210,57 @@ def classify_receipts(
     return receipts
 
 
+def _text_source_paths(environ: dict[str, str] | None = None) -> list[str]:
+    env = environ if environ is not None else os.environ
+    raw = (env.get(TEXT_SOURCES_ENV, "") or "").strip()
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def text_sources_state_path():
+    return config.data_dir() / "chip_state" / "text_sources.json"
+
+
+def _load_text_state() -> dict[str, object]:
+    p = text_sources_state_path()
+    if not p.is_file():
+        return {"offsets": {}, "pgs_zero_streak": {}}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {"offsets": {}, "pgs_zero_streak": {}}
+    except json.JSONDecodeError:
+        return {"offsets": {}, "pgs_zero_streak": {}}  # garbage state = fresh, never a crash
+
+
+def _save_text_state(state: dict[str, object]) -> None:
+    p = text_sources_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
+
+
+def ingest_text_sources(environ: dict[str, str] | None = None) -> dict[str, object]:
+    """One text-source ingestion pass (chip.text_sources; fail-visible)."""
+    paths = _text_source_paths(environ)
+    if not paths:
+        return {"enabled": False, "alerts": [], "ignored": 0, "skipped": []}
+    out = text_sources.ingest_text_files(paths, _load_text_state())
+    _save_text_state(out["state"])
+    return {"enabled": True, **out}
+
+
 def tick(*, persist: bool = False, environ: dict[str, str] | None = None) -> dict[str, object]:
     healths: dict[str, dict[str, object]] = {}
     host = _env(FEED_HOST_ENV, DEFAULT_HOST)
     for name, port in _targets(environ).items():
         healths[name] = _fetch_health(host, port, name)
-    receipt = classify_receipts(healths, environ=environ, persist=persist)
+    text = ingest_text_sources(environ)
+    receipt = classify_receipts(
+        healths, environ=environ, persist=persist, extra_alerts=text.get("alerts")
+    )
+    receipt["text_sources"] = {
+        "enabled": text.get("enabled", False),
+        "ignored": text.get("ignored", 0),
+        "skipped": text.get("skipped", []),
+    }
     save_snapshot(receipt)
     return receipt
 

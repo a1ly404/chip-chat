@@ -432,3 +432,36 @@ def test_run_feed_loop_transient_never_posts(feed_env: Path, monkeypatch: pytest
     _fast_wait(monkeypatch)
     monitor_feed.run_feed_loop(stop)
     assert hook.posts == []  # transient: one tick only → verify-twice keeps it silent
+
+
+# ---------------------------------------------------------------------------
+# text-source ingestion (CHIP_FEED_TEXT_SOURCES; 2026-09-28 signature classes)
+# ---------------------------------------------------------------------------
+
+
+def test_tick_no_env_text_sources_disabled(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CHIP_FEED_TEXT_SOURCES", raising=False)
+    monkeypatch.setattr(monitor_feed, "_fetch_health", lambda host, port, name: {})
+    receipt = monitor_feed.tick(persist=False)
+    assert receipt["text_sources"] == {"enabled": False, "ignored": 0, "skipped": []}
+
+
+def test_tick_wires_text_alerts_into_verdicts(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json as _json
+
+    monkeypatch.setattr(monitor_feed, "_fetch_health", lambda host, port, name: {})
+    watch = feed_env / "watch.jsonl"
+    watch.write_text(_json.dumps({
+        "source_id": "advisor",
+        "text": "Command ['python3', 'scripts/disk_pressure_advisor.py', '--force'] timed out after 180 seconds",
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CHIP_FEED_TEXT_SOURCES", str(watch))
+    receipt = monitor_feed.tick(persist=True)
+    assert receipt["text_sources"]["enabled"] is True
+    keys = {v["key"]: v["verdict"] for v in receipt["verdicts"]}
+    assert keys.get("stage1-advisor") == "actionable"
+    # state persisted: a second tick does NOT replay the same banner
+    receipt2 = monitor_feed.tick(persist=True)
+    keys2 = {v["key"] for v in receipt2["verdicts"]}
+    assert "stage1-advisor" not in keys2
+    assert (feed_env / "chip_state" / "text_sources.json").is_file()
