@@ -143,6 +143,51 @@ def confident_health_hits(text: str) -> list[str]:
     return [m.group(0) for m in _BANNED_SILENT.finditer(text)]
 
 
+def correlated_dark(receipts: Iterable[Any]) -> dict[str, Any]:
+    """Correlated-dark detector (STANDUP_EMISSION_SPEC task 2, room layer).
+
+    >=2 DISTINCT standup personas silent inside one emission window = ONE
+    correlated finding (shared upstream root cause, tell-Ally-once).
+    Single-lane silence = logs-and-continues (no finding). Zero silent =
+    clean. Malformed receipts are counted as ``ignored`` — excluded from the
+    silence assessment but never silently dropped (golden 5).
+
+    Deterministic: personas sorted; one finding line regardless of how many
+    lanes are silent (N lanes = still ONE shared-root-cause finding).
+    """
+    silent: set[str] = set()
+    ages: dict[str, float | None] = {}
+    ignored = 0
+    for r in receipts:
+        if not isinstance(r, Mapping) or validate_receipt(r) or r.get("payload", {}).get("source") != "silent":
+            ignored += 1
+            continue
+        persona = r.get("standup")
+        age = r["payload"].get("age_h")
+        silent.add(persona)
+        if age is None:
+            ages[persona] = None  # 'never received' dominates any age
+        else:
+            prev = ages.get(persona, "unset")
+            ages[persona] = age if prev in ("unset", None) else min(prev, age)
+    worst: float | None
+    if None in list(ages.values()):
+        worst = None
+    else:
+        worst = max(ages.values()) if ages else None
+    if len(silent) >= 2:
+        age_txt = "never" if worst is None else f"age_h={worst:g}h"
+        report = (
+            f"correlated-dark: {'+'.join(sorted(silent))} — payload pipeline silent "
+            f"({age_txt}) — one root cause"
+        )
+    elif len(silent) == 1:
+        report = f"single-lane dark: {next(iter(silent))} — log-and-continue (no correlated finding)"
+    else:
+        report = "no silent lanes"
+    return {"correlated": len(silent) >= 2, "silent": sorted(silent), "worst_age_h": worst, "ignored": ignored, "report": report}
+
+
 def consume(receipts: Iterable[Mapping[str, Any]]) -> dict[str, int]:
     """Phase C credit counter — spec task 4.
 

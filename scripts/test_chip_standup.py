@@ -155,6 +155,60 @@ def test_consume_empty():
     assert su.consume([]) == {"received": 0, "credited": 0}
 
 
+def test_correlated_dark_pair_is_one_finding():
+    r1 = su.make_silent_receipt("homelab", 30.0, issued_at="2026-09-28 06:00 PT")
+    r2 = su.make_silent_receipt("gymlog", 44.0, issued_at="2026-09-28 06:00 PT")
+    out = su.correlated_dark([r1, r2, live_receipt(2.0)])
+    assert out["correlated"] is True
+    assert out["report"].count("correlated-dark") == 1  # ONE finding, not per-persona
+    assert out["report"] == (
+        "correlated-dark: gymlog+homelab — payload pipeline silent (age_h=44h) — one root cause"
+    )  # deterministic: personas sorted, worst (max) age carried
+    assert out["silent"] == ["gymlog", "homelab"]
+
+
+def test_correlated_dark_single_lane_no_finding():
+    out = su.correlated_dark([su.make_silent_receipt("homelab", 30.0, issued_at="2026-09-28 06:00 PT")])
+    assert out["correlated"] is False
+    assert "log-and-continue" in out["report"]
+
+
+def test_correlated_dark_dedupes_same_persona():
+    r = su.make_silent_receipt("homelab", 30.0, issued_at="2026-09-28 06:00 PT")
+    out = su.correlated_dark([r, r, r])
+    assert out["correlated"] is False  # one lane, even thrice
+
+
+def test_correlated_dark_three_lanes_still_one_line():
+    lanes = [su.make_silent_receipt(p, 9.0, issued_at="2026-09-28 06:00 PT") for p in ("homelab", "gymlog", "ops")]
+    out = su.correlated_dark(lanes)
+    assert out["report"].count("correlated-dark") == 1
+    assert "homellog" not in out["report"]  # no mangled joins
+    assert "gymlog" in out["report"] and "homelab" in out["report"]
+
+
+def test_correlated_dark_never_received_is_worst_case():
+    lanes = [su.make_silent_receipt("homelab", None, issued_at="2026-09-28 06:00 PT"),
+             su.make_silent_receipt("gymlog", 3.0, issued_at="2026-09-28 06:05 PT")]
+    out = su.correlated_dark(lanes)
+    assert out["correlated"] is True
+    assert "never" in out["report"]
+
+
+def test_correlated_dark_malformed_counted_not_used():
+    out = su.correlated_dark([{}, silent_receipt(1.0), "not a receipt"])
+    assert out["ignored"] == 2
+    assert out["silent"] == ["homelab"]
+    assert out["correlated"] is False  # garbage never manufactures a finding
+
+
+def test_correlated_dark_clean_and_deterministic():
+    assert su.correlated_dark([live_receipt(1.0)])["report"] == "no silent lanes"
+    lanes = [silent_receipt(3.0), silent_receipt(10.0), live_receipt(1.0)]
+    a, b = su.correlated_dark(lanes), su.correlated_dark(list(reversed(lanes)))
+    assert a["report"] == b["report"]
+
+
 def test_silent_helper_receipt_shape():
     r = su.make_silent_receipt("gymlog", None, issued_at="2026-09-28 06:00 PT")
     assert r["credit"]["phaseC_gate"] is False
