@@ -64,12 +64,40 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
 ## Untrusted-`state` hardening (review hole #1 — deeper than key names)
 
 - The request builder sends **script-built fields only**: fingerprint, counters,
-  enum anomaly codes, timestamps, ids. **Free text is DROPPED by default.** When a
-  bounded excerpt is genuinely needed (signature classifier), it is fenced
+  enum anomaly codes, timestamps, ids, **plus the Phase-1 ledger columns**
+  (`task_id`, `task_type`, `turn_of_task`, `usd_cost`/`cost_usd` dual-key,
+  `memory_op_counts`) — carried straight from the thread rows so Jev receipts
+  join the Phase-5 unit-economics data without a second formatter (ledger-fix:
+  this spec predates #86's columns; the build inherits them, not vice versa).
+  **Free text is DROPPED by default.** When a bounded excerpt is genuinely
+  needed (signature classifier), it is fenced
   (`"excerpt_escaped": "<≤200 chars, control chars stripped>"`) and carries the
   untrusted-data marker from harvest law — the Decisions API reading instruction-
   shaped text cannot act on it any more than `monitor.classify` can.
 - Secret-KEY rejection stays (v1 check), but it is the LAST line, not the defense.
+
+## Room-receipt compatibility (Phase-2 contract merge — collision 2 answer)
+
+- `[jev:<call_site>]` lines land as **thread rows in the Phase-1/2 shape**
+  (task-less rows keep the old shape when no task binding exists; task-bound
+  rows carry the ledger columns) with `content` prefixed `[jev:<call_site>] ...`
+  and a row-level `kind: "jev"` marker — NOT parallel free-form text. The
+  transcript remains the single row schema (claims scanning + done gate +
+  dedup read it); MemPalace rows stay in their own store
+  (`tasks/<room>/<agent>.jsonl`) and are untouched by Jev.
+- Consequence: no competing format; Jev receipts are first-class thread rows.
+
+## Cursor-WIP dependency (collision 3 answer — per-site runnability)
+
+| call site | runnable on current main (0fbe941)? | dependency |
+| --- | --- | --- |
+| 4 done-gate suspicion | YES — `chip.done_gate` regex + room row contract exist on main | none |
+| 2 runbook classifier | YES — registry + MONITOR_CASES exist on main | none (revision hop needs room personas live, which is Phase 2 land) |
+| 1 wake-eligibility graying | YES in principle — the feed's actionable pipeline exists on main | richer gray framing may arrive with RAZ-330; not a blocker |
+| 3 signature classifier | DEGRADED until Cursor's RAZ-330 collectors + alert surface land | text-source ingestion (#78) exists; unknown-fingerprints mostly EMERGE from that stream |
+
+- All four sites are runnable OFFLINE via mock fixtures regardless (CI $0.00);
+  offline-first means no part of this proposal silently assumes unlanded surfaces.
 
 ## Thrift-rung amendment (review: "Jev after gray, never as a paid delay")
 
@@ -136,3 +164,13 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
    (golden-13 corollary binds its own proposer).
 3. `jev-1.13-free` / second surface → rejected (single-key story).
 4. Thrift ladder rung inserted as gray-only (deterministic → Jev → persona → wake).
+
+## Suite confirmation at rebased HEAD (Lyla's 04:00 ask)
+- Rebased onto origin/main `0fbe941` (Phase-2 circuit + #86 ledger columns).
+- Full suite from THIS branch tree: **384 passed, 1 skipped** (matches the ~384
+  expectation; CI file list re-pinned through #86/#87 chains).
+- Collision answers summary: (1) ledger rebased-in — state serializer predated
+  #86's columns, spec now carries them; (2) format merged into the Phase-2 row
+  contract (`kind: "jev"`, `content` prefix), MemPalace store untouched;
+  verdict = NO structural competition; (3) sites 4/2/1 runnable on main, site 3
+  degraded until RAZ-330 lands; all four runnable OFFLINE via mock fixtures.
