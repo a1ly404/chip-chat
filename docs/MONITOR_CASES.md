@@ -19,6 +19,16 @@ runners (Slice B). Chip chat never executes razzorstack mutations directly.
 | 5 | `suppression-saturation` | monitor dead-letter verdict on any key | no (predicted at DEADLETTER_AFTER=10) | chip | `clear-stale-suppress` (auto) + human-reopen receipt | warn-only (posts once per 4h) |
 | 6 | `skill-runner-fault` | `<skill_id>` timed-out / contract-drift / hang (Slice B) | no (future) | chip (runner dead-man) | new `skill-runner-restart` (propose) | yes |
 
+## Text-source signature classes (added per Ally 2026-09-27 — advisor + PGS + standup-stall)
+
+Real chip-feed-detectable signatures from the 2026-09-27 morning wall. They key
+on STRUCTURED numbers in a text-source receipt — never prose scraping (a
+prose-only source counts as `source=silent` under the emission contract).
+
+1. **`advisor-timeout-banner`** (advisor tooling is razzorstack's; chip DETECTS only): a source's receipt contains an explicit bounded-fail banner, e.g. `Command ['python3', 'scripts/disk_pressure_advisor.py', '--force'] timed out after 180 seconds` → alert `{key: "stage1-advisor", detail: "timeout=180s"}`. Diagnosing the hang parks to homelab lane. Observed 2026-09-27.
+2. **`pgs-zero-production`** (observed 2026-09-27: `ran=true AND ok==0 AND skipped==0 AND error==0`,.embedding a soft-health lie): scheduler-says-healthy while the delta is zero — the standing "health green, loop idle" signature. One zero-night = log-only (dedup coalesces); **two consecutive zero-nights = tell-Ally-once**.
+3. **`standup-stall`** — absorbed from the emission spec (Chip Chat builds the emitter): `source=silent` stalls carry `payload_age_h`; never five `unknown` lines. **correlated-dark law: ≥2 lanes silent in one window = ONE finding** (shared root cause upstream), tell-Ally-once; single-lane silence logs-and-continues. Phase C gate credit counts ONLY `source=live` receipts (fail-closed per golden 5).
+
 ## Verification bar per case (fixture for the 3-day gate resume math)
 
 - The gate counts quiet days only when the feed is **proven** quiet: after the
