@@ -661,6 +661,59 @@ def cmd_task_create(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_taskflow(args: argparse.Namespace) -> int:
+    """chip taskflow — Phase-2 circuit CLI (brief|claim|bind|gate), Lyla-locked.
+
+    Fail-closed faces: palace-gate failure prints a BLOCKED line + rc 4;
+    scope conflict rc 5. Nothing falls back silently to the raw task (golden 5).
+    """
+    from chip import taskflow  # local import keeps module load cheap elsewhere
+    if args.sub == "gate":
+        try:
+            taskflow.preflight()
+            print(json.dumps({"gate": "open"}, ensure_ascii=False))
+            return 0
+        except taskflow.TaskPalaceUnavailable as exc:
+            print(json.dumps({"gate": "BLOCKED", "error": str(exc)}, ensure_ascii=False))
+            return 4
+    if args.sub == "brief":
+        try:
+            brief = taskflow.build_brief(
+                args.task_id, args.agent, args.room, args.goal,
+                acceptance=[s.strip() for s in (args.ac or "").split("|") if s.strip()],
+                environ=None,  # process env (os.environ) — test overrides propagate
+            )
+        except taskflow.TaskPalaceUnavailable as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 4
+        print(brief.text)
+        return 0
+    if args.sub == "claim":
+        try:
+            taskflow.claim_if_free(args.room, args.agent, args.scope)
+        except taskflow.TaskScopeConflict as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 5
+        print("claimed")
+        return 0
+    if args.sub == "bind":
+        try:
+            out = taskflow.bind_result(
+                args.task_id, args.room, args.agent,
+                outcome=args.outcome,
+                receipts=[s.strip() for s in (args.receipts or "").split(",") if s.strip()],
+                lessons=args.lessons, task_type=args.task_type,
+                linear_anchor=args.linear_anchor, environ=None,  # process env
+            )
+        except taskflow.TaskPalaceUnavailable as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 4
+        print(out["linear_comment"])
+        print(f"memory: {out['palace']['path']}")
+        return 0
+    return 1
+
+
 def cmd_task_show(args: argparse.Namespace) -> int:
     try:
         envelope = task.load_task(args.task_id)
@@ -812,6 +865,33 @@ def build_parser() -> argparse.ArgumentParser:
     task_run.add_argument("--cwd", default=None)
     task_run.add_argument("--json", action="store_true")
     task_run.set_defaults(func=cmd_task_run)
+
+    tf = sub.add_parser("taskflow", parents=[common], help="Phase-2 circuit CLI (brief|claim|bind|gate)")
+    tf_sub = tf.add_subparsers(dest="sub", required=True)
+    tf_gate = tf_sub.add_parser("gate", help="0 = open, 4 = palace gate BLOCKED")
+    tf_gate.set_defaults(func=cmd_taskflow)
+    tf_brief = tf_sub.add_parser("brief", help="emit a task brief for an anchored task")
+    tf_brief.add_argument("--task-id", dest="task_id", required=True)
+    tf_brief.add_argument("--agent", dest="agent", required=True)
+    tf_brief.add_argument("--room", required=True)
+    tf_brief.add_argument("--goal", required=True)
+    tf_brief.add_argument("--ac", default="", help="acceptance items joined with '|'")
+    tf_brief.set_defaults(func=cmd_taskflow)
+    tf_claim = tf_sub.add_parser("claim", help="claim a scope (first-claim-wins; rc 5 on conflict)")
+    tf_claim.add_argument("--room", required=True)
+    tf_claim.add_argument("--agent", dest="agent", required=True)
+    tf_claim.add_argument("--scope", required=True)
+    tf_claim.set_defaults(func=cmd_taskflow)
+    tf_bind = tf_sub.add_parser("bind", help="bind a task result (receipt body + palace write)")
+    tf_bind.add_argument("--task-id", dest="task_id", required=True)
+    tf_bind.add_argument("--room", required=True)
+    tf_bind.add_argument("--agent", dest="agent", required=True)
+    tf_bind.add_argument("--outcome", required=True)
+    tf_bind.add_argument("--receipts", default="", help="comma-separated PR/commit/RAZ anchors")
+    tf_bind.add_argument("--lessons", default="")
+    tf_bind.add_argument("--task-type", dest="task_type", default="docs")
+    tf_bind.add_argument("--linear-anchor", dest="linear_anchor", default=None)
+    tf_bind.set_defaults(func=cmd_taskflow)
 
     done_gate_p = sub.add_parser(
         "done-gate",
