@@ -9,7 +9,7 @@ import sys
 
 from pathlib import Path
 
-from chip import config, constraints, law, learnings, mempalace, mock, openrouter, runtime, spend, store, task, tool
+from chip import config, constraints, law, learnings, mempalace, mock, openrouter, runtime, spend, store, task, task_ledger, tool
 from chip import standing_law
 from chip.need_tool import NeedToolError
 from chip.tools_manifest import list_tools
@@ -245,21 +245,28 @@ def recall_mined_memory_block(
     top_k: int | None = None,
     token_budget: int | None = None,
 ) -> str:
-    """Top-K mined memories for prompt assembly (advisory only)."""
+    """Top-K mined memories for prompt assembly (advisory only).
+
+    Returns (block, reads_count) — Phase-1 ledger records memory ops at the
+    call site; a recall with zero mined memories still counts one read attempt
+    (the op happened; the absence is visible in the prompt block being empty).
+    """
     k = config.memory_top_k(top_k)
     budget = config.memory_token_budget(token_budget)
+    reads = 0
     if k <= 0 or budget <= 0:
-        return ""
+        return "", reads
     memories = mempalace.load_memories(room, agent)
+    reads = 1
     if not memories:
-        return ""
+        return "", reads
     picked = mempalace.select_top_k(
         memories,
         user_text,
         k=k,
         token_budget=budget,
     )
-    return mempalace.format_recall_block(picked)
+    return mempalace.format_recall_block(picked), reads
 
 
 def build_room_messages(
@@ -271,10 +278,16 @@ def build_room_messages(
     recall_agent: str | None = None,
     memory_top_k: int | None = None,
     memory_token_budget: int | None = None,
+    memory_ops_out: dict[str, int] | None = None,
 ) -> list[dict[str, str]]:
-    """Room law (binding) plus persona, prior transcript, then the new user line."""
+    """Room law (binding) plus persona, prior transcript, then the new user line.
+
+    ``memory_ops_out`` (Phase-1 ledger): when a dict is passed, the memory-op
+    observability is recorded there (``reads`` so far) — opt-in per call site,
+    so every existing caller keeps itsOLD shape.
+    """
     agent_key = recall_agent or persona
-    mined = recall_mined_memory_block(
+    mined, memory_reads = recall_mined_memory_block(
         room,
         agent_key,
         user_text,
@@ -294,6 +307,8 @@ def build_room_messages(
     )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)
+    if memory_ops_out is not None:
+        memory_ops_out["reads"] = int(memory_reads)
     return [
         {"role": "system", "content": system},
         *history,
@@ -302,11 +317,28 @@ def build_room_messages(
 
 
 def close_room_session(room: str) -> int:
-    """Post-process the open session segment into per-agent memory JSONL files."""
+    """Post-process the open session segment into per-agent memory JSONL files.
+
+    Phase-1 ledger: this session's memory WRITE op is also logged to the room
+    JSONL as a spoken row (``memory_op_counts.writes/written_lines``) so cost
+    discovery for `close` shows up in the same stream as the turns that made it.
+    """
     segment = store.session_segment_rows(room)
     records = mempalace.extract_from_transcript(room, segment)
     written = mempalace.append_memories(room, records)
     store.mark_session_closed(room)
+    store.log_message(
+        room,
+        "system",
+        f"session close: memory mining wrote {written} line(s) from {len(records)} record(s)",
+        extra={
+            "memory_op_counts": {
+                "reads": 0,
+                "writes": len(records),
+                "written_lines": written,
+            },
+        },
+    )
     print(f"room {room!r} closed: extracted {len(records)} memories, wrote {written} lines")
     return 0
 
@@ -408,12 +440,14 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
             print(blocked)
         return 0
     history_limit = getattr(args, "history_limit", None)
+    memory_ops: dict[str, int] = {}
     messages = build_room_messages(
         room,
         persona,
         message,
         history_limit=history_limit,
         recall_agent=agent,
+        memory_ops_out=memory_ops,
     )
     messages[0]["content"] += (
         f"\n\nYou are speaking only as {agent}. "
@@ -434,6 +468,20 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
         return 2
     prompt_n, completion_n, session_usd, monthly_usd = _shot_usage(payload, ledger)
     call_cost = max(0.0, session_usd - before)
+    # Phase-1 task ledger (Lyla lock 2026-09-28): task binding is FIRST-CLASS —
+    # the columns land on task rows only; task-less shots keep the old row shape.
+    task_extra: dict[str, Any] = {}
+    task_id = (getattr(args, "task_id", "") or "").strip()
+    task_type = (getattr(args, "task_type", "") or "").strip()
+    if task_id:
+        turn = task_ledger.TaskCounter(task_ledger.counter_path(config.data_dir())).next_turn(task_id)
+        task_extra = task_ledger.counts_for_row(
+            task_id,
+            task_type or "other",
+            turn,
+            call_cost,
+            memory_ops,
+        )
     store.log_message(
         room,
         "assistant",
@@ -444,6 +492,7 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
             "tokens_prompt": prompt_n,
             "tokens_completion": completion_n,
             "cost_usd": call_cost,
+            **task_extra,
         },
     )
     result = {
@@ -453,6 +502,8 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
         "session_usd": session_usd,
         "monthly_usd": monthly_usd,
     }
+    if task_extra:
+        result["task_ledger"] = task_extra
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
@@ -697,6 +748,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Speaker id (persona key from config/chip_chat_personas.json when defined)",
     )
     room.add_argument("--json", action="store_true", help="Print one JSON object on stdout")
+    room.add_argument("--task-id", dest="task_id", default=None,
+                      help="task anchor (RAZ-xx) binding this shot's ledger row to an outcome")
+    room.add_argument("--task-type", dest="task_type", default=None,
+                      help=f"task class label (one of {sorted(task_ledger.TASK_TYPES_KNOWN)}; default 'other')")
     room.add_argument("--turn-limit", dest="turn_limit", type=int, default=1, help="Max exchanges this process (default 1)")
     room.add_argument(
         "--history-limit",
