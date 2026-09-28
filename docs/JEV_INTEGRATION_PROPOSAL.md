@@ -1,4 +1,12 @@
-# JEV_INTEGRATION_PROPOSAL — v2 (Ally review gate; NOT implemented)
+# JEV_INTEGRATION_PROPOSAL — v3.1 (Ally review gate; NOT implemented)
+
+> Status: v3.1 — the morning-cut review found v3 self-contradictory: the thrift
+> section said Jev runs on unknown fingerprints / wake-gray ONLY and that row #1
+> dies at the counter, while the band section used row #1's 0.75 to LOWER the
+> done-gate in-room floor, and the build plan still turned done-gate first.
+> **A mis-inserted row got promoted into a threshold.** v3.1 corrects all three
+> surfaces at once (bands, activation order, build plan) so the spec no longer
+> argues with itself.
 
 > Status: PROPOSAL v2 — rewritten after the Harden review (same PR #75, iterating).
 > v1 was a mute one-shot scorer; the review correctly identified that Chip Chat is
@@ -31,54 +39,75 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
 
 ## Insertion point v2 forms
 
-### v3 band law (Ally-morning review) — PER-CALL-SITE cuts, asymmetric-cost
-- **Top band >0.95 propose-auto stays; no lowering before a false-wake count.**
-  Asymmetry: a false auto-wake spends a speaking model on a receipt the room
-  will reject; a false needs-repro spends ONE cheap revision receipt. One row
-  cannot move 0.95 (row #1 alone is not the denominator).
-- **Suspicion-only sites (done-gate): in-room posting extends down to ~0.60.**
-  The room line is nearly free — burying a Done-lie under a revision hop is the
-  v1 veto in band form. Structural regex stays authority; Jev raises the line.
-  (Row #1's 0.75 = missed-defect class under the old 0.80 cut; the fix is the
-  lower in-room floor, which also exposes the deterministic-lesson below.)
-- **Band-2 bottom is provisional:** 0.80–0.85 = in-room ONLY when the receipt
-  NAMES a specific missing script field (a persona can supply it); otherwise
-  needs-repro. Tightening prose while counters stay equal re-prints ~0.75 —
-  "the bottom of band 2 is band 3 with an extra persona turn attached."
+### v3.1 band law — PER-SITE cuts, NO branch-at-live (jitter gated)
+
+- **First-live-window law: LOG the score, DO NOT branch on it.** Bands stay in
+  one constants block as UNLABELED hypotheses until same-state re-score jitter
+  and the known-bad/benign histogram exist: if identical state moves ~±0.10,
+  the 0.15-wide in-room band AND the 0.05 success delta are inside the noise,
+  and ">0.95" reads as a rank label, not a probability. Opening with live bands
+  confounds the ledger — every row becomes "what an unmeasured cut did," and
+  bad-threshold vs bad-model is indistinguishable afterwards. Measuring the
+  jitter IS the first window's purpose.
+- **Top band >0.95 propose-auto survives as a HYPOTHESIS only** — no lowering
+  before a false-wake count (asymmetry: false auto-wake spends a speaking
+  model; false needs-repro spends ONE cheap revision receipt). One row cannot
+  move 0.95 (row #1 alone is not the denominator).
+- **Done-gate 0.60 floor WITHDRAWN.** It was fit against row #1, which the
+  ladder excludes as counter-decidable — fitting a floor to a case Jev is
+  forbidden to see, with no benign histogram (0.60 may sit mid-range of
+  ordinary gray traffic, and every in-room line below the true floor is a room
+  turn; combined with the quiet-stall N=3 pager, a low floor is Ally-spend on
+  thin fingerprints — the expensive wake in disguise). Rubber-stamp path named
+  for the record: suspicion posts as a normal thread row the done-gate and
+  claims scanner already trust → cheap iteration manufactures the appearance
+  of a bound receipt → a Done-lie launders THROUGH the sensor.
+- **Done-gate auto-band: ABSENT.** Auto-raise is a veto; auto-clear is a pass;
+  both end the conversation. This site's only legal output is the logged score
+  (plus a room line ONLY after the counter rung has declined the receipt —
+  counter-decidable rows never reach Jev).
 - **Runbook choice confidence ≠ wake-anomaly score:** separate quantities, own
   cuts; sharing one number locks a coincidence.
-- **Missing data this spec must gather before any lock:** score histogram of
-  known-bad vs known-benign gray receipts; repeat-call jitter on identical
-  state (if the same state moves ~0.10, a 0.15-wide band is noise — then
-  ">0.95" reads as "top of the observed range", not a probability).
+- **Missing data before any lock:** known-bad vs benign histogram; repeat-call
+  jitter (0.15-wide bands only as trustworthy as that jitter).
 
-**1. Wake-eligibility — ORDER at gray, never veto (R8).**
-- TRUE (machine-checkable) wakes; FALSE stays quiet; GRAY → Jev orders:
-  bands as above with the in-room floor 0.80 on THIS site (cheap revision).
-- Jev has no third verdict "no."
+**1. Wake-eligibility — ORDER at gray, never veto (R8).** First-live-window:
+score logged, NO band action (v3.1 band law). TRUE wakes; FALSE quiet; stays.
 
 **2. Runbook classifier — separate quantity (own thresholds until its own data).**
-- needs-repro ⇒ ONE revision hop; hop budget below.
+needs-repro ⇒ ONE revision hop; hop budget below.
 
 **3. Signature classifier — UNKNOWN fingerprints only (unchanged).**
 
-**4. Done-gate suspicion — room-surfaced; in-room floor ~0.60 (v3 lowered per
-the asymmetry math + row-#1 lesson).**
+**4. Done-gate suspicion — LOGGER ONLY for the first window (v3.1: no in-room
+floor, no auto band; posts nothing until the counter rung has already declined
+the receipt; the ~0.60 floor is withdrawn and must not return without the
+benign histogram).**
 
-## v3 revision-hop law (2 calls hard ceiling)
+## v3 revision-hop law (2 calls hard ceiling) — SUCCESS TEST v3.1
 
-- **Success test:** score delta ≥0.05 on call 2 is stop-success ONLY when the
-  tighter state added script-built fields ABSENT on call 1 (receipt id, counter,
-  enum code). Same state hash + new score = **false convergence (persona led the
-  witness)** — verdict stays whatever the field rule says.
-- **Stop-fail:** call 2 stays under the site floor ⇒ case stays needs-repro;
-  hop count alone cannot mean success; delta alone cannot drive the loop
-  (0.79→0.86 wobble would thrash).
-- **Quiet-stall instrumentation (the failure to fix):** if a revision receipt
-  posts but no tighter state arrives within N=3 room turns → ledger row
-  "revision posted, no tighter state in N turns" logged beside both call rows;
-  escalated exactly once (tell-Ally-once ladder). Thrash is already bounded by
-  the two-call cap; quiet-stall v3 is what we instrumented instead.
+- **v3.1 strengthening: the delta test is insufficient.** Any new field changes
+  the state hash; a marginally relevant field plus a ≥0.05 jump scores as
+  "success" without doing real work. Replaced by a stronger predicate that
+  costs **no extra Jev call**:
+  1. the revision receipt (call 1's fallback) must NAMED the missing field id;
+  2. call 2's state must add THAT id — and **no other new keys**;
+  3. the new value must change a counter the deterministic rung already
+     understands (receipt count, bound id, enum);
+  4. **the rule rung must CHANGE ITS OWN RESULT.** If the rule still says the
+     same thing, the score move is rejected even though the hash changed and
+     the delta cleared 0.05 — witness-leading via relevance-gaming.
+- Delta ≥0.05 remains a NECESSARY signal but is not sufficient; and when the
+  jitter study shows ~±0.10 on identical state, **the 0.05 delta test is
+  dropped entirely** (a noise-sized delta cannot be a success test).
+- Same-state-hash + higher score remains rejected outright (witness-led, v3).
+- **Stop-fail:** call 2 below the site's deterministic-path verdict ⇒ case
+  stays needs-repro; hop count alone cannot mean success; delta alone cannot
+  drive the loop (0.79→0.86 wobble would thrash).
+- **Quiet-stall instrumentation:** revision posted, no tighter state within
+  N=3 room turns → ledger row beside both call rows; escalated exactly once
+  (tell-Ally-once). Thrash is bounded by the cap; quiet-stall is what v3.1
+  instruments.
 
 ## v3 thrift-rung skips (where Jev has NO signal)
 
@@ -122,6 +151,12 @@ the asymmetry math + row-#1 lesson).**
   dedup read it); MemPalace rows stay in their own store
   (`tasks/<room>/<agent>.jsonl`) and are untouched by Jev.
 - Consequence: no competing format; Jev receipts are first-class thread rows.
+- **Laundering guard (v3.1, mandatory)**: presence/type of ANY subsequent row
+  (jev receipts, persona chatter, contest lines) never counts as receipt
+  binding for the done-gate or claims scanner — binding happens ONLY by the
+  structural rule (a receipt line bound to a box passes the regex fields it
+  requires). Chatter volume cannot warm a box toward "bound." The row shape is
+  shared; the SEMANTICS of binding are unchanged by `kind:"jev"` rows existing.
 
 ## Cursor-WIP dependency (collision 3 answer — per-site runnability)
 
@@ -162,18 +197,35 @@ the asymmetry math + row-#1 lesson).**
   from training eyes; published as a ledger table on RAZ-16.
 - Three-band form adopted as the working hypothesis; single-cut rejected.
 
-## Golden-17 candidate: evidence-triggered (v3 gate, not time/first-wake)
+## Golden-17 candidate: FIVE-condition gate (v3.1, evidence-triggered)
 
-- **Eligibility to DRAFT** after the first false wake — but adoption requires ALL
-  of: (1) disagreement-set ledger has order-of-ten gray rows (a denominator —
-  one row cannot set law); (2) the false wake was on the **gray path**
-  (deterministic rules were inconclusive — if a counter should have caught it,
-  the fix is a new RULE, and writing Golden-17 would canonize the wrong layer);
-  (3) the room rejection is recorded as a ledger row (band >0.95, room
-  rejected), not a vibe.
-- Candidate text is already the fail-closed spec wording; promoting to golden
-  law = claiming confidence thresholds are trustworthy enough to bind — which
-  wants a false-wake rate that does not exist yet.
+Eligibility to DRAFT after the first false wake; **adoption requires ALL FIVE:**
+
+1. **Ten DISTINCT fingerprints across more than one call site.** A family of
+   ten similar rows, or counter-misses labeled gray because the counter was
+   never written, do not satisfy the denominator. Rows the skip list should
+   have caught are excluded.
+2. **The false wake was on the gray path** — deterministic rules were
+   inconclusive. If a named counter in the thrift list matches the receipt,
+   the fix is a new RULE, and writing Golden-17 would canonize the wrong layer.
+3. **The anti-incentive check was recorded BEFORE the Jev call** (not after the
+   rejection): an independent determination that no named counter in the
+   thrift list matches the receipt. "Counter should have caught it" judged by
+   the proposer lets the proposer under-specify counters until the line is
+   adoptable — laundering the gate itself.
+4. **Jitter-immune: the false-wake state was RE-SCORED, and the second score
+   stayed above the auto cut.** A 0.96 that re-scores at 0.86 on the same hash
+   is jitter — a room rejection of noise satisfies none of the conditions.
+5. **The rejection names the band and the state hash, and comes from a speaker
+   who did not author the revision state** (values flowing from a rejected
+   band's own author = self-validation = the R11-forbidden path).
+
+Plus, per-site scope split (final): **suspicion rejections do NOT count as
+false wakes.** A rejected suspicion-auto from the cheapest site manufactures
+evidence for a law aimed at confidence gates in general. False wake means one
+thing: a **wake-eligibility auto that a human or inject speaker rejected**.
+Candidate text is already fail-closed wording; promoting it to golden law
+before the five hold = a false-wake-rate claim without a false-wake rate.
 
 ## Single pipe enforced
 - `jev-1.13-free` / OpenCode Zen / any second surface: **rejected** (v2 per review: a second pipe breaks the single-key story). One pipe: OpenRouter only.
@@ -186,14 +238,26 @@ the asymmetry math + row-#1 lesson).**
   fail-closed fallback (§3) · `usage.cost` ledger metering (§4) · Jevons brake
   (§4: calls only when a receipt is already actionable, once per fingerprint).
 
-## Rev-2 build plan (still gated: your GO + Grok consult standing)
+## Rev-2 build plan (v3.1: safe-first-activation, skip-list enforced in the caller)
+
 1. `chip/jev_router.py` — request builder (script-built fields; excerpt fencing;
-   redaction sweep), room-receipt formatter, band constants block, fail-closed
-   fallback, mock fixture (CI $0.00; live only behind GO + env).
-2. Threshold calibration = disagreement-set collection on real receipts BEFORE any
-   threshold constants are promoted (ledger on RAZ-16).
-3. Insertion order: done-gate suspicion (flag→room) → signature classifier
-   (unknown-fingerprints only) → wake-eligibility graying → runbook revision hop.
+   redaction sweep; **literal free-text DROPPED**), room-receipt formatter, band
+   constants block (UNLABELED hypotheses — never branch), fail-closed fallback,
+   mock fixture (CI $0.00; live only behind GO + env).
+2. **First activation pair (both score-log-only):**
+   - **wake-gray scoring**: logs scores on deterministic-gray receipts; takes NO
+     band action; the conservative default action each site already has
+     (done-gate: structural finding only; wake-gray: stays quiet) runs as-is.
+   - **done-gate suspicion LOGGER**: runs ONLY on receipts the counter rung has
+     ALREADY declined as gray (counter-decidable rows skip Jev — enforced IN
+     THE CALLER, not in the thrift text). Room lines: deferred until the benign
+     histogram + jitter land (row #1's mis-insertion is the standing example of
+     why no-floor-cheap-room-lines must not exist pre-measurement).
+   - **Runbook + signature classifier: NOT activated.** Runbook can start a
+     remediation hop (higher blast radius than a transcript line); signature
+     is degraded until RAZ-330. Revisit after Phase 3 signal sources land.
+3. Threshold calibration = disagreement-set collection on real receipts BEFORE
+   any threshold constants are promoted (ledger on RAZ-16).
 
 ## Ally verification checklist (v2 — how each claim is checked without me)
 
