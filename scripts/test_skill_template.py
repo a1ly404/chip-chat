@@ -84,3 +84,13 @@ def test_gate_and_done_bar_referenced() -> None:
     assert "reopen_required" in text
     assert "claim done" in text and "Done" in text
     assert "verified-as-of" in text
+
+
+def test_gold_signal_down_contract() -> None:
+    p = next(x for x in _templates() if x.name == "gold-signal-down.template.md")
+    check_template_contract(p)
+    text = _read(p)
+    assert "skill_id: gold-signal-down" in text
+    assert "discord-bot-loop-restart" in text  # registry-bound rollback id
+    assert '"loops_ok": false' in text or '"loops_ok" : false' in text
+    assert "standup_schedule.loops_ok" in text
