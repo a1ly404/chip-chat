@@ -109,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="dir holding <lane>.json standup receipts (absent = stall)")
     parser.add_argument("--post", action="store_true",
                         help="post the SITREP to CHIP_WEBHOOK_MONITORING if set (dry-run default)")
+    parser.add_argument("--signal-file", default=None,
+                        help="signal JSON path (default: env CHIP_CHAT_STANDUP_SIGNAL_FILE, else skipped-noted)")
     parser.add_argument("--json", action="store_true", help="machine-checkable receipt line to stderr")
     args = parser.parse_args(argv)
     lanes = [s.strip() for s in args.lanes.split(",") if s.strip()]
@@ -127,7 +129,24 @@ def main(argv: list[str] | None = None) -> int:
         rc = 2
     else:
         rc = 0
+
+    # Signal contract (RAZ-329/RAZ-331; binding anti-silence law): the signal
+    # is written on EVERY run — dry-run included — because "absence of a
+    # signal file is the one thing that is never allowed".
+    from chip import standup_signal
+
+    receipts = load_receipts(args.receipts_dir, lanes)
+    fin_receipts = [standup.finalize_receipt(dict(r)) for r in receipts]
+    signal = standup_signal.build_signal(
+        fin_receipts, verified_as_of=standup_signal._iso_utc()
+    )
+    sig = standup_signal.write_signal(signal, args.signal_file)
+    print(f"signal: {sig['note']}" + (f" -> {sig['wrote']}" if sig["wrote"] else ""))
     if args.post:
+        # --post gates the SITREP; the URL exposure is env-presence-gated
+        post = standup_signal.post_signal_url()
+        if post["url"]:
+            print(f"signal-url: {post['note']}")
         ok, note = post_to_monitoring(window)
         print(note)
         if not ok:
