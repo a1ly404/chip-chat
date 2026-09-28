@@ -1,118 +1,138 @@
-# JEV_INTEGRATION_PROPOSAL — verifiable spec (Ally review gate; NOT implemented)
+# JEV_INTEGRATION_PROPOSAL — v2 (Ally review gate; NOT implemented)
 
-> Status: PROPOSAL ONLY. Nothing here is wired; no routing change exists; personas
-> stay exactly as the standing spec says (dev Qwen 3.7 Flash / PM GLM 5.3-Flash /
-> mock+CI). Merging this document = agreeing the CONTRACT, not the build. Build
-> happens in a separate PR after your GO + (per law) the Grok consult.
+> Status: PROPOSAL v2 — rewritten after the Harden review (same PR #75, iterating).
+> v1 was a mute one-shot scorer; the review correctly identified that Chip Chat is
+> a ROOM — agents argue, narrow the question, and try again. v2 makes Jev a
+> queue-orderer and conversational anchor, never a verdict.
 >
-> Key fact this spec verifies first: **Jev runs over the SAME OpenRouter API key**
-> chip already uses (`OPENROUTER_CC_API_KEY`) — model slug `typesafe/jev-1.13`,
-> endpoint `POST https://openrouter.ai/api/alpha/decisions` (OpenRouter's Decisions
-> API), billed to the same OpenRouter account. **No new vendor, no new credential.**
+> Unchanged verified ground (from v1, accepted in review): same
+> `OPENROUTER_CC_API_KEY`; pinned slug `typesafe/jev-1.13` (alias never); mock
+> fixtures offline; secret-KEY rejection; Jev never lives inside `authorize()`,
+> `monitor.classify()`, or done-gate regex; fail-closed to no-wake/needs-repro/
+> structural regex; `usage.cost` into the existing ledger; Jevons brake (calls
+> only on already-actionable receipts, once per fingerprint).
 
-## 1. What Jev is / is not (verifiable from OpenRouter's model page)
+## CORE CHANGE: Jev starts conversations; it never ends them
 
-| property | fact | verification |
-| --- | --- | --- |
-| model id | `typesafe/jev-1.13` (pinned; `~typesafe/jev-latest` NEVER used by chip) | `GET openrouter.ai/typesafe/jev-1.13` model page |
-| output | typed decisions (`choice`/`noul`/`score`) + confidence; FREE output tokens; NO text/prose possible | API reference + response shape below |
-| price | $0.042/M input tokens (output free); response carries `usage.cost` in USD | per-call spend = self-reporting |
-| context | 32k tokens (state + questions) | model page |
-| auth | same OpenRouter key chip already holds | docs: "any valid OpenRouter API key" |
+v1 used confidence as a VETO. v2: Jev only works the band the deterministic
+rules already left open — and every live call emits a **room receipt** the next
+persona can answer (the missing product requirement from the review).
 
-## 2. Where chip uses it (4 insertion points — all ADVISORY scoring)
+## The room receipt (mandatory on every live call)
 
-| # | spot | question schema (typed) | law carried |
-| --- | --- | --- | --- |
-| 1 | **Wake-eligibility (golden 8 qualifier)** | `noul`: "does this anomaly qualify for a personalized wake under R8?" — criteria: machine-checkable anomaly fields from the receipt | low confidence ⇒ NO wake (R8: exceptions are machine-checkable, never vibes) |
-| 2 | **Runbook-id classifier (fixer wake)** | `choice`: one of the registry runbook ids ∪ `needs-repro` | low confidence ⇒ `needs-repro` (R14 encoded as output schema) |
-| 3 | **Text-source signature classifier** (advisor-banner / pgs-zero-prod / standup-stall) | `choice` over the MONITOR_CASES signature classes + `noul noise` | feed dedup/verify-twice still applies to whatever it labels |
-| 4 | **Done-gate suspicion pre-check** | `noul`: "does this receipt line actually evidence THIS box?" | STRUCTURAL regex stays the authority; Jev only flags suspicion for human review — never passes/fails alone |
-
-NOT used for: persona replies (it cannot speak), any Law-harness test (those stay
-deterministic pytest), any `authorize()`/`monitor.classify` decision (deterministic
-code remains the gate — Jev only scores candidates the gates hand it).
-
-## 3. Determinism, fail-closed, and no-second-path (the three laws the spec must satisfy)
-
-- **Determinism/pinning:** slug pinned to `typesafe/jev-1.13`, never the alias; the
-  dated snapshot is recorded in every receipt. Thresholds are constants in code
-  (`JEV_WAKE_MIN_CONFIDENCE = 0.90`, `JEV_RUNBOOK_MIN_CONFIDENCE = 0.80`, Ally-tunable).
-- **Fail-closed:** Jev unreachable / timeout / rate-limited / malformed response ⇒
-  callers fall back to the deterministic path (rules/`needs-repro`/no-wake) —
-  exactly one retry, then fallback. Jev-down must be indistinguishable from "gray
-  zone, human reviews later" — never a blocker, never a hidden free pass.
-- **No second path:** `authorize()`, `monitor.classify()`, `done_gate` regexes remain
-  the ONLY gates. Jev output can lower a burden of review, never bypass a gate. The
-  diff review check: any PR adding a Jev call must prove no gate's verdict can be
-  overridden by it (test asserts the deterministic fallback exists per call site).
-
-## 4. Spend + budget (native to the existing gates)
-
-- Every response carries `usage.cost` (USD, self-reporting) — chip logs it into the
-  ledger JSONL as jev rows (`model=typesafe/jev-1.13`), aggregated in `chip spend`.
-- Same $5 WARN / $10 HARD monthly; same $0.50/$1.00 session walls; projected real
-  usage ≈ $0.00x/month at wire scale (input-token metering; output free).
-- **Jevons-paradox brake sits in law, not price:** rate of jev calls per window is
-  bounded by the R8/R12 counters (wake-eligibility runs only when a receipt is
-  already actionable; sweep classification runs once per new fingerprint). No other
-  call cadence exists to invent.
-
-## 5. Secrets / tenant-boundary law checks (golden 15 + 16)
-
-- Inputs: structured receipts only (probe JSON, fingerprints, counters, redacted
-  text) — health strings, no secret values. The schema REJECTS any key named like a
-  secret (`token|key|secret|password|webhook`) from `state` — enforced in the
-  request builder with a test (redaction sweep before send).
-- Key = the existing `OPENROUTER_CC_API_KEY` env; never printed (same openrouter
-  redaction rules as chat completions).
-- razzorstack content never enters a Jev `state` (one-lane-one-writer hygiene:
-  cross-lane texts are parked to their lanes, not classified here).
-
-## 6. Implementation sketch (build-on-approval; nothing exists yet)
-
-```python
-# scripts/chip/jev_router.py (offline-first; live calls behind explicit env)
-def decide(state: dict, questions: dict, *,
-           environ=None, mock: bool = False) -> dict:
-    """POST /api/alpha/decisions with pinned model; returns typed answers.
-    mock=True (or CHIP_CHAT_MOCK=1) returns deterministic fixture offline.
-    Fail-closed: transport/shape errors -> {"status": "fallback", ...}."""
 ```
+[jev:<call_site>] question=<id> band=<auto|room|needs-repro> conf=<0.xx>
+state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call once
+```
+- Posted to the room transcript (footer of the propose card / wake card), NOT a
+  side log — the contest happens where the agents live.
+- Next persona may reply with a TIGHTER state (one hop) → one re-call → stop.
+  Both calls logged; the delta between them IS the machine-learning signal.
 
-- Env: honors `OPENROUTER_CC_API_KEY` (same key as chat). Mock responses fixture
-  versioned in-repo (no network in tests — CI stays $0.00).
-- CLI surfacing (both `--json`-shaped, offline-by-default): `chip jev ping` (schema
-  probe), `chip jev classify --state-file x.json` — needed for Ally's one-shot
-  self-verification without touching prod paths.
-- Live calls: only inside the 3 call sites of §2, only when their host feature is
-  itself enabled (Phase B/C gates), and only after the first fixture-based eval
-  shows ≥95% agreement with the deterministic baseline on a labeled replay set.
+## Insertion point v2 forms
 
-## 7. Ally verification checklist (how you check each claim without me)
+**1. Wake-eligibility — ORDER, never veto (R8 preserved).**
+- Machine-checkable TRUE set wakes (unchanged); FALSE set stays quiet (unchanged).
+- The GRAY set (rules inconclusive) goes to Jev for ORDERING only: `score` "How
+  strongly does this receipt represent a machine-checkable anomaly?" with the
+  score bands below. **Jev has no third verdict called "no."**
+- Bands: `>0.95 propose-auto · 0.80–0.95 propose-in-room (a persona picks it up
+  and may tighten) · <0.80 needs-repro`. **Numeric cuts are NOT locked until the
+  disagreement-set numbers exist (see §eval).** Thresholds live in one constants
+  block, Ally-tunable, never inside gates.
 
-1. **Single-key claim**: OpenRouter docs (jev tutorial) state "any valid OpenRouter
-   API key works, billed to your account" — no TypeSafe signup. Check the cc-env:
-   still exactly one `OPENROUTER_CC_API_KEY` in `.env`/Infisical after any build.
-2. **Pinning check**: `grep -r "jev-latest" scripts/` → zero hits ever.
-3. **No-silent-integration check**: `grep -rn "jev" scripts/chip/(authorize|monitor|done_gate).py`
-   → zero hits (Jev never lives INSIDE the gates - it is called BY callers).
-4. **Determinism of gates unchanged**: full suite includes the existing
-   determinism/dedup/authorize tests untouched by Jev PRs.
-5. **Spend check**: `chip spend` shows jev rows only after an explicit live GO;
-   mock/CI total stays $0.00.
-6. **Cost reality check**: model page price $0.042/M input, output free; usage.cost
-   in every response is auditable per call.
+**2. Runbook classifier — needs-repro is a START of a hop, not a stop.**
+- Run 1 (deterministic-path fitness): if `choice.confidence < 0.80` → the chosen
+  fallback posts a structured revision receipt — which option lost, confidence,
+  exactly what a tighter state would change.
+- **One revision hop:** one persona answers with a tighter state (script-built
+  fields only), one re-call, then STOP (both calls logged in the room receipt).
+- The repro is produced IN THE ROOM; the classifier cannot stall a fix forever.
 
-## 8. Open questions for the Ally/Grok consult
+**3. Signature classification — Jev earns its keep only on UNKNOWN fingerprints.**
+- Known MONITOR_CASES classes never hit Jev (dedup + verify-twice already run on
+  whatever it labels; labelers in front of trusted rules are paid noise).
+- New/unknown fingerprint → `choice` over signature classes ∪ `unknown` → the
+  room receipt proposes the label; a persona may contest by supplying counters.
 
-1. Rung order confirmation: script → GHA → **Jev** → cheap-agent → expensive-LLM
-   (inserting a decision-model rung changes TOKEN_THRIFT ladder text = a spec-A PR).
-2. Threshold values (`0.90` / `0.80`) — or does Grok prefer band structure (e.g.
-   `>0.95 auto / 0.80–0.95 propose / <0.80 needs-repro`)?
-3. Any 17th golden item? ("calibrated-decision gates: confidence < threshold ⇒
-   deterministic fallback") — candidate is YOURS to ack, and per the PHASE-B
-   R17-note it enters the GOLDEN block only by an explicit window ack of yours,
-   never silent backfill.
-4. Free tier `jev-1.13-free` (OpenCode Zen) as the dev/CI mockable target? (adds a
-   second surface — recommended NO; keep chip on the one OpenRouter pipe).
+**4. Done-gate suspicion — kept, surfaced in the room.**
+- Structural regex stays authority; Jev raises suspicion on receipt↔box mismatch.
+- The suspicion line posts to the room transcript (not a side log) so a persona
+  or Ally can contest it with a better-bound receipt; contesting re-binds
+  structurally, never by Jev's say-so.
+
+## Untrusted-`state` hardening (review hole #1 — deeper than key names)
+
+- The request builder sends **script-built fields only**: fingerprint, counters,
+  enum anomaly codes, timestamps, ids. **Free text is DROPPED by default.** When a
+  bounded excerpt is genuinely needed (signature classifier), it is fenced
+  (`"excerpt_escaped": "<≤200 chars, control chars stripped>"`) and carries the
+  untrusted-data marker from harvest law — the Decisions API reading instruction-
+  shaped text cannot act on it any more than `monitor.classify` can.
+- Secret-KEY rejection stays (v1 check), but it is the LAST line, not the defense.
+
+## Thrift-rung amendment (review: "Jev after gray, never as a paid delay")
+
+- Ladder v2: script → GHA → **deterministic rule** → **Jev (gray only)** →
+  speaking persona → expensive wake.
+- Jev runs when the deterministic check returns **gray**; a speaking persona runs
+  only if Jev's receipt asks for a revision or a human wake. If a regex or
+  counter can answer, Jev is a paid delay — the rung text asserts that.
+
+## Eval law (review: "measuring agreement measures nothing")
+
+- **The disagreement set is the only evidence.** Baseline-correct cases prove
+  nothing. Before any numeric threshold is treated as real, publish:
+  1. disagreement-set size (deterministic baseline said gray/needs-repro)
+  2. false-wake count (Jev band >0.95 but room rejected)
+  3. false-needs-repro count (Jev <0.80 but room's tightened state classified ≥0.80)
+- The labeled replay set comes from REAL receipts (done-gate QA style), excluded
+  from training eyes; published as a ledger table on RAZ-16.
+- Three-band form adopted as the working hypothesis; single-cut rejected.
+
+## Golden-17 candidate: NOT adopted
+- Candidate line ("calibrated-decision gates: confidence < threshold ⇒
+  deterministic fallback") stays a candidate. Adopting it from this proposal
+  before seeing **one real false wake** = the silent backfill the phase note
+  forbids (golden 13 corollary applies to its own proposer).
+
+## Single pipe enforced
+- `jev-1.13-free` / OpenCode Zen / any second surface: **rejected** (v2 per review: a second pipe breaks the single-key story). One pipe: OpenRouter only.
+</think><tool_call>edit<arg_key>newString</arg_key><arg_value>- `jev-1.13-free` / OpenCode Zen / any second surface: **rejected** (v2 per review: a second pipe breaks the single-key story). One pipe: OpenRouter only.
+
+## What v2 keeps from v1 verbatim (the accepted base)
+- Same OpenRouter key, no new vendor (§1 table) · pinned slug (§1) · mock
+  fixtures offline, CI $0.00 (§6) · secret-key rejection (§5, now last-line) ·
+  Jev never inside `authorize()`/`monitor.classify()`/done-gate regex (§3) ·
+  fail-closed fallback (§3) · `usage.cost` ledger metering (§4) · Jevons brake
+  (§4: calls only when a receipt is already actionable, once per fingerprint).
+
+## Rev-2 build plan (still gated: your GO + Grok consult standing)
+1. `chip/jev_router.py` — request builder (script-built fields; excerpt fencing;
+   redaction sweep), room-receipt formatter, band constants block, fail-closed
+   fallback, mock fixture (CI $0.00; live only behind GO + env).
+2. Threshold calibration = disagreement-set collection on real receipts BEFORE any
+   threshold constants are promoted (ledger on RAZ-16).
+3. Insertion order: done-gate suspicion (flag→room) → signature classifier
+   (unknown-fingerprints only) → wake-eligibility graying → runbook revision hop.
+
+## Ally verification checklist (v2 — how each claim is checked without me)
+
+1. **Single-key**: still exactly one `OPENROUTER_CC_API_KEY` (no TypeSafe/Zen cred);
+   OpenRouter docs declare "any valid OpenRouter API key" is sufficient for Jev.
+2. **Pin**: `grep -r "jev-latest" scripts/` → zero hits forever.
+3. **Gates untouched**: `grep -rn jev scripts/chip/authorize.py scripts/chip/monitor.py
+   scripts/chip/done_gate.py` → zero (Jev called BY callers, never inside gates).
+4. **Room-receipt law**: every live call site shows a transcript receipt line
+   (see the room-receipt section) — verified by PR diff inspection.
+5. **Spend**: `usage.cost` rows land in the existing ledger; CI/mock $0.00.
+6. **Eval guarantees**: placeholder thresholds live in ONE constants block with
+   "NOT LOCKED — disagreement-set numbers required first" proven by test.
+
+## Open questions retained (all answered in v2)
+1. Thresholds → three-band working hypothesis adopted; numbers unlocked until the
+   disagreement-set data exists.
+2. 17th golden line → NOT adopted until one real false wake is observed
+   (golden-13 corollary binds its own proposer).
+3. `jev-1.13-free` / second surface → rejected (single-key story).
+4. Thrift ladder rung inserted as gray-only (deterministic → Jev → persona → wake).
