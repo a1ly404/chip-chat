@@ -49,8 +49,8 @@ def validate_receipt(receipt: Mapping[str, Any]) -> list[str]:
     if receipt.get("standup") not in _STANDUPS:
         errs.append("standup: must be one of homelab|gymlog")
     issued = receipt.get("issued_at")
-    if not isinstance(issued, str) or not issued.strip():
-        errs.append("issued_at: required string")
+    if not (issued is None or (isinstance(issued, str) and issued.strip())):
+        errs.append("issued_at: required string or null (null = silent-lane, issue time unknown)")
     payload = receipt.get("payload")
     if not isinstance(payload, Mapping):
         errs.append("payload: required mapping")
@@ -208,10 +208,15 @@ def consume(receipts: Iterable[Mapping[str, Any]]) -> dict[str, int]:
     return {"received": received, "credited": credited}
 
 
-def make_silent_receipt(standup: str, age_h: float | None, *, issued_at: str, **extra: Any) -> dict[str, Any]:
-    """Typed receipt from a silent window (the only honest shape available)."""
-    if not issued_at.strip():
-        raise StandupSchemaError("issued_at: a silent receipt still needs its issue timestamp")
+def make_silent_receipt(standup: str, age_h: float | None, *, issued_at: str | None = None, **extra: Any) -> dict[str, Any]:
+    """Typed receipt from a silent window (the only honest shape available).
+
+    ``issued_at=None`` is HONEST for silent lanes (issue time unknown — a
+    fabricated timestamp would be golden-1 fiction); non-empty strings pass
+    through for lanes that genuinely know their issuance.
+    """
+    if issued_at is not None and not str(issued_at).strip():
+        raise StandupSchemaError("issued_at: null (unknown) or a non-empty string, never empty")
     rec: dict[str, Any] = {
         "standup": standup,
         "issued_at": issued_at,

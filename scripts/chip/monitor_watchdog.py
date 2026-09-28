@@ -262,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print()
         print(baseline_report(findings_state(findings), baseline_state, baseline_collected))
+    print(f"export_sha16: {hashlib.sha256(json.dumps(issues, sort_keys=True).encode()).hexdigest()[:16]}")
 
     if args.state_file:
         state_path = Path(args.state_file).expanduser()
