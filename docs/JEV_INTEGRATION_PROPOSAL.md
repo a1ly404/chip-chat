@@ -31,35 +31,71 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
 
 ## Insertion point v2 forms
 
-**1. Wake-eligibility — ORDER, never veto (R8 preserved).**
-- Machine-checkable TRUE set wakes (unchanged); FALSE set stays quiet (unchanged).
-- The GRAY set (rules inconclusive) goes to Jev for ORDERING only: `score` "How
-  strongly does this receipt represent a machine-checkable anomaly?" with the
-  score bands below. **Jev has no third verdict called "no."**
-- Bands: `>0.95 propose-auto · 0.80–0.95 propose-in-room (a persona picks it up
-  and may tighten) · <0.80 needs-repro`. **Numeric cuts are NOT locked until the
-  disagreement-set numbers exist (see §eval).** Thresholds live in one constants
-  block, Ally-tunable, never inside gates.
+### v3 band law (Ally-morning review) — PER-CALL-SITE cuts, asymmetric-cost
+- **Top band >0.95 propose-auto stays; no lowering before a false-wake count.**
+  Asymmetry: a false auto-wake spends a speaking model on a receipt the room
+  will reject; a false needs-repro spends ONE cheap revision receipt. One row
+  cannot move 0.95 (row #1 alone is not the denominator).
+- **Suspicion-only sites (done-gate): in-room posting extends down to ~0.60.**
+  The room line is nearly free — burying a Done-lie under a revision hop is the
+  v1 veto in band form. Structural regex stays authority; Jev raises the line.
+  (Row #1's 0.75 = missed-defect class under the old 0.80 cut; the fix is the
+  lower in-room floor, which also exposes the deterministic-lesson below.)
+- **Band-2 bottom is provisional:** 0.80–0.85 = in-room ONLY when the receipt
+  NAMES a specific missing script field (a persona can supply it); otherwise
+  needs-repro. Tightening prose while counters stay equal re-prints ~0.75 —
+  "the bottom of band 2 is band 3 with an extra persona turn attached."
+- **Runbook choice confidence ≠ wake-anomaly score:** separate quantities, own
+  cuts; sharing one number locks a coincidence.
+- **Missing data this spec must gather before any lock:** score histogram of
+  known-bad vs known-benign gray receipts; repeat-call jitter on identical
+  state (if the same state moves ~0.10, a 0.15-wide band is noise — then
+  ">0.95" reads as "top of the observed range", not a probability).
 
-**2. Runbook classifier — needs-repro is a START of a hop, not a stop.**
-- Run 1 (deterministic-path fitness): if `choice.confidence < 0.80` → the chosen
-  fallback posts a structured revision receipt — which option lost, confidence,
-  exactly what a tighter state would change.
-- **One revision hop:** one persona answers with a tighter state (script-built
-  fields only), one re-call, then STOP (both calls logged in the room receipt).
-- The repro is produced IN THE ROOM; the classifier cannot stall a fix forever.
+**1. Wake-eligibility — ORDER at gray, never veto (R8).**
+- TRUE (machine-checkable) wakes; FALSE stays quiet; GRAY → Jev orders:
+  bands as above with the in-room floor 0.80 on THIS site (cheap revision).
+- Jev has no third verdict "no."
 
-**3. Signature classification — Jev earns its keep only on UNKNOWN fingerprints.**
-- Known MONITOR_CASES classes never hit Jev (dedup + verify-twice already run on
-  whatever it labels; labelers in front of trusted rules are paid noise).
-- New/unknown fingerprint → `choice` over signature classes ∪ `unknown` → the
-  room receipt proposes the label; a persona may contest by supplying counters.
+**2. Runbook classifier — separate quantity (own thresholds until its own data).**
+- needs-repro ⇒ ONE revision hop; hop budget below.
 
-**4. Done-gate suspicion — kept, surfaced in the room.**
-- Structural regex stays authority; Jev raises suspicion on receipt↔box mismatch.
-- The suspicion line posts to the room transcript (not a side log) so a persona
-  or Ally can contest it with a better-bound receipt; contesting re-binds
-  structurally, never by Jev's say-so.
+**3. Signature classifier — UNKNOWN fingerprints only (unchanged).**
+
+**4. Done-gate suspicion — room-surfaced; in-room floor ~0.60 (v3 lowered per
+the asymmetry math + row-#1 lesson).**
+
+## v3 revision-hop law (2 calls hard ceiling)
+
+- **Success test:** score delta ≥0.05 on call 2 is stop-success ONLY when the
+  tighter state added script-built fields ABSENT on call 1 (receipt id, counter,
+  enum code). Same state hash + new score = **false convergence (persona led the
+  witness)** — verdict stays whatever the field rule says.
+- **Stop-fail:** call 2 stays under the site floor ⇒ case stays needs-repro;
+  hop count alone cannot mean success; delta alone cannot drive the loop
+  (0.79→0.86 wobble would thrash).
+- **Quiet-stall instrumentation (the failure to fix):** if a revision receipt
+  posts but no tighter state arrives within N=3 room turns → ledger row
+  "revision posted, no tighter state in N turns" logged beside both call rows;
+  escalated exactly once (tell-Ally-once ladder). Thrash is already bounded by
+  the two-call cap; quiet-stall v3 is what we instrumented instead.
+
+## v3 thrift-rung skips (where Jev has NO signal)
+
+- **Deterministic verdict exists ⇒ stop at the rule rung.** "Done claimed ∧
+  boxes_checked>0 ∧ receipts_bound=0" IS a counter — row #1 should have ended
+  at the deterministic rung; sending it to Jev = paid delay on a counter
+  question (Jev has no signal to add when you can name the counter).
+- **Next action independent of the label ⇒ Jev skipped.** Unbound-Done fix =
+  re-bind a receipt (regex already flagged it); rule → speaking persona direct.
+- Jev earns calls on **unknown fingerprints** and **wake-gray** only (output
+  chooses ordering / signature class). Persona remains the skip target from the
+  rule rung when the rule's result is already what the room contests.
+- **Row-#1 carcinised candor (ledger follows separately):** the review's
+  counter-lesson classifies row #1 as a mis-insertion; its corrective rule
+  candidate lives at the deterministic rung (done-gate counter), NOT in the
+  Jev path. The room floor for suspicion sites remains a Jev-law widening, not
+  a Jev-created rule.
 
 ## Untrusted-`state` hardening (review hole #1 — deeper than key names)
 
@@ -99,13 +135,18 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
 - All four sites are runnable OFFLINE via mock fixtures regardless (CI $0.00);
   offline-first means no part of this proposal silently assumes unlanded surfaces.
 
-## Thrift-rung amendment (review: "Jev after gray, never as a paid delay")
+## Thrift-rung ORDER v3 (supersedes the v2 bullet above)
 
-- Ladder v2: script → GHA → **deterministic rule** → **Jev (gray only)** →
-  speaking persona → expensive wake.
-- Jev runs when the deterministic check returns **gray**; a speaking persona runs
-  only if Jev's receipt asks for a revision or a human wake. If a regex or
-  counter can answer, Jev is a paid delay — the rung text asserts that.
+- Ladder: script → GHA → **deterministic rule** → **Jev (gray only)** →
+  speaking persona → expensive wake — **with two classes that SKIP Jev entirely:**
+  1. **Deterministic verdict exists** ("Done ∧ boxes_checked>0 ∧ receipts_bound=0"
+     is a counter — row #1 should have ended at this rung; sending it was a paid
+     delay on a counter question; if you can NAME the counter, Jev adds nothing).
+  2. **Next action independent of the label** (unbound-Done fix = re-bind a
+     receipt the regex already flagged): rule → speaking persona directly.
+- Jev earns calls at **unknown fingerprints** and **wake-gray** only (its output
+  chooses ordering / signature class). Persona stays the skip target from the
+  rule rung when the rule's result is already what the room contests.
 
 ## Eval law (review: "measuring agreement measures nothing")
 
@@ -113,16 +154,26 @@ state_sha=<sha256[0:12]> — no wake yet; pm may tighten the state and re-call o
   nothing. Before any numeric threshold is treated as real, publish:
   1. disagreement-set size (deterministic baseline said gray/needs-repro)
   2. false-wake count (Jev band >0.95 but room rejected)
-  3. false-needs-repro count (Jev <0.80 but room's tightened state classified ≥0.80)
+  3. false-needs-repro count (Jev BELOW the site's in-room floor but the room's
+     tightened state classified at/above it — floors are per-site per v3)
+- Plus the two v3 datasets: known-bad/benign score histogram, and repeat-call
+  jitter on identical state (band width is only as trustworthy as that jitter).
 - The labeled replay set comes from REAL receipts (done-gate QA style), excluded
   from training eyes; published as a ledger table on RAZ-16.
 - Three-band form adopted as the working hypothesis; single-cut rejected.
 
-## Golden-17 candidate: NOT adopted
-- Candidate line ("calibrated-decision gates: confidence < threshold ⇒
-  deterministic fallback") stays a candidate. Adopting it from this proposal
-  before seeing **one real false wake** = the silent backfill the phase note
-  forbids (golden 13 corollary applies to its own proposer).
+## Golden-17 candidate: evidence-triggered (v3 gate, not time/first-wake)
+
+- **Eligibility to DRAFT** after the first false wake — but adoption requires ALL
+  of: (1) disagreement-set ledger has order-of-ten gray rows (a denominator —
+  one row cannot set law); (2) the false wake was on the **gray path**
+  (deterministic rules were inconclusive — if a counter should have caught it,
+  the fix is a new RULE, and writing Golden-17 would canonize the wrong layer);
+  (3) the room rejection is recorded as a ledger row (band >0.95, room
+  rejected), not a vibe.
+- Candidate text is already the fail-closed spec wording; promoting to golden
+  law = claiming confidence thresholds are trustworthy enough to bind — which
+  wants a false-wake rate that does not exist yet.
 
 ## Single pipe enforced
 - `jev-1.13-free` / OpenCode Zen / any second surface: **rejected** (v2 per review: a second pipe breaks the single-key story). One pipe: OpenRouter only.
