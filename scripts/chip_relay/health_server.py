@@ -51,6 +51,43 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def do_POST(self) -> None:  # RAZ-332 Step 3: monitoring>alert ingest (shadow)
+        path = self.path.split("?", 1)[0]
+        if path != "/alert":
+            self.send_response(404)
+            self.end_headers()
+            return
+        import json as _json
+        import os as _os
+
+        from chip_relay.alert_ingest import ALERT_TOKEN_ENV, handle_alert
+
+        token = (_os.environ.get(ALERT_TOKEN_ENV, "") or "").strip()
+        auth = (self.headers.get("Authorization") or "").strip()
+        if not token or auth != f"Bearer {token}":
+            self._json_response(401, {"ok": False, "error": "unauthorized"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = _json.loads(self.rfile.read(length).decode("utf-8", errors="replace"))
+        except (ValueError, _json.JSONDecodeError):
+            self._json_response(400, {"ok": False, "error": "invalid json"})
+            return
+        import os as _ose2
+
+        out = handle_alert(body, environ=dict(_os.environ))
+        self._json_response(out.get("status", 500), out)
+
+    def _json_response(self, status: int, payload: dict) -> None:
+        import json as _json
+
+        body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
 def start_health_server() -> HTTPServer:
     """Bind and serve in a daemon thread. Caller should call set_gateway_ready() when Discord is up."""
