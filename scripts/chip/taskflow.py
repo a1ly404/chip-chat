@@ -152,6 +152,16 @@ def build_brief(
 
 def claim_if_free(room: str, persona: str, scope: str) -> str:
     """Append the claim envelope line to the room transcript; fail if owned."""
+    from chip.lanes import decide, persona_root
+    from chip.speaker import require_match
+
+    require_match(persona)
+    if decide(scope, []) == "deny":
+        raise PermissionError("deny")
+    if "/" in scope or "\\" in scope:
+        root = persona_root(persona)
+        if root is None or not Path(scope).expanduser().resolve().is_relative_to(root):
+            raise PermissionError("deny")
     existing = claims.claim_owner(room, scope)
     if existing and existing != persona:
         raise TaskScopeConflict(f"{room}:{scope} already claimed by {existing}")
