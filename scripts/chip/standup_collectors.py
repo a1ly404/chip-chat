@@ -57,6 +57,61 @@ def _env(environ: dict[str, str] | None, key: str, default: str = "") -> str:
     return (env.get(key) or default).strip()
 
 
+def _resolve_gym_app_workflow_id(
+    repo: str,
+    workflow_file: str,
+    *,
+    headers: dict[str, str],
+    fetch: HttpGet,
+) -> str | None:
+    """Workflow path or numeric id when the configured filename varies."""
+    candidates = [workflow_file, "gym-app.yaml", "gym-app.yml", "gym-app-ci.yml"]
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for wf in candidates:
+        if wf and wf not in seen:
+            seen.add(wf)
+            ordered.append(wf)
+    for wf in ordered:
+        url = (
+            f"https://api.github.com/repos/{repo}/actions/workflows/"
+            f"{urllib.parse.quote(wf)}/runs?per_page=1"
+        )
+        try:
+            status, _body = fetch(url, headers, 15.0)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            continue
+        if status == 200:
+            return wf
+    list_url = f"https://api.github.com/repos/{repo}/actions/workflows?per_page=100"
+    try:
+        status, body = fetch(list_url, headers, 15.0)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    if status != 200:
+        return None
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    workflows = data.get("workflows") if isinstance(data, dict) else None
+    if not isinstance(workflows, list):
+        return None
+    for wf in workflows:
+        if not isinstance(wf, dict):
+            continue
+        path = str(wf.get("path") or "")
+        wname = str(wf.get("name") or "")
+        if "gym-app" in path.lower() or "gym-app" in wname.lower() or wname.lower() == "gym app":
+            wid = wf.get("id")
+            if wid is not None:
+                return str(wid)
+            if path:
+                return path.lstrip("./")
+    return None
+
+
 def collect_gha_workflow(
     environ: dict[str, str] | None = None,
     *,
@@ -69,13 +124,21 @@ def collect_gha_workflow(
     workflow = _env(environ, "CHIP_STANDUP_GHA_WORKFLOW", DEFAULT_GHA_WORKFLOW)
     if not token:
         return CollectorResult("gha", False, "no token", "GITHUB_TOKEN unset")
-    url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?per_page=1"
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
         "User-Agent": USER_AGENT,
         "X-GitHub-Api-Version": "2022-11-28",
     }
+    resolved = _resolve_gym_app_workflow_id(
+        repo, workflow, headers=headers, fetch=fetch
+    )
+    if not resolved:
+        return CollectorResult("gha", False, "workflow missing", "gym-app workflow not found")
+    url = (
+        f"https://api.github.com/repos/{repo}/actions/workflows/"
+        f"{urllib.parse.quote(resolved)}/runs?per_page=1"
+    )
     try:
         status, body = fetch(url, headers, 15.0)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -91,7 +154,7 @@ def collect_gha_workflow(
         return CollectorResult("gha", False, "no runs", "empty workflow_runs")
     run = runs[0]
     conclusion = str(run.get("conclusion") or run.get("status") or "unknown")
-    name = str(run.get("name") or workflow)
+    name = str(run.get("name") or resolved)
     html = str(run.get("html_url") or "")
     ok = conclusion in ("success", "skipped")
     return CollectorResult(
