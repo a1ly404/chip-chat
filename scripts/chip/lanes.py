@@ -34,20 +34,50 @@ def load_lanes() -> dict[str, Any]:
 
 
 def persona_root(persona: str) -> Path | None:
-    """Return the pinned root, or None when the env pin is unset or missing."""
+    """Return the primary pinned root, or None when the env pin is unset or missing."""
+    return persona_roots(persona)[0] if persona_roots(persona) else None
+
+
+def persona_roots(persona: str) -> list[Path]:
+    """Primary pinned root plus any extras (lane-table rows), filtered to existing dirs."""
     spec = (load_lanes().get("personas") or {}).get(persona.strip().lower())
     if not isinstance(spec, dict):
+        return []
+    roots: list[Path] = []
+    for env_name in ([str(spec.get("root_env") or "").strip()] + [str(e).strip() for e in spec.get("extra_root_envs") or []]):
+        raw = os.environ.get(env_name, "").strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path.is_dir():
+            roots.append(path)
+    return roots
+
+
+def resolve_lane_path(persona: str, relpath: str) -> tuple[Path, Path] | None:
+    """Pick the pinned root (primary or extras) whose containment holds for relpath.
+
+    Existence-preferred: if several roots can contain a relpath, the root where
+    the target already exists wins (reads hit the right tree); if no root has it,
+    containment falls back to the primary root (write-creation target).
+    """
+    resolved: list[tuple[Path, Path]] = []
+    escape_err: ValueError | None = None
+    for root in persona_roots(persona):
+        try:
+            resolved.append((root, _under_root(root, relpath)))
+        except ValueError as err:
+            if "escapes" in str(err):
+                escape_err = err
+            continue
+    if not resolved:
+        if escape_err is not None:
+            raise escape_err  # escape is NOT a missing pin
         return None
-    env_name = str(spec.get("root_env") or "").strip()
-    if not env_name:
-        return None
-    raw = os.environ.get(env_name, "").strip()
-    if not raw:
-        return None
-    path = Path(raw).expanduser().resolve()
-    if not path.is_dir():
-        return None
-    return path
+    for root, target in resolved:
+        if target.is_file() or target.is_dir():
+            return root, target
+    return resolved[0]
 
 
 def _norm(text: str) -> str:
@@ -258,10 +288,10 @@ def read_text(
     relpath: str,
     ticket_id: str | None = None,
 ) -> str:
-    root = persona_root(persona)
-    if root is None:
+    resolved = resolve_lane_path(persona, relpath)
+    if resolved is None:
         raise FileNotFoundError(f"lane pin missing for {persona}")
-    target = _under_root(root, relpath)
+    root, target = resolved
     reason = deny_reason(str(target), ticket_id=ticket_id)
     if reason:
         file_retro(attempted=f"read {target}", why=reason, envelope=f"persona={persona} path={relpath}")

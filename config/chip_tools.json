@@ -57,6 +57,48 @@
       "risk": "low",
       "allow_extra_args": true,
       "description": "Show a task envelope by id (requires task id as first extra arg)"
+    },
+    {
+      "id": "razzorstack-diagnose",
+      "argv": ["python3", "scripts/airvpn_port_health.py", "--diagnose-only"],
+      "risk": "medium",
+      "allow_extra_args": false,
+      "description": "Razzorstack diagnostic script, baked --diagnose-only (no fix actions); root = lanes extra_root CHIP_LANE_RAZZORSTACK_ROOT; global denies inherited"
+    },
+    {
+      "id": "gluetun-restart",
+      "argv": ["docker", "restart", "gluetun"],
+      "risk": "high",
+      "allow_extra_args": false,
+      "description": "TIER-1 (RAZ-335 only): Skill envelope REQUIRED (receipt-before-action + rollback line + verified-listen probe) + per-run named GO (sub-scope wake scope:RAZ-335-t1-gluetun-restart). Refuse-and-page class untouched."
+    },
+    {
+      "id": "qb-restart",
+      "argv": ["docker", "restart", "qbittorrent"],
+      "risk": "high",
+      "allow_extra_args": false,
+      "description": "TIER-1 (RAZ-335 only): Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-qb-restart). Refuse-and-page class untouched."
+    },
+    {
+      "id": "airvpn-port-regab",
+      "argv": ["python3", "scripts/airvpn_port_grab.py"],
+      "risk": "high",
+      "allow_extra_args": false,
+      "description": "TIER-1 (RAZ-335 only): re-run port forward grab script; Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-port-regab). Refuse-and-page class untouched."
+    },
+    {
+      "id": "fw-rule-reload",
+      "argv": ["ufw", "reload"],
+      "risk": "high",
+      "allow_extra_args": false,
+      "description": "TIER-1 (RAZ-335 only): firewall rule reload, baked (no rule edits via this row; edits = proposal-only). Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-fw-reload). Refuse-and-page class untouched."
+    },
+    {
+      "id": "qb-port-update",
+      "argv": ["python3", "scripts/qb_port_set.py"],
+      "risk": "high",
+      "allow_extra_args": false,
+      "description": "TIER-1 (RAZ-335 only): update qBittorrent listen port from live lease, baked script (no arbitrary config edits; compose changes = proposal-only). Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-qb-port). Refuse-and-page class untouched."
     }
   ]
 }

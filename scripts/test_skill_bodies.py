@@ -21,6 +21,7 @@ EXPECTED_PAIRS = {
     "gold-signal-down": "gold-signal-down.template.md",
     "skill-runner-fault": "skill-runner-fault.template.md",
     "suppression-saturation": "suppression-saturation.template.md",
+    "airvpn-port-unhealthy": "airvpn-port-unhealthy.template.md",
 }
 
 

@@ -13,6 +13,7 @@
 | `docs/skill-bodies/gold-signal-down.body.md` | `.cursor/skills/gold-signal-down.md` | `docs/skill-templates/gold-signal-down.template.md` | moved=no, ready=yes |
 | `docs/skill-bodies/skill-runner-fault.body.md` | `.cursor/skills/skill-runner-fault.md` | `docs/skill-templates/skill-runner-fault.template.md` | moved=no, ready=yes |
 | `docs/skill-bodies/suppression-saturation.body.md` | `.cursor/skills/suppression-saturation.md` | `docs/skill-templates/suppression-saturation.template.md` | moved=no, ready=yes |
+| `docs/skill-bodies/airvpn-port-unhealthy.body.md` | `.cursor/skills/airvpn-port-unhealthy.md` | `docs/skill-templates/airvpn-port-unhealthy.template.md` | moved=no, ready=yes |
 
 ## Move procedure (owning lane; receipts to RAZ-16)
 
