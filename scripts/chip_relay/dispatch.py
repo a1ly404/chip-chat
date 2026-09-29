@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable
@@ -322,7 +323,8 @@ def handle_message(
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
 
-    reset_delegate_chain(room.id)
+    if incoming.author != "inject":
+        reset_delegate_chain(room.id)
 
     persona, persona_alert = resolve_persona_for_dispatch(
         room,
@@ -332,7 +334,18 @@ def handle_message(
     if persona_alert:
         return _fail(logs, persona_alert)
     persona, text = apply_wake_to_turn(text, persona)
-    reply, outcome = _run_chip_shot(room.id, persona, text, chip=chip)
+    prior_speaker = environ.get("CHIP_TURN_SPEAKER")
+    environ["CHIP_TURN_SPEAKER"] = persona
+    os.environ["CHIP_TURN_SPEAKER"] = persona
+    try:
+        reply, outcome = _run_chip_shot(room.id, persona, text, chip=chip)
+    finally:
+        if prior_speaker is None:
+            environ.pop("CHIP_TURN_SPEAKER", None)
+            os.environ.pop("CHIP_TURN_SPEAKER", None)
+        else:
+            environ["CHIP_TURN_SPEAKER"] = prior_speaker
+            os.environ["CHIP_TURN_SPEAKER"] = prior_speaker
     chip_calls = 1
     if outcome.timed_out:
         return _fail(logs, "slow_call_killed", chip_calls=chip_calls)

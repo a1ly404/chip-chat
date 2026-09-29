@@ -67,6 +67,7 @@
     },
     {
       "id": "gluetun-restart",
+      "audience": "global-only",
       "argv": ["docker", "restart", "gluetun"],
       "risk": "high",
       "allow_extra_args": false,
@@ -74,6 +75,7 @@
     },
     {
       "id": "qb-restart",
+      "audience": "global-only",
       "argv": ["docker", "restart", "qbittorrent"],
       "risk": "high",
       "allow_extra_args": false,
@@ -81,6 +83,7 @@
     },
     {
       "id": "airvpn-port-regab",
+      "audience": "global-only",
       "argv": ["python3", "scripts/airvpn_port_grab.py"],
       "risk": "high",
       "allow_extra_args": false,
@@ -88,6 +91,7 @@
     },
     {
       "id": "fw-rule-reload",
+      "audience": "global-only",
       "argv": ["ufw", "reload"],
       "risk": "high",
       "allow_extra_args": false,
@@ -95,6 +99,7 @@
     },
     {
       "id": "qb-port-update",
+      "audience": "global-only",
       "argv": ["python3", "scripts/qb_port_set.py"],
       "risk": "high",
       "allow_extra_args": false,

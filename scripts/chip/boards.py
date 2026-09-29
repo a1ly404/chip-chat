@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import re
+import socket
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -13,6 +14,21 @@ from chip import config
 from chip.lanes import decide
 
 SCHEMA = 1
+# Slice 6 sets this false. Until then a missing phase is stamped, not a permanent bypass.
+ALLOW_PHASE_MIGRATION = False
+
+
+def local_host() -> str:
+    return socket.gethostname()
+
+
+def _log_board(event: str, **fields: Any) -> None:
+    from chip import store
+
+    store.append_jsonl(
+        config.data_dir() / "audit" / "board_events.jsonl",
+        {"event": event, **fields},
+    )
 
 
 def board_path(room: str) -> Path:
@@ -40,7 +56,13 @@ def board_lock(room: str) -> Iterator[None]:
 
 
 def _empty(room: str) -> dict[str, Any]:
-    return {"schema": SCHEMA, "room": room, "version": 0, "entries": []}
+    return {
+        "schema": SCHEMA,
+        "room": room,
+        "version": 0,
+        "phase": "brainstorm",
+        "entries": [],
+    }
 
 
 def _check(doc: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +82,14 @@ def load(room: str) -> dict[str, Any]:
     doc = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(doc, dict):
         raise ValueError("board schema must be 1")
-    return _check(doc)
+    doc = _check(doc)
+    if not doc.get("phase"):
+        if not ALLOW_PHASE_MIGRATION:
+            raise ValueError("board phase required")
+        doc["phase"] = "brainstorm"
+        save(doc)
+        _log_board("board_phase_migrated", room=str(doc.get("room")))
+    return doc
 
 
 def save(doc: dict[str, Any]) -> None:
@@ -128,6 +157,8 @@ def edit_entry(board: dict[str, Any], *, actor: str, entry_id: str, body: str) -
             break
     if found is None:
         raise KeyError(entry_id)
+    if found.get("kind") == "decision":
+        raise PermissionError("dissent")
     if found["sealed"] and actor != found["author"]:
         decision = decide(
             f"edit {entry_id} author={found['author']}",
@@ -168,10 +199,59 @@ def list_sealed(board: dict[str, Any]) -> list[dict[str, Any]]:
     return [e for e in board["entries"] if e.get("sealed")]
 
 
+def wake_block(room: str) -> str:
+    if not board_path(room).is_file():
+        return ""
+    board = load(room)
+    try:
+        assert_local_board(board)
+    except PermissionError:
+        return "board_foreign_host"
+    lines = [
+        f"round_id={board.get('round_id')}",
+        f"phase={board.get('phase')}",
+        f"version={board.get('version')}",
+        f"host={board.get('host')}",
+    ]
+    for entry in (board.get("entries") or [])[-5:]:
+        lines.append(f"{entry.get('id')}: {str(entry.get('body') or '')[:80]}")
+    return "\n".join(lines)
+
+
+def assert_local_board(board: dict[str, Any]) -> None:
+    host = str(board.get("host") or "")
+    data = str(board.get("data_dir") or "")
+    if host and host != local_host():
+        _log_board("board_foreign_host", room=str(board.get("room")), host=host)
+        raise PermissionError("board_foreign_host")
+    if data and data != str(config.data_dir()):
+        _log_board("board_foreign_host", room=str(board.get("room")), data_dir=data)
+        raise PermissionError("board_foreign_host")
+
+
+def _refuse_spend_if_due(version: int) -> None:
+    if version % 3 != 0:
+        return
+    from chip import spend
+
+    spend.enforce_cutoff(spend.ledger_monthly_usd(spend.load_ledger()))
+
+
 def protocol_turn(board: dict[str, Any], *, actor: str, body: str) -> dict[str, Any]:
     from chip import store
 
     board = refresh(board)
+    phase = board.get("phase")
+    if phase == "revealed":
+        raise PermissionError("reveal")
+    if phase == "converged":
+        decision = board.get("decision") or {}
+        if not str(decision.get("verified-as-of") or "").strip():
+            raise PermissionError("verified-as-of")
+    elif phase not in (None, "", "brainstorm", "idle"):
+        raise PermissionError("reveal")
+    assert_local_board(board)
+    _refuse_spend_if_due(int(board.get("version") or 0) + 1)
     board = append_entry(board, actor=actor, body=body)
     store.append_jsonl(
         store.thread_path(str(board["room"])),

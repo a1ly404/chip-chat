@@ -1,0 +1,291 @@
+"""Collaboration rounds on the room board. protocol_turn stays unchanged."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from chip import boards
+from chip import config
+
+
+def require_protocol_go(go_ticket: str | None = None) -> None:
+    import os
+    import re
+
+    from chip import spend
+
+    ticket = (go_ticket or os.environ.get("CHIP_LANE_GO_TICKET") or "").strip()
+    if re.fullmatch(r"RAZ-\d+", ticket) is None:
+        raise PermissionError("go")
+    pinned = os.environ.get("CHIP_LANE_GO_TICKET", "").strip()
+    if pinned and pinned != ticket:
+        raise PermissionError("go")
+    spend.enforce_cutoff(spend.ledger_monthly_usd(spend.load_ledger()))
+
+
+def _board(room: str) -> dict[str, Any]:
+    return boards.load(room)
+
+
+def _norm_body(body: str) -> str:
+    return " ".join(body.casefold().split())
+
+
+def begin_brainstorm(room: str, goal: str, participants: list[str], go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
+    if not participants:
+        raise ValueError("participants required")
+    board = _board(room)
+    board["phase"] = "brainstorm"
+    board["goal"] = goal
+    board["participants"] = list(participants)
+    board["chair"] = participants[0]
+    board["chair_history"] = list(board.get("chair_history") or []) + [participants[0]]
+    board["rejected"] = list(board.get("rejected") or [])
+    board["decision"] = None
+    board["critique_closed"] = False
+    board["entries"] = []
+    board["round_id"] = f"r{int(board.get('version') or 0) + 1}"
+    board["host"] = boards.local_host()
+    board["data_dir"] = str(config.data_dir())
+    boards.save(board)
+    board = boards.protocol_turn(board, actor=participants[0], body=goal)
+    entry_id = board["entries"][-1]["id"]
+    # E5 reopen(room, actor, reason) is spec-only until Lyla after RAZ-335. Not callable.
+    return boards.seal_entry(board, actor=participants[0], entry_id=entry_id)
+
+
+def submit_hypothesis(room: str, actor: str, body: str) -> dict[str, Any]:
+    board = _board(room)
+    if board.get("phase") != "brainstorm":
+        raise PermissionError("reveal")
+    if actor not in (board.get("participants") or []):
+        raise PermissionError("participant")
+    for row in board.get("rejected") or []:
+        if _norm_body(str(row.get("body") or "")) == _norm_body(body):
+            raise PermissionError("rejected")
+    board = boards.protocol_turn(board, actor=actor, body=body)
+    entry_id = board["entries"][-1]["id"]
+    return boards.seal_entry(board, actor=actor, entry_id=entry_id)
+
+
+def close_brainstorm(room: str) -> dict[str, Any]:
+    boards.reveal_all(room)
+    board = _board(room)
+    board["phase"] = "revealed"
+    boards.save(board)
+    return board
+
+
+def _entry(board: dict[str, Any], entry_id: str) -> dict[str, Any] | None:
+    for entry in board["entries"]:
+        if entry.get("id") == entry_id:
+            return entry
+    return None
+
+
+def critique(room: str, actor: str, target_id: str, body: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
+    with boards.board_lock(room):
+        board = _board(room)
+        if board.get("phase") != "revealed" or board.get("critique_closed"):
+            raise PermissionError("phase")
+        if actor not in (board.get("participants") or []):
+            raise PermissionError("participant")
+        target = _entry(board, target_id)
+        if target is None or target.get("kind") != "hypothesis":
+            raise KeyError(target_id)
+        if not str(body or "").strip():
+            raise PermissionError("substantive")
+        if target.get("author") == actor:
+            raise PermissionError("self-critique")
+        posted = [
+            entry
+            for entry in board["entries"]
+            if entry.get("kind") == "critique"
+            and entry.get("author") == actor
+            and entry.get("round_id") == board.get("round_id")
+        ]
+        if len(posted) >= 3:
+            raise PermissionError("cap")
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"c{version}",
+                "author": actor,
+                "kind": "critique",
+                "body": body,
+                "target_id": target_id,
+                "round_id": board.get("round_id"),
+                "sealed": False,
+                "version": version,
+            }
+        ]
+        board["version"] = version
+        boards.save(board)
+        return board
+
+
+def end_critique(room: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        participants = list(board.get("participants") or [])
+        for persona in participants:
+            covered = False
+            for entry in board["entries"]:
+                if entry.get("kind") != "critique" or entry.get("author") != persona:
+                    continue
+                target = _entry(board, str(entry.get("target_id")))
+                author = (target or {}).get("author")
+                if author and author != persona and author in participants:
+                    covered = True
+            if not covered:
+                abstained = any(
+                    entry.get("kind") == "abstain"
+                    and entry.get("author") == persona
+                    and entry.get("round_id") == board.get("round_id")
+                    for entry in board["entries"]
+                )
+                if not abstained:
+                    raise PermissionError("early")
+        board["critique_closed"] = True
+        boards.save(board)
+        return board
+
+
+def converge(
+    room: str,
+    chair: str,
+    plan_body: str,
+    assignments: list[dict[str, str]],
+    dissent: list[dict[str, str]],
+) -> dict[str, Any]:
+    from chip import taskflow
+    from chip.speaker import require_match
+
+    board = _board(room)
+    if not board.get("critique_closed"):
+        raise PermissionError("early")
+    require_match(chair)
+    if chair != board.get("chair"):
+        raise PermissionError("chair")
+    for row in assignments:
+        try:
+            taskflow.claim_if_free(room, row["persona"], row["scope"])
+        except PermissionError:
+            with boards.board_lock(room):
+                board = _board(room)
+                board["decision"] = {
+                    "status": "aborted",
+                    "denied_scope": row["scope"],
+                    "plan": plan_body,
+                    "assignments": [],
+                    "dissent": [],
+                }
+                version = int(board["version"]) + 1
+                board["entries"] = list(board["entries"]) + [
+                    {
+                        "id": f"d{version}",
+                        "author": chair,
+                        "kind": "decision",
+                        "body": plan_body,
+                        "status": "aborted",
+                        "denied_scope": row["scope"],
+                        "sealed": True,
+                        "version": version,
+                    }
+                ]
+                board["version"] = version
+                boards.save(board)
+                return board
+    with boards.board_lock(room):
+        board = _board(room)
+        stored = [{"author": row["author"], "text": row["text"]} for row in dissent]
+        board["decision"] = {
+            "plan": plan_body,
+            "assignments": list(assignments),
+            "dissent": stored,
+        }
+        board["phase"] = "converged"
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"d{version}",
+                "author": chair,
+                "kind": "decision",
+                "body": plan_body,
+                "sealed": True,
+                "version": version,
+                "dissent": stored,
+            }
+        ]
+        board["version"] = version
+        boards.save(board)
+        return board
+
+
+def reject_hypothesis(room: str, entry_id: str, reason: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        entry = _entry(board, entry_id)
+        if entry is None or entry.get("kind") != "hypothesis":
+            raise KeyError(entry_id)
+        board["rejected"] = list(board.get("rejected") or []) + [
+            {
+                "id": entry_id,
+                "body": entry.get("body"),
+                "reason": reason,
+                "author": entry.get("author"),
+            }
+        ]
+        board["entries"] = [row for row in board["entries"] if row.get("id") != entry_id]
+        board["version"] = int(board["version"]) + 1
+        boards.save(board)
+        return board
+
+
+def abstain(room: str, actor: str, reason_code: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
+    if reason_code not in {"no_overlap", "out_of_lane", "already_rejected"}:
+        raise PermissionError("reason")
+    with boards.board_lock(room):
+        board = _board(room)
+        if actor not in (board.get("participants") or []):
+            raise PermissionError("participant")
+        from chip.speaker import require_match
+
+        require_match(actor)
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"n{version}",
+                "author": actor,
+                "kind": "abstain",
+                "body": reason_code,
+                "reason_code": reason_code,
+                "round_id": board.get("round_id"),
+                "sealed": True,
+                "version": version,
+            }
+        ]
+        board["version"] = version
+        boards.save(board)
+        return board
+
+
+def rotate_chair(room: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
+    with boards.board_lock(room):
+        board = _board(room)
+        people = list(board.get("participants") or [])
+        if not people:
+            raise ValueError("participants required")
+        current = board.get("chair")
+        index = people.index(current) if current in people else -1
+        nxt = people[(index + 1) % len(people)]
+        board["chair"] = nxt
+        history = list(board.get("chair_history") or [])
+        history.append(nxt)
+        board["chair_history"] = history
+        boards.save(board)
+        return board
