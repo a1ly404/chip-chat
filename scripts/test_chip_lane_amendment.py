@@ -67,3 +67,31 @@ def test_diagnose_only_is_baked_in_tool_row() -> None:
     row = next(t for t in spec["tools"] if t["id"] == "razzorstack-diagnose")
     assert "--diagnose-only" in row["argv"]
     assert row["allow_extra_args"] is False  # no fix-mode args can be smuggled
+
+
+def test_tier1_rows_baked_and_envelope_contracted() -> None:
+    """GO: RAZ-335-tier1-plumbing — tier-1 executor rows exist, baked (no smuggling),
+    refuse-and-page class untouched, every description carries the skill-envelope- +
+    sub-scope-GO contract."""
+    spec = json.loads((REPO / "config/chip_tools.json").read_text())
+    by_id = {t["id"]: t for t in spec["tools"]}
+
+    tier1 = {
+        "gluetun-restart": ["docker", "restart", "gluetun"],
+        "qb-restart": ["docker", "restart", "qbittorrent"],
+        "airvpn-port-regab": ["python3", "scripts/airvpn_port_grab.py"],
+        "fw-rule-reload": ["ufw", "reload"],
+        "qb-port-update": ["python3", "scripts/qb_port_set.py"],
+    }
+    forbidden_tokens = ["delete", "rm ", "compose", "secret", "media"]
+    for tid, argv in tier1.items():
+        row = by_id[tid]
+        assert row["argv"] == argv, (tid, row["argv"])
+        assert row["allow_extra_args"] is False
+        assert row["risk"] == "high"
+        assert "TIER-1 (RAZ-335 only)" in row["description"]
+        assert "skill envelope REQUIRED" in row["description"]
+        assert "scope:RAZ-335-t1-" in row["description"]  # per-run named GO contract
+        assert "Refuse-and-page class untouched" in row["description"]
+        blob = " ".join(row["argv"]).lower()
+        assert not any(f in blob for f in forbidden_tokens), f"{tid}: refuse-class leak in argv"
