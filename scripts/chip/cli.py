@@ -309,8 +309,14 @@ def build_room_messages(
     history = store.load_room_history(room, limit=limit)
     if memory_ops_out is not None:
         memory_ops_out["reads"] = int(memory_reads)
+    from chip import boards
+
+    board_note = boards.wake_block(room)
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    if board_note:
+        messages.append({"role": "system", "content": board_note})
     return [
-        {"role": "system", "content": system},
+        *messages,
         *history,
         {"role": "user", "content": user_text},
     ]
