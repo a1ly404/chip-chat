@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "pinned_at": "2026-09-28",
+  "counters": [
+    {
+      "id": "done-gate-unbound-done",
+      "description": "Ticket claims Done (statusType==completed or status==Done) while acceptance boxes are checked and zero receipts are structurally bound. Counter-decidable: the deterministic rung answers this shape; Jev is forbidden to see it.",
+      "matches": {
+        "task_kind": "done-gate",
+        "condition": "unbound_done"
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "row1-unbound-done",
+      "anchored_from": "RAZ-16 disagreement-set row #1 (RAZ-199 as the live-proven instance)",
+      "state": {
+        "task_id": "RAZ-199",
+        "task_type": "done-gate",
+        "status": "Done",
+        "statusType": "completed",
+        "checked_boxes": 4,
+        "receipts_bound": 0,
+        "unbound_done": true
+      },
+      "expect": "counter-hit:done-gate-unbound-done",
+      "note": "This shape must FAIL the build if it ever reaches the Jev HTTP client (see chip/jev_router.py)."
+    }
+  ]
+}
