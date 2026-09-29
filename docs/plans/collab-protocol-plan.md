@@ -95,3 +95,7 @@ Tests:
 ## Acceptance
 
 Every slice PR body contains that slice’s commit hash and the verbatim `pytest -q` summary line. Draft. Base is the previous slice branch, not `main`.
+
+## reopen (spec only, not callable)
+
+`reopen(room, actor, reason)` would require the dispatch-stamped speaker to be the chair and a non-empty reason code, then set `phase` from `converged` back to `revealed`. It is not implemented. Lyla decides after the RAZ-335 ops session. Until then `converged` is not Done and has no reopen path.

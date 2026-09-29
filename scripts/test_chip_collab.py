@@ -216,6 +216,22 @@ def test_wake_includes_board_and_hides_foreign_body(data) -> None:
     assert "visible-goal" not in hidden
 
 
+def test_empty_critique_refused_and_abstain_satisfies(data, monkeypatch) -> None:
+    goal_id, idea = _opened()
+    with pytest.raises(PermissionError, match="substantive"):
+        collab.critique("dev", "a", idea, "   ")
+    with pytest.raises(PermissionError, match="early"):
+        collab.end_critique("dev")
+    with pytest.raises(PermissionError, match="reason"):
+        collab.abstain("dev", "a", "vibes")
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "a")
+    collab.abstain("dev", "a", "no_overlap")
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "b")
+    collab.critique("dev", "b", goal_id, "on the goal")
+    closed = collab.end_critique("dev")
+    assert closed["critique_closed"] is True
+
+
 def test_dark_gate_blocks_critique_and_ab_without_ticket(data, monkeypatch) -> None:
     from chip.collab_ab import run_ab
 
