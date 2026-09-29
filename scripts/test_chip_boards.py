@@ -56,6 +56,14 @@ def test_protocol_turn_refreshes_on_version_conflict(data) -> None:
     assert boards.load("dev")["version"] == 2
 
 
+def test_list_open_and_sealed_partition(data) -> None:
+    board = boards.append_entry(boards.load("dev"), actor="a", body="open")
+    board = boards.append_entry(board, actor="b", body="shut")
+    board = boards.seal_entry(board, actor="b", entry_id=board["entries"][1]["id"])
+    assert [e["body"] for e in boards.list_open(board)] == ["open"]
+    assert [e["body"] for e in boards.list_sealed(board)] == ["shut"]
+
+
 def test_board_schema_is_1(data) -> None:
     board = boards.load("dev")
     boards.save(board)

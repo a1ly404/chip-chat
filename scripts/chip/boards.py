@@ -120,6 +120,14 @@ def edit_entry(board: dict[str, Any], *, actor: str, entry_id: str, body: str) -
     return board
 
 
+def list_open(board: dict[str, Any]) -> list[dict[str, Any]]:
+    return [e for e in board["entries"] if not e.get("sealed")]
+
+
+def list_sealed(board: dict[str, Any]) -> list[dict[str, Any]]:
+    return [e for e in board["entries"] if e.get("sealed")]
+
+
 def protocol_turn(board: dict[str, Any], *, actor: str, body: str) -> dict[str, Any]:
     board = refresh(board)
     return append_entry(board, actor=actor, body=body)
