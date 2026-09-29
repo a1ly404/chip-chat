@@ -10,6 +10,7 @@ from chip import collab
 @pytest.fixture
 def data(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-335")
     return tmp_path
 
 
@@ -196,4 +197,37 @@ def test_fake_chair_and_lane_denied_converge(data, monkeypatch) -> None:
     thread = store.thread_path("dev")
     text = thread.read_text(encoding="utf-8") if thread.is_file() else ""
     assert "claim:" not in text
+
+
+def test_wake_includes_board_and_hides_foreign_body(data) -> None:
+    from chip import boards
+    from chip.cli import build_room_messages
+
+    collab.begin_brainstorm("dev", "visible-goal", ["a"])
+    messages = build_room_messages("dev", "pm", "hi")
+    joined = "\n".join(message["content"] for message in messages)
+    assert "visible-goal" in joined
+    assert "round_id=" in joined
+    board = boards.load("dev")
+    board["host"] = "other-host"
+    boards.save(board)
+    hidden = "\n".join(message["content"] for message in build_room_messages("dev", "pm", "hi"))
+    assert "board_foreign_host" in hidden
+    assert "visible-goal" not in hidden
+
+
+def test_dark_gate_blocks_critique_and_ab_without_ticket(data, monkeypatch) -> None:
+    from chip.collab_ab import run_ab
+
+    monkeypatch.delenv("CHIP_LANE_GO_TICKET", raising=False)
+    with pytest.raises(PermissionError, match="go"):
+        collab.critique("dev", "a", "h1", "x")
+    with pytest.raises(PermissionError, match="go"):
+        run_ab("dev", "problem", ["a", "b", "c"])
+    board = collab.begin_brainstorm("dev", "goal", ["a"], go_ticket="RAZ-335")
+    from chip import spend
+
+    monkeypatch.setattr(spend, "ledger_monthly_usd", lambda _ledger: 10.0)
+    with pytest.raises(spend.SpendCutoffError):
+        collab.submit_hypothesis("dev", "a", "third")
 

@@ -8,6 +8,21 @@ from chip import boards
 from chip import config
 
 
+def require_protocol_go(go_ticket: str | None = None) -> None:
+    import os
+    import re
+
+    from chip import spend
+
+    ticket = (go_ticket or os.environ.get("CHIP_LANE_GO_TICKET") or "").strip()
+    if re.fullmatch(r"RAZ-\d+", ticket) is None:
+        raise PermissionError("go")
+    pinned = os.environ.get("CHIP_LANE_GO_TICKET", "").strip()
+    if pinned and pinned != ticket:
+        raise PermissionError("go")
+    spend.enforce_cutoff(spend.ledger_monthly_usd(spend.load_ledger()))
+
+
 def _board(room: str) -> dict[str, Any]:
     return boards.load(room)
 
@@ -16,7 +31,8 @@ def _norm_body(body: str) -> str:
     return " ".join(body.casefold().split())
 
 
-def begin_brainstorm(room: str, goal: str, participants: list[str]) -> dict[str, Any]:
+def begin_brainstorm(room: str, goal: str, participants: list[str], go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
     if not participants:
         raise ValueError("participants required")
     board = _board(room)
@@ -68,7 +84,8 @@ def _entry(board: dict[str, Any], entry_id: str) -> dict[str, Any] | None:
     return None
 
 
-def critique(room: str, actor: str, target_id: str, body: str) -> dict[str, Any]:
+def critique(room: str, actor: str, target_id: str, body: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
     with boards.board_lock(room):
         board = _board(room)
         if board.get("phase") != "revealed" or board.get("critique_closed"):
@@ -218,7 +235,8 @@ def reject_hypothesis(room: str, entry_id: str, reason: str) -> dict[str, Any]:
         return board
 
 
-def rotate_chair(room: str) -> dict[str, Any]:
+def rotate_chair(room: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
     with boards.board_lock(room):
         board = _board(room)
         people = list(board.get("participants") or [])

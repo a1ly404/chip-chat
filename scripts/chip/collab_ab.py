@@ -13,7 +13,11 @@ def run_ab(
     personas: list[str],
     *,
     clock: Callable[[], int] | None = None,
+    go_ticket: str | None = None,
 ) -> dict[str, Any]:
+    from chip.collab import require_protocol_go
+
+    require_protocol_go(go_ticket)
     if len(personas) != 3:
         raise ValueError("trio arm needs 3 personas")
     solo_name, *others = personas
