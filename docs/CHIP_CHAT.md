@@ -170,6 +170,35 @@ Each invocation is appended to `audit/tool_invocations.jsonl` (argv, stdout, std
 ./bin/chip task run task-xxxxxxxxxxxx --execute --json
 ```
 
+## BUILD tier and learning ledger
+
+Lane policy stays in `scripts/chip/lanes.py` and `config/chip_lanes.json`. Do not add a second gate.
+
+**BUILD tier** (`lanes.run_build`), under a live claim:
+
+| Tool id | Rule |
+| --- | --- |
+| `lane-test`, `docker-build`, `vite-build` | Allowed. `docker-build` only with a local tag `name:tag` (no `/`). |
+| `registry-push`, `deploy`, `compose-up` | Denied unless `CHIP_LANE_GO_TICKET` equals the ticket on the run. |
+
+One build per persona. A second build is denied and files a retro. It is not queued. Before the runner starts, a `phase=start` receipt is appended to `audit/tool_receipts.jsonl`. Every exit, including a crash mid-artifact, appends `phase=complete` (`sha256` or `incomplete`).
+
+**chipchatdev wake** (`lanes.chipchatdev_wake_allowed`, called from relay `handle_message`): read-tier only, and only with `scope:<id>` owned by `chipchatdev`. Task text that names write, build, docker, deploy, compose, push, unlink, truncate, or vite needs an in-room `GO: <ticket>` that matches `CHIP_LANE_GO_TICKET`.
+
+**Learning ledger.** Every `chip.tool.run` outcome calls `lanes.record_outcome` from five sites in `scripts/chip/tool.py` (`_learn`): hard-constraint block, lane deny, dry-run, authorization refusal, and the subprocess result. `lanes.run_build` calls `record_outcome` directly. Rows append to `$CHIP_CHAT_DATA_DIR/audit/tool_learning.jsonl` (Docker: `/data/chip-chat/audit/tool_learning.jsonl`).
+
+| Field | Meaning |
+| --- | --- |
+| `ts` | UTC ISO time |
+| `tool_id` | Allowlisted tool id, or the BUILD tool id |
+| `persona` | Speaker, or `anonymous` |
+| `exit_code` | Process exit, or `-1` when gated |
+| `duration_s` | Seconds, six decimal places |
+| `artifact_sha256` | SHA-256 of the artifact string (stdout, stderr, or build artifact path text) |
+| `reflection` | One line, max 200 characters: `<persona> <tool_id> exited <code>` |
+
+Nonzero `exit_code` also appends a retro ticket via `task_ledger.file_retro_ticket` to `$CHIP_CHAT_DATA_DIR/task_ledger/retro_tickets.jsonl` (`claimed`, `verified`, `catch`, `task_id`). Personas read the learning row to build the next envelope. Operators read the retro file before the next sitrep. Neither file overrides room law.
+
 ## Spend gates (live OpenRouter)
 
 Before each live completion, Chip Chat refreshes `GET /api/v1/auth/key` and tracks spend locally in `$CHIP_CHAT_DATA_DIR/spend.json` (Docker: `/data/chip-chat` on the `chip-chat-data` volume). When OpenRouter returns a positive `usage_monthly`, that value is authoritative. When the API omits usage or reports zero, Chip keeps the on-disk **token estimate** (`estimated_monthly_usd`) so relay heartbeats and `$5` / `$10` gates do not reset after a container restart.
