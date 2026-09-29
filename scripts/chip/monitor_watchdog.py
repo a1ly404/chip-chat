@@ -38,6 +38,40 @@ from chip.done_gate import sweep
 MONITORING_WEBHOOK_ENV = "CHIP_WEBHOOK_MONITORING"
 
 
+def ops_ab_heartbeat_stale(lastrun_path: Path, max_age_hours: float = 2.6,
+                           now_utc: float | None = None) -> dict | None:
+    """Report-only heartbeat dead-man sensor (ocgo churn ruling, RAZ-335 lane).
+
+    Returns a finding dict when the hourbeat lastrun is missing (never started)
+    or stale (> max_age_hours since last tick) — silent death of a monitor is
+    its own incident class per Lyla ruling. Returns None when fresh.
+    Never mutates, never posts: callers own reporting (report-only).
+    """
+    import time as _t
+    from datetime import datetime, timezone
+
+    p = Path(lastrun_path)
+    if not p.exists():
+        return {"id": "ops-ab-heartbeat-missing", "severity": "warn",
+                "checked": str(p), "stamps": [], "detail": "lastrun never written"}
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        ts = str(payload.get("ts") or "")
+        last = datetime.fromisoformat(ts)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_h = ((now_utc is not None and now_utc)
+                 or datetime.now(timezone.utc).timestamp()) - last.timestamp()
+        if age_h > max_age_hours * 3600:
+            return {"id": "ops-ab-heartbeat-stale", "severity": "warn",
+                    "checked": f"{age_h/3600:.1f}h old",
+                    "stamps": [ts], "detail": f"max {max_age_hours}h"}
+        return None
+    except (json.JSONDecodeError, ValueError, KeyError, OSError) as exc:
+        return {"id": "ops-ab-heartbeat-garbage", "severity": "warn",
+                "checked": str(p), "stamps": [], "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def findings_state(findings: list[dict]) -> dict[str, dict]:
     """Deterministic per-ticket state map for delta computation."""
     return {
