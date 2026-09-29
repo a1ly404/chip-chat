@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import re
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from chip import config
 from chip.lanes import decide
@@ -16,6 +18,25 @@ SCHEMA = 1
 def board_path(room: str) -> Path:
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in room.strip()) or "room"
     return config.data_dir() / "boards" / f"{safe}.json"
+
+
+def lock_path(room: str) -> Path:
+    """Sidecar lock. Writers flock this file for the whole read-modify-write."""
+    path = board_path(room)
+    return path.with_name(path.name + ".lock")
+
+
+@contextmanager
+def board_lock(room: str) -> Iterator[None]:
+    path = lock_path(room)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
 
 
 def _empty(room: str) -> dict[str, Any]:
@@ -58,22 +79,26 @@ def refresh(board: dict[str, Any]) -> dict[str, Any]:
 
 
 def append_entry(board: dict[str, Any], *, actor: str, body: str) -> dict[str, Any]:
-    board = refresh(board)
-    version = int(board["version"]) + 1
-    entry_id = f"h{version}"
-    board["entries"] = list(board["entries"]) + [
-        {
-            "id": entry_id,
-            "author": actor,
-            "kind": "hypothesis",
-            "body": body,
-            "sealed": False,
-            "version": version,
-        }
-    ]
-    board["version"] = version
-    save(board)
-    return board
+    room = str(board["room"])
+    with board_lock(room):
+        # CAS: under the flock, a stale version reloads before the append.
+        board = refresh(board)
+        version = int(board["version"]) + 1
+        entry_id = f"h{version}"
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": entry_id,
+                "author": actor,
+                "kind": "hypothesis",
+                "body": body,
+                "sealed": False,
+                "readable": False,
+                "version": version,
+            }
+        ]
+        board["version"] = version
+        save(board)
+        return board
 
 
 def seal_entry(board: dict[str, Any], *, actor: str, entry_id: str) -> dict[str, Any]:
@@ -118,6 +143,21 @@ def edit_entry(board: dict[str, Any], *, actor: str, entry_id: str, body: str) -
     board["version"] = int(board["version"]) + 1
     save(board)
     return board
+
+
+def reveal_all(room: str) -> dict[str, Any]:
+    """Mark every sealed entry readable for a later round. Sealed stays true."""
+    with board_lock(room):
+        board = load(room)
+        changed = False
+        for entry in board["entries"]:
+            if entry.get("sealed") and not entry.get("readable"):
+                entry["readable"] = True
+                changed = True
+        if changed:
+            board["version"] = int(board["version"]) + 1
+            save(board)
+        return board
 
 
 def list_open(board: dict[str, Any]) -> list[dict[str, Any]]:

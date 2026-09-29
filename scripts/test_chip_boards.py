@@ -56,6 +56,41 @@ def test_protocol_turn_refreshes_on_version_conflict(data) -> None:
     assert boards.load("dev")["version"] == 2
 
 
+def test_concurrent_writers_flock_keeps_both_entries(data) -> None:
+    import threading
+
+    errors: list[BaseException] = []
+
+    def go(actor: str, body: str) -> None:
+        try:
+            boards.protocol_turn(boards.load("dev"), actor=actor, body=body)
+        except BaseException as exc:  # noqa: BLE001 — surface any racer
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=go, args=("a", "one")),
+        threading.Thread(target=go, args=("b", "two")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    board = boards.load("dev")
+    assert board["version"] == 2
+    assert sorted(entry["body"] for entry in board["entries"]) == ["one", "two"]
+    assert boards.lock_path("dev").is_file()
+
+
+def test_reveal_all_makes_sealed_readable(data) -> None:
+    board = boards.append_entry(boards.load("dev"), actor="b", body="hidden")
+    board = boards.seal_entry(board, actor="b", entry_id=board["entries"][0]["id"])
+    revealed = boards.reveal_all("dev")
+    assert revealed["entries"][0]["sealed"] is True
+    assert revealed["entries"][0]["readable"] is True
+    assert revealed["version"] == board["version"] + 1
+
+
 def test_list_open_and_sealed_partition(data) -> None:
     board = boards.append_entry(boards.load("dev"), actor="a", body="open")
     board = boards.append_entry(board, actor="b", body="shut")

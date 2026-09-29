@@ -1,7 +1,12 @@
 # Collab phase — contract
 
 Base: `07b3225` (`07b32252ae73a2f81809957d9ccee21bc4bf992a`).
-Branch: `chipchatdev/collab-phase`. Nothing in slices 1–5 merges to `main`.
+Branch: `chipchatdev/collab-phase`.
+
+Amendments (approved):
+
+1. Concurrency is **flock on a sidecar lockfile** `{room}.json.lock` plus a version CAS inside that lock: a stale `version` reloads, then the append runs. The concurrent-writer test must pass under threads, not by timing luck.
+2. `reveal_all(room)` sets `readable: true` on every sealed entry and bumps `version` once. `sealed` stays true. This is the shared-memory substrate only. The protocol engine (sealed brainstorm, critique rounds, convergence with dissent, chair rotation, A/B runner) is a later contract.
 Suite at this base must stay green and grow: **423 passed / 1 skipped**.
 
 This file is the spec. Slice PRs cite it. Behavior not named here is out of scope.
