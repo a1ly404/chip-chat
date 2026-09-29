@@ -52,8 +52,8 @@ GROUND_TRUTH_CLASS = re.compile(
 )
 FALSIFIABLE = re.compile(
     r"(verified[-_ ]as[-_ ]of|verified[-_ ]listen|re[-_ ]probe|pass[/ ]?fail|"
-    r"flip[s]? .{0,30}(true|reachable)|before/after|rollback)",
-    re.IGNORECASE,
+    r"flip[s]? .{0,30}(true|reachable)|before/after|rollback|"
+    r"\bfail\b\s*=|\bpass\b\s*=|falsifiab)", re.IGNORECASE,
 )
 EVIDENCE_CITE = re.compile(
     r"(inbound_reachable|qb_listen_port|38\.88\.124\.105|54543|gluetun|publicip)"
@@ -115,6 +115,35 @@ def _maybe_collab():
     return collab
 
 
+class DeltaSpend:
+    """Session-spend tracker keyed on chip's room-session ledger ramp.
+
+    chip's --json session_usd is the cumulative of the ROOM's session; the
+    true per-call cost = current - previous (first call: current minus the
+    room-fresh baseline 0; receipted as 'first-call baseline unknown' inside
+    transcript rows when the caller wants belt-and-braces). Refuses at
+    SESSION_REFUSE_USD like the base tracker.
+    """
+
+    def __init__(self, spend: SpendTracker) -> None:
+        self.spend = spend
+        self._prev: dict[str, float] = {}
+        self._estimate_rows = 0
+
+    def record_chip_call(self, room: str, session_usd: float, label: str) -> None:
+        prev = self._prev.get(room)
+        self._prev[room] = float(session_usd)
+        if prev is None:
+            # first call on this room this session: cost unknown; use the ramp
+            # delta from the next call when known; conservatively count alert
+            self._estimate_rows += 1
+            self.spend.record_call(0.0, f"{label} (first-baseline unknown)",
+                                   on_refuse=lambda: None)
+            return
+        self.spend.record_call(max(0.0, float(session_usd) - prev), label,
+                               on_refuse=lambda: None)
+
+
 def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
              go_token: str, room: str = "ab_solo") -> dict:
     if is_live() and not go_token:
@@ -148,10 +177,11 @@ def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
 
 
 def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
-             go_token: str, room: str = "ab_trio") -> dict:
+             go_token: str, room: str = "ab_trio", arm_scope: str = "RAZ-335-ops-ab-trio") -> dict:
     if is_live() and not go_token:
         raise RuntimeError("live arm refused: empty GO token (gate threading law)")
     collab = _maybe_collab()
+    dn = DeltaSpend(spend)
     board = collab.begin_brainstorm(room, SCENARIO_GOAL, TRIO_PARTICIPANTS)
     log.event("board_op", "harness", json.dumps({"op": "begin_brainstorm",
                                                  "go": go_token},
@@ -160,7 +190,7 @@ def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
     replies: dict[str, dict] = {}
     for persona in TRIO_PARTICIPANTS:
         reply = _chip_room_reply(repo_root, room, persona, message, live=is_live())
-        spend.record_call(reply["session_usd"], f"trio/{persona}/hypothesis")
+        dn.record_chip_call(room, reply["session_usd"], f"trio/{persona}/hypothesis")
         log.event("prompt", persona, message)
         log.event("reply", persona, reply["reply"],
                   tokens_prompt=reply.get("tokens_prompt"),
@@ -182,7 +212,7 @@ def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
             "Reply with your critique of it: what it gets right, what it "
             "misses, falsifiability of its fix shape.")
         critical = _chip_room_reply(repo_root, room, persona, critique_msg, live=is_live())
-        spend.record_call(critical["session_usd"], f"trio/{persona}/critique")
+        dn.record_chip_call(room, critical["session_usd"], f"trio/{persona}/critique")
         log.event("critique", persona, critical["reply"],
                   target_id=target_id,
                   tokens=1,
@@ -196,15 +226,16 @@ def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
         "evidence cites + disagreed parts + assumption ties + verification "
         "probe with pass/fail.")
     conv = _chip_room_reply(repo_root, room, chair, conv_msg, live=is_live())
-    spend.record_call(conv["session_usd"], f"trio/{chair}/converge")
+    dn.record_chip_call(room, conv["session_usd"], f"trio/{chair}/converge")
     log.event("converge", chair, conv["reply"],
               tokens_completion=conv.get("tokens_completion"),
               session_usd=conv.get("session_usd"))
     # dissent extraction is rubric-driven later; store verbatim for now
-    assignments = [{"persona": p, "scope": "RAZ-335"} for p in TRIO_PARTICIPANTS]
+    assignments = [{"persona": p, "scope": f"{arm_scope}-{p}"} for p in TRIO_PARTICIPANTS]
     board = collab.converge(room, chair, conv["reply"], assignments,
                             [{"author": "pm", "text": "verbatim-body-pending"}])
-    return {"arm": "trio", "decision": conv["reply"], "spend": spend.state()}
+    return {"arm": "trio", "decision": conv["reply"], "spend": spend.state(),
+            "arm_scope": arm_scope}
 
 
 def score_arm(transcript_path: Path) -> dict:
