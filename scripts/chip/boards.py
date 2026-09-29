@@ -199,6 +199,25 @@ def list_sealed(board: dict[str, Any]) -> list[dict[str, Any]]:
     return [e for e in board["entries"] if e.get("sealed")]
 
 
+def wake_block(room: str) -> str:
+    if not board_path(room).is_file():
+        return ""
+    board = load(room)
+    try:
+        assert_local_board(board)
+    except PermissionError:
+        return "board_foreign_host"
+    lines = [
+        f"round_id={board.get('round_id')}",
+        f"phase={board.get('phase')}",
+        f"version={board.get('version')}",
+        f"host={board.get('host')}",
+    ]
+    for entry in (board.get("entries") or [])[-5:]:
+        lines.append(f"{entry.get('id')}: {str(entry.get('body') or '')[:80]}")
+    return "\n".join(lines)
+
+
 def assert_local_board(board: dict[str, Any]) -> None:
     host = str(board.get("host") or "")
     data = str(board.get("data_dir") or "")
