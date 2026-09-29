@@ -13,5 +13,7 @@
   ],
   "go_denies": [
     "infisical"
-  ]
+  ],
+  "build_allowed": ["lane-test", "docker-build", "vite-build"],
+  "build_needs_go": ["registry-push", "deploy", "compose-up"]
 }

@@ -31,6 +31,27 @@
       "description": "Read-only recent commit subjects"
     },
     {
+      "id": "lane-test",
+      "argv": ["python3", "-m", "pytest"],
+      "risk": "medium",
+      "allow_extra_args": true,
+      "description": "BUILD tier: lane test command. Distinct from write."
+    },
+    {
+      "id": "docker-build",
+      "argv": ["docker", "build", "-t"],
+      "risk": "medium",
+      "allow_extra_args": true,
+      "description": "BUILD tier: docker build with a local-only tag. Registry push is not this tool."
+    },
+    {
+      "id": "vite-build",
+      "argv": ["npm", "run", "build"],
+      "risk": "medium",
+      "allow_extra_args": false,
+      "description": "BUILD tier: gym-app vite build (npm run build)."
+    },
+    {
       "id": "task-show",
       "argv": ["python3", "-m", "chip", "task", "show"],
       "risk": "low",

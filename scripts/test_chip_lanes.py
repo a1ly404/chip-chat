@@ -165,3 +165,114 @@ def test_live_retro_records_refusal(pins: dict[str, Path], monkeypatch: pytest.M
     retro = lanes.retro_path().read_text(encoding="utf-8")
     assert "global deny" in retro
     assert "RAZ-278" in retro
+
+
+def test_allow_rule_cannot_outrank_media_deny() -> None:
+    decision = lanes.decide(
+        "/mnt/nas/media/movie.mkv",
+        [("deny", "/mnt/nas/media"), ("allow", "/mnt/nas/media")],
+    )
+    assert decision == "deny"
+
+
+def test_unlink_and_truncate_of_receipt_log_refused(pins: dict[str, Path], tmp_path: Path) -> None:
+    ledger = tmp_path / "tool_receipts.jsonl"
+    ledger.write_text('{"ok":1}\n', encoding="utf-8")
+    for op in ("unlink", "truncate"):
+        with pytest.raises(PermissionError, match="global deny"):
+            lanes.refuse_ledger_mutation(ledger, op)
+    assert ledger.read_text(encoding="utf-8") == '{"ok":1}\n'
+
+
+def test_infisical_mismatched_go_ticket(pins: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    _claim("opsdev", "raz-94")
+    monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-1")
+    with pytest.raises(PermissionError, match="infisical"):
+        lanes.write_text(
+            persona="opsdev",
+            relpath="infisical/token.txt",
+            content="nope",
+            ticket_id="RAZ-94",
+            room="dev",
+            scope="raz-94",
+        )
+
+
+def test_build_local_tag_and_learning_row(pins: dict[str, Path]) -> None:
+    _claim("buffrdev", "raz-b")
+    code = lanes.run_build(
+        persona="buffrdev",
+        tool_id="vite-build",
+        room="dev",
+        scope="raz-b",
+        ticket_id="RAZ-B",
+        runner=lambda: (0, "dist/index.js"),
+    )
+    assert code == 0
+    row = json.loads(lanes.learning_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert row["exit_code"] == 0
+    assert "duration_s" in row
+    assert len(row["artifact_sha256"]) == 64
+    assert row["reflection"].startswith("buffrdev vite-build")
+
+
+def test_registry_push_and_compose_need_go(pins: dict[str, Path]) -> None:
+    _claim("opsdev", "raz-d")
+    for tool_id in ("registry-push", "deploy", "compose-up"):
+        with pytest.raises(PermissionError, match="without GO"):
+            lanes.run_build(
+                persona="opsdev",
+                tool_id=tool_id,
+                room="dev",
+                scope="raz-d",
+                ticket_id="RAZ-D",
+                runner=lambda: (0, ""),
+            )
+
+
+def test_docker_build_rejects_registry_tag(pins: dict[str, Path]) -> None:
+    _claim("homelabdev", "raz-db")
+    with pytest.raises(PermissionError, match="local-only"):
+        lanes.run_build(
+            persona="homelabdev",
+            tool_id="docker-build",
+            room="dev",
+            scope="raz-db",
+            ticket_id="RAZ-DB",
+            docker_tag="ghcr.io/app:latest",
+            runner=lambda: (0, ""),
+        )
+
+
+def test_one_build_per_lane(pins: dict[str, Path]) -> None:
+    _claim("chipchatdev", "raz-c")
+    lanes.acquire_build("chipchatdev")
+    try:
+        with pytest.raises(PermissionError, match="1 concurrent"):
+            lanes.run_build(
+                persona="chipchatdev",
+                tool_id="lane-test",
+                room="dev",
+                scope="raz-c",
+                ticket_id="RAZ-C",
+                runner=lambda: (0, ""),
+            )
+    finally:
+        lanes.release_build("chipchatdev")
+
+
+def test_failed_build_files_retro_template(pins: dict[str, Path]) -> None:
+    _claim("buffrdev", "raz-f")
+    code = lanes.run_build(
+        persona="buffrdev",
+        tool_id="lane-test",
+        room="dev",
+        scope="raz-f",
+        ticket_id="RAZ-F",
+        runner=lambda: (1, "fail-log"),
+    )
+    assert code == 1
+    retro = json.loads(lanes.retro_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert retro["attempted"] == "lane-test"
+    assert "exit 1" in retro["why"]
+    assert "RAZ-F" in retro["envelope"]

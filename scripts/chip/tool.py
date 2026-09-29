@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,6 +153,17 @@ def run(
     spec = resolve_tool(tool_name)
     if spec is None:
         raise NeedToolError(tool_name)
+    started = time.perf_counter()
+
+    def _learn(exit_code: int, artifact: str) -> None:
+        lanes.record_outcome(
+            tool_id=spec.id,
+            persona=speaker or "anonymous",
+            exit_code=exit_code,
+            duration_s=time.perf_counter() - started,
+            artifact=artifact,
+            reflection=f"{speaker or 'anonymous'} {spec.id} exited {exit_code}",
+        )
 
     intent = (user_intent or "").strip()
     if intent:
@@ -168,6 +180,7 @@ def run(
             why=denied,
             envelope=f"tool={spec.id} ticket={task_id or ''}",
         )
+        _learn(-1, denied)
         raise ToolGatedError(denied)
     timeout = timeout_seconds if timeout_seconds is not None else default_timeout_seconds()
     allowed = execution_allowed(execute=execute)
@@ -197,6 +210,7 @@ def run(
             cwd=str(workdir),
         )
         append_audit({**base_audit, **result.to_dict(), "gated": True})
+        _learn(result.exit_code, result.stderr)
         return result
 
     base_audit["speaker"] = speaker
@@ -229,6 +243,7 @@ def run(
                 cwd=str(workdir),
             )
             append_audit({**base_audit, **result.to_dict(), "gated": True, "authz_refused": reason})
+            _learn(result.exit_code, result.stderr)
             return result
 
     try:
@@ -268,6 +283,7 @@ def run(
         cwd=str(workdir),
     )
     append_audit({**base_audit, **result.to_dict(), "gated": False})
+    _learn(result.exit_code, result.stdout or result.stderr)
     return result
 
 
