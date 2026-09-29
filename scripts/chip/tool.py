@@ -12,6 +12,7 @@ from typing import Any, Sequence
 from chip import config
 from chip import constraints
 from chip import store
+from chip import lanes
 from chip.need_tool import NeedToolError
 from chip.tools_manifest import ToolSpec, default_timeout_seconds, resolve_tool
 
@@ -160,6 +161,14 @@ def run(
 
     argv = build_argv(spec, extra_args)
     workdir = _resolve_cwd(cwd)
+    denied = lanes.refuse_blob(*(argv + [str(workdir)]), ticket_id=task_id)
+    if denied:
+        lanes.file_retro(
+            attempted=" ".join(argv),
+            why=denied,
+            envelope=f"tool={spec.id} ticket={task_id or ''}",
+        )
+        raise ToolGatedError(denied)
     timeout = timeout_seconds if timeout_seconds is not None else default_timeout_seconds()
     allowed = execution_allowed(execute=execute)
 

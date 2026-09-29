@@ -17,6 +17,20 @@
       "description": "Read-only git status in the current working tree"
     },
     {
+      "id": "git-diff",
+      "argv": ["git", "diff", "--no-ext-diff"],
+      "risk": "low",
+      "allow_extra_args": true,
+      "description": "Read-only git diff. Extra args are paths; global denies still refuse."
+    },
+    {
+      "id": "git-log",
+      "argv": ["git", "log", "-n", "20", "--oneline"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only recent commit subjects"
+    },
+    {
       "id": "task-show",
       "argv": ["python3", "-m", "chip", "task", "show"],
       "risk": "low",
