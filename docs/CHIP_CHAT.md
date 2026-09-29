@@ -6,6 +6,8 @@ CLI-first multi-agent chat against **OpenRouter only**, using a dedicated API ke
 
 Runs on **WSL2 Ubuntu** or native **Ubuntu** with Python 3.11+ and bash. No razzorstack checkout, no Hyper-V flip, no Open WebUI dependency.
 
+Lanes constrain hands, not minds. Any persona may reason about any lane in the room. Execution stays pinned to that persona’s root and the global denies. A collaboration chair is conversational authority only: the same lanes, the same tool tiers, and the same GO gates, with no extra permission to run tools.
+
 ## Install (WSL / Ubuntu)
 
 ```bash

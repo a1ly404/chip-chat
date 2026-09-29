@@ -172,3 +172,20 @@ def reject_hypothesis(room: str, entry_id: str, reason: str) -> dict[str, Any]:
         board["version"] = int(board["version"]) + 1
         boards.save(board)
         return board
+
+
+def rotate_chair(room: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        people = list(board.get("participants") or [])
+        if not people:
+            raise ValueError("participants required")
+        current = board.get("chair")
+        index = people.index(current) if current in people else -1
+        nxt = people[(index + 1) % len(people)]
+        board["chair"] = nxt
+        history = list(board.get("chair_history") or [])
+        history.append(nxt)
+        board["chair_history"] = history
+        boards.save(board)
+        return board

@@ -91,3 +91,18 @@ def test_reject_hypothesis_blocks_resubmission(data) -> None:
     boards.save(board)
     with pytest.raises(PermissionError, match="rejected"):
         collab.submit_hypothesis("dev", "b", "idea")
+
+
+def test_chair_gets_no_extra_tool_powers(data) -> None:
+    from chip.lanes import decide
+    from chip.tool import run
+
+    board = collab.begin_brainstorm("dev", "goal", ["a", "b"])
+    assert board["chair"] == "a"
+    rotated = collab.rotate_chair("dev")
+    assert rotated["chair"] == "b"
+    assert rotated["chair_history"] == ["a", "b"]
+    blob = "python3 -m pytest boards/dev.json"
+    assert decide(blob, [("allow", "boards/")]) == "deny"
+    with pytest.raises(PermissionError, match="boards/"):
+        run("pytest", "boards/dev.json", execute=False, speaker=rotated["chair"], room="dev")
