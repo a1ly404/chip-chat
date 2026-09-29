@@ -108,7 +108,7 @@ pm's lane `tools` list is `pytest`, `git-add`, and `git-commit`. git add/commit 
 
 ## Lane correction — airvpn_port_grab.py
 
-`config/chip_tools.json` row `airvpn-port-regab` argv is `python3 scripts/airvpn_port_grab.py`. That file is not in chip-chat. It belongs on the razzorstack Windows checkout. The specialist is **homelabdev**. buffrdev is Buffr / gym-app only. Do not delegate this script to buffrdev. A room reply at 2026-09-29T14:47:40Z that said `delegate:buffrdev` is wrong and is superseded by this section. verified-as-of: 2026-09-29T15:15:00Z.
+`config/chip_tools.json` row `airvpn-port-regab` argv is `python3 scripts/airvpn_port_grab.py`. The script file may still be absent on disk; **absence is not cancellation**. Disposition after the RAZ-335 ops A/B: ownership **transferred to `cc` (chip-chat lane)** — not voided, not cancelled, not buffrdev, not "drop the tier-1 row". Do not treat the row as dead. Cross-ref mothball / disposition: [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md). A room reply at 2026-09-29T14:47:40Z that said `delegate:buffrdev` remains wrong. verified-as-of: `2026-09-29T17:29:07Z`.
 
 ## Canvas holes still without a code slice
 
@@ -119,7 +119,7 @@ Still open / remainder:
 - **P4 remainder.** Path scopes refuse outside the persona root. A slash-free ticket scope is still not checked against a charter. No slice yet.
 - **P6 remainder.** `end_critique` needs one cross-critique or one abstain. It does not require every hypothesis to be read. No slice yet.
 - **P8.** Cross-host flock. Spec below. **Not implemented.** POSIX `flock` cannot synchronize WSL and Hyper-V because they are different files.
-- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. That is a **mock grade**, not spend proof. Live A/B spend measurement is the ops harness (`chip.ops_session_a_b`); **ocgo is firing the live RAZ-335 ops A/B now** under Lyla's GO. pm does not fire that session. See `docs/ops/post-ab-runbook.md`.
+- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. That is a **mock grade**, not spend proof. Live ops A/B under GO `f4k9-wq2x-t7bz` **completed**: tie 4/4 both arms; Ally mothball; session cap disarmed; spend `$0.0062` / `$0.25`; receipt RAZ-335 / `63b479a0`. See [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md) for what happened (not only the predicted flow).
 
 ## Cross-host flock (E3 successor, spec only — do not implement in this doc PR)
 
@@ -175,9 +175,9 @@ Effect (converged → revealed only):
 
 Non-effects: no tool tier change, no claim release, no delegate hop reset, no spend charge by itself.
 
-**Pending Lyla post-RAZ-335.** Blocked until Lyla rules after the ops session. The names `chip.done_gate.reopen_required` and `chip.monitor.mark_human_reopen` are different APIs and stay as they are.
+**Post-RAZ-335 status:** live ops A/B mothballed (tie 4/4; see post-ab runbook). `reopen` remains **not callable** until Lyla explicitly GOs an implementation slice. The names `chip.done_gate.reopen_required` and `chip.monitor.mark_human_reopen` are different APIs and stay as they are.
 
-verified-as-of: `2026-09-29T16:36:31Z`.
+verified-as-of: `2026-09-29T17:29:07Z`.
 
 ## Search receipt — scripts/chip hygiene (work-exhausted)
 
