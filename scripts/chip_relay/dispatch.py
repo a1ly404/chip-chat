@@ -334,6 +334,12 @@ def handle_message(
     if persona_alert:
         return _fail(logs, persona_alert)
     persona, text = apply_wake_to_turn(text, persona)
+    if persona == "chipchatdev":
+        from chip import lanes as _lanes
+
+        allowed, wake_reason = _lanes.chipchatdev_wake_allowed(text, room.id)
+        if not allowed:
+            return _fail(logs, wake_reason)
     prior_speaker = environ.get("CHIP_TURN_SPEAKER")
     environ["CHIP_TURN_SPEAKER"] = persona
     os.environ["CHIP_TURN_SPEAKER"] = persona

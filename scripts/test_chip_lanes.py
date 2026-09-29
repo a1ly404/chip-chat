@@ -313,3 +313,83 @@ def test_pm_write_inside_root_and_refuse_outside(pins: dict[str, Path], tmp_path
             room="dev",
             scope="raz-pm",
         )
+
+
+def test_build_writes_start_then_completion(pins: dict[str, Path]) -> None:
+    _claim("buffrdev", "raz-r")
+    lanes.run_build(
+        persona="buffrdev",
+        tool_id="vite-build",
+        room="dev",
+        scope="raz-r",
+        ticket_id="RAZ-R",
+        runner=lambda: (0, "dist/app.js"),
+    )
+    rows = [json.loads(line) for line in lanes.receipt_path().read_text(encoding="utf-8").splitlines() if line.strip()]
+    builds = [row for row in rows if row["op"] == "build"]
+    assert [row["phase"] for row in builds] == ["start", "complete"]
+    assert builds[0]["tool_id"] == "vite-build"
+    assert builds[1]["sha256"] != "incomplete"
+
+
+def test_build_exception_still_completes_receipt(pins: dict[str, Path]) -> None:
+    _claim("buffrdev", "raz-x")
+
+    def boom():
+        raise RuntimeError("died mid artifact")
+
+    with pytest.raises(RuntimeError):
+        lanes.run_build(
+            persona="buffrdev",
+            tool_id="docker-build",
+            room="dev",
+            scope="raz-x",
+            ticket_id="RAZ-X",
+            docker_tag="throwaway:local",
+            runner=boom,
+        )
+    rows = [json.loads(line) for line in lanes.receipt_path().read_text(encoding="utf-8").splitlines() if line.strip()]
+    builds = [row for row in rows if row["op"] == "build"]
+    assert builds[0]["phase"] == "start"
+    assert builds[-1]["phase"] == "complete"
+    assert builds[-1]["sha256"] == "incomplete"
+
+
+def test_second_build_files_retro(pins: dict[str, Path]) -> None:
+    _claim("chipchatdev", "raz-cap")
+    lanes.acquire_build("chipchatdev")
+    try:
+        with pytest.raises(PermissionError, match="1 concurrent"):
+            lanes.run_build(
+                persona="chipchatdev",
+                tool_id="lane-test",
+                room="dev",
+                scope="raz-cap",
+                ticket_id="RAZ-CAP",
+                runner=lambda: (0, ""),
+            )
+    finally:
+        lanes.release_build("chipchatdev")
+    retro = lanes.retro_path().read_text(encoding="utf-8")
+    assert "1 concurrent" in retro
+    assert not lanes.receipt_path().exists()
+
+
+def test_chipchatdev_read_wake_needs_claim(pins: dict[str, Path]) -> None:
+    ok, reason = lanes.chipchatdev_wake_allowed("read scope:raz-w notes", "dev")
+    assert ok is False
+    assert "claim_owner" in reason
+    _claim("chipchatdev", "raz-w")
+    ok, reason = lanes.chipchatdev_wake_allowed("read scope:raz-w notes", "dev")
+    assert ok is True
+    assert reason == "read tier under claim"
+
+
+def test_chipchatdev_build_wake_needs_named_go(pins: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    _claim("chipchatdev", "raz-g")
+    ok, reason = lanes.chipchatdev_wake_allowed("vite build scope:raz-g", "dev")
+    assert ok is False
+    assert "GO" in reason
+    monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-G")
+    ok, reason = lanes.chipchatdev_wake_allowed("GO: RAZ-G vite build scope:raz-g", "dev")
+    assert ok is True
