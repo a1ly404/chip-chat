@@ -110,3 +110,65 @@ def end_critique(room: str) -> dict[str, Any]:
         board["critique_closed"] = True
         boards.save(board)
         return board
+
+
+def converge(
+    room: str,
+    chair: str,
+    plan_body: str,
+    assignments: list[dict[str, str]],
+    dissent: list[dict[str, str]],
+) -> dict[str, Any]:
+    from chip import taskflow
+
+    board = _board(room)
+    if not board.get("critique_closed"):
+        raise PermissionError("early")
+    if chair != board.get("chair"):
+        raise PermissionError("chair")
+    for row in assignments:
+        taskflow.claim_if_free(room, row["persona"], row["scope"])
+    with boards.board_lock(room):
+        board = _board(room)
+        stored = [{"author": row["author"], "text": row["text"]} for row in dissent]
+        board["decision"] = {
+            "plan": plan_body,
+            "assignments": list(assignments),
+            "dissent": stored,
+        }
+        board["phase"] = "converged"
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"d{version}",
+                "author": chair,
+                "kind": "decision",
+                "body": plan_body,
+                "sealed": True,
+                "version": version,
+                "dissent": stored,
+            }
+        ]
+        board["version"] = version
+        boards.save(board)
+        return board
+
+
+def reject_hypothesis(room: str, entry_id: str, reason: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        entry = _entry(board, entry_id)
+        if entry is None or entry.get("kind") != "hypothesis":
+            raise KeyError(entry_id)
+        board["rejected"] = list(board.get("rejected") or []) + [
+            {
+                "id": entry_id,
+                "body": entry.get("body"),
+                "reason": reason,
+                "author": entry.get("author"),
+            }
+        ]
+        board["entries"] = [row for row in board["entries"] if row.get("id") != entry_id]
+        board["version"] = int(board["version"]) + 1
+        boards.save(board)
+        return board

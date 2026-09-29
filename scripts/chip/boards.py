@@ -128,6 +128,8 @@ def edit_entry(board: dict[str, Any], *, actor: str, entry_id: str, body: str) -
             break
     if found is None:
         raise KeyError(entry_id)
+    if found.get("kind") == "decision":
+        raise PermissionError("dissent")
     if found["sealed"] and actor != found["author"]:
         decision = decide(
             f"edit {entry_id} author={found['author']}",

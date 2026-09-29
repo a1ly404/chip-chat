@@ -49,3 +49,45 @@ def test_early_convergence_refused_until_each_critiques_another(data) -> None:
     collab.critique("dev", "b", goal_id, "push on a")
     closed = collab.end_critique("dev")
     assert closed["critique_closed"] is True
+
+
+def _ready():
+    goal_id, idea = _opened()
+    collab.critique("dev", "a", idea, "on b")
+    collab.critique("dev", "b", goal_id, "on a")
+    collab.end_critique("dev")
+    return goal_id, idea
+
+
+def test_dissent_survives_convergence_verbatim(data) -> None:
+    from chip import boards
+
+    _goal, idea = _ready()
+    dissent = [{"author": "b", "text": "keep the port"}]
+    board = collab.converge(
+        "dev",
+        "a",
+        "ship it",
+        [{"persona": "b", "scope": "health-port"}],
+        dissent,
+    )
+    decision = next(entry for entry in board["entries"] if entry["kind"] == "decision")
+    assert decision["dissent"] == dissent
+    assert board["decision"]["dissent"] == dissent
+    with pytest.raises(PermissionError, match="dissent"):
+        boards.edit_entry(board, actor="a", entry_id=decision["id"], body="rewritten")
+    assert boards.load("dev")["decision"]["dissent"][0]["text"] == "keep the port"
+
+
+def test_reject_hypothesis_blocks_resubmission(data) -> None:
+    _goal, idea = _opened()
+    collab.reject_hypothesis("dev", idea, "dead end")
+    # phase is revealed, so brainstorm resubmit is also reveal-blocked.
+    # Put the room back into brainstorm without clearing rejected.
+    from chip import boards
+
+    board = boards.load("dev")
+    board["phase"] = "brainstorm"
+    boards.save(board)
+    with pytest.raises(PermissionError, match="rejected"):
+        collab.submit_hypothesis("dev", "b", "idea")
