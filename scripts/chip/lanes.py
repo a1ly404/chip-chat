@@ -133,11 +133,20 @@ def learning_path() -> Path:
     return config.data_dir() / "audit" / "tool_learning.jsonl"
 
 
-def decide(blob: str, persona_rules: list[tuple[str, str]]) -> str:
-    """Persona rules are applied in order. Global hard denies are appended last so they win."""
+def decide(
+    blob: str,
+    persona_rules: list[tuple[str, str]],
+    *,
+    room_go: str | None = None,
+) -> str:
+    """Persona rules first. Global denies are appended last so a later allow still loses."""
     ordered = list(persona_rules)
-    for frag in load_lanes().get("hard_denies") or []:
+    lanes = load_lanes()
+    for frag in lanes.get("hard_denies") or []:
         ordered.append(("deny", str(frag)))
+    if room_go is not None and os.environ.get(GO_ENV, "").strip() != room_go.strip():
+        for frag in lanes.get("go_denies") or []:
+            ordered.append(("deny", str(frag)))
     decision = "allow"
     low = _norm(blob)
     for effect, frag in ordered:
@@ -180,6 +189,15 @@ def record_outcome(
             "reflection": reflection.replace("\n", " ")[:200],
         },
     )
+    if exit_code != 0:
+        from chip import task_ledger
+
+        task_ledger.file_retro_ticket(
+            claimed=f"{persona} {tool_id} exited {exit_code}",
+            verified=reflection.replace("\n", " ")[:200],
+            catch="nonzero tool exit belongs on the task ledger before the next sitrep",
+            task_id=tool_id,
+        )
 
 
 def _build_lock(persona: str) -> Path:
@@ -192,6 +210,12 @@ def acquire_build(persona: str) -> None:
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError as exc:
+        file_retro(
+            attempted=f"build {persona}",
+            why=f"build cap: 1 concurrent build for {persona}",
+            envelope=f"persona={persona}",
+            force=True,
+        )
         raise PermissionError(f"build cap: 1 concurrent build for {persona}") from exc
     os.write(fd, persona.encode("utf-8"))
     os.close(fd)
@@ -247,6 +271,19 @@ def run_build(
     acquire_build(persona)
     import time
 
+    append_receipt(
+        {
+            "ts": _ts(),
+            "phase": "start",
+            "op": "build",
+            "persona": persona,
+            "tool_id": tool_id,
+            "ticket_id": ticket_id,
+            "room": room,
+            "scope": scope,
+            "docker_tag": docker_tag or "",
+        }
+    )
     started = time.perf_counter()
     code = 1
     artifact = ""
@@ -254,8 +291,24 @@ def run_build(
         code, artifact = runner()
         code = int(code)
         artifact = artifact or ""
+    except Exception:
+        artifact = artifact or "incomplete"
+        code = 1
+        raise
     finally:
         duration = time.perf_counter() - started
+        append_receipt(
+            {
+                "ts": _ts(),
+                "phase": "complete",
+                "op": "build",
+                "persona": persona,
+                "tool_id": tool_id,
+                "ticket_id": ticket_id,
+                "exit_code": code,
+                "sha256": hashlib.sha256(artifact.encode("utf-8")).hexdigest() if artifact and artifact != "incomplete" else "incomplete",
+            }
+        )
         record_outcome(
             tool_id=tool_id,
             persona=persona,
@@ -273,6 +326,35 @@ def run_build(
             force=True,
         )
     return code
+
+
+_ABOVE_READ = ("write", "docker", "deploy", "compose", "push", "unlink", "truncate", "vite", "build")
+
+
+def chipchatdev_wake_allowed(task: str, room: str) -> tuple[bool, str]:
+    """Read-tier chipchatdev wakes need a live claim. Above-read needs an in-room GO naming the ticket."""
+    import re
+
+    from chip import claims
+
+    text = task or ""
+    scope_match = re.search(r"\bscope:(\S+)", text, re.IGNORECASE)
+    if scope_match is None:
+        return False, "chipchatdev wake needs scope:<id>"
+    scope = scope_match.group(1)
+    low = text.lower()
+    above = any(re.search(rf"\b{word}\b", low) for word in _ABOVE_READ)
+    if above:
+        go_match = re.search(r"\bGO:\s*([A-Za-z0-9-]+)", text, re.IGNORECASE)
+        named = go_match.group(1) if go_match else ""
+        pinned = os.environ.get(GO_ENV, "").strip()
+        if not named or pinned != named:
+            return False, "above read needs GO naming the ticket"
+        return True, "go names ticket"
+    owner = claims.claim_owner(room, scope)
+    if owner != "chipchatdev":
+        return False, f"claim_owner={owner or 'none'} ≠ chipchatdev"
+    return True, "read tier under claim"
 
 
 def file_retro(*, attempted: str, why: str, envelope: str, force: bool = False) -> None:

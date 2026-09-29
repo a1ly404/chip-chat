@@ -39,6 +39,28 @@ def test_apply_wake_to_turn() -> None:
     assert text == "only task"
 
 
+def test_chipchatdev_wake_refuses_without_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    config = load_config(environ={})
+    called = {"n": 0}
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del args, timeout
+        called["n"] += 1
+        return ChipResult(0, '{"reply": "ack"}')
+
+    result = handle_message(
+        Incoming("chip-dev", "@chipchatdev read scope:raz-9 notes", "ally", author_id=ALLY_INJECT_AUTHOR_ID),
+        config,
+        chip=chip,
+        webhook=lambda *a: WebhookResult(204),
+        environ={"CHIP_WEBHOOK_DEV": "https://example.invalid/dev"},
+    )
+    assert result.ok is False
+    assert result.alert and "claim_owner" in result.alert
+    assert called["n"] == 0
+
+
 def test_human_wake_routes_as_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     config = load_config(environ={})

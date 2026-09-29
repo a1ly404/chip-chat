@@ -197,6 +197,7 @@ def run(
     if intent:
         blocked = constraints.first_hard_block(intent)
         if blocked:
+            _learn(-1, blocked)
             raise ToolGatedError(blocked)
 
     argv = build_argv(spec, extra_args)
