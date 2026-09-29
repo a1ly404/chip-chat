@@ -119,7 +119,7 @@ Still open / remainder:
 - **P4 remainder.** Path scopes refuse outside the persona root. A slash-free ticket scope is still not checked against a charter. No slice yet.
 - **P6 remainder.** `end_critique` needs one cross-critique or one abstain. It does not require every hypothesis to be read. No slice yet.
 - **P8.** Cross-host flock. Spec below. **Not implemented.** POSIX `flock` cannot synchronize WSL and Hyper-V because they are different files.
-- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. That is a **mock grade**, not spend proof. Live ops A/B under GO `f4k9-wq2x-t7bz` **completed**: tie 4/4 both arms; Ally mothball; session cap disarmed; spend `$0.0062` / `$0.25`; receipt RAZ-335 / `63b479a0`. See [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md) for what happened (not only the predicted flow).
+- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. That is a **mock grade**, not spend proof. Live ops A/B under GO `REDACTED` **completed**: tie 4/4 both arms; Ally mothball; session cap disarmed; spend `$0.0062` / `$0.25`; receipt RAZ-335 / `63b479a0`. See [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md) for what happened (not only the predicted flow).
 
 ## Cross-host flock (E3 successor, spec only — do not implement in this doc PR)
 
