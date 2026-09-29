@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "personas": {
+    "homelabdev": {"root_env": "CHIP_LANE_HOMELAB_ROOT"},
+    "opsdev": {"root_env": "CHIP_LANE_OPS_ROOT"},
+    "buffrdev": {"root_env": "CHIP_LANE_BUFFR_ROOT"},
+    "chipchatdev": {"root_env": "CHIP_LANE_CHIP_ROOT"}
+  },
+  "hard_denies": [
+    "/mnt/nas/media",
+    "tool_receipts.jsonl",
+    ".env"
+  ],
+  "go_denies": [
+    "infisical"
+  ],
+  "build_allowed": ["lane-test", "docker-build", "vite-build"],
+  "build_needs_go": ["registry-push", "deploy", "compose-up"]
+}
