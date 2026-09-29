@@ -70,6 +70,39 @@ class TaskCounter:
         return n
 
 
+def retro_tickets_path(data_dir: Path | None = None) -> Path:
+    """Append-only retro tickets. Same task_ledger directory as the turn counter."""
+    from chip import config
+
+    base = Path(data_dir) if data_dir is not None else config.data_dir()
+    return base / "task_ledger" / "retro_tickets.jsonl"
+
+
+def file_retro_ticket(
+    *,
+    claimed: str,
+    verified: str,
+    catch: str,
+    task_id: str = "RETRO",
+) -> None:
+    """File one retro on the existing task ledger. No second tracker."""
+    from datetime import datetime, timezone
+
+    from chip import store
+
+    store.append_jsonl(
+        retro_tickets_path(),
+        {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "task_id": task_id,
+            "task_type": "ledger",
+            "claimed": claimed,
+            "verified": verified,
+            "catch": catch,
+        },
+    )
+
+
 def counter_path(data_dir: Path) -> Path:
     return Path(env_path) if (env_path := os.environ.get("CHIP_TASK_COUNTER_PATH", "")) else Path(data_dir) / "task_ledger" / "task_turns.json"
 

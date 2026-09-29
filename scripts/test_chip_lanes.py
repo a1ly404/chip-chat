@@ -385,6 +385,70 @@ def test_chipchatdev_read_wake_needs_claim(pins: dict[str, Path]) -> None:
     assert reason == "read tier under claim"
 
 
+def test_persona_allow_later_loses_to_global_deny(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow rules sit later than nothing; global denies are appended and win."""
+    monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-1")
+    media = lanes.decide(
+        "/mnt/nas/media/movie.mkv",
+        [("allow", "/mnt/nas/media")],
+    )
+    unlink = lanes.decide(
+        "unlink tool_receipts.jsonl",
+        [("allow", "unlink"), ("allow", "tool_receipts.jsonl")],
+    )
+    truncate = lanes.decide(
+        "truncate tool_receipts.jsonl",
+        [("allow", "truncate"), ("allow", "tool_receipts.jsonl")],
+    )
+    infisical = lanes.decide(
+        "read infisical/token.txt GO: RAZ-94",
+        [("allow", "infisical")],
+        room_go="RAZ-94",
+    )
+    assert media == "deny"
+    assert unlink == "deny"
+    assert truncate == "deny"
+    assert infisical == "deny"
+
+
+def test_nonzero_tool_run_files_task_ledger_retro(pins: dict[str, Path]) -> None:
+    from chip import task_ledger
+
+    lanes.record_outcome(
+        tool_id="pytest",
+        persona="chipchatdev",
+        exit_code=1,
+        duration_s=0.02,
+        artifact="fail",
+        reflection="chipchatdev pytest exited 1",
+    )
+    row = json.loads(lanes.learning_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert row["exit_code"] == 1
+    assert "duration_s" in row
+    assert len(row["artifact_sha256"]) == 64
+    assert row["reflection"] == "chipchatdev pytest exited 1"
+    retro = json.loads(task_ledger.retro_tickets_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert retro["task_id"] == "pytest"
+    assert "exited 1" in retro["claimed"]
+    assert retro["catch"]
+
+
+def test_prior_session_false_dirty_tree_retro(pins: dict[str, Path]) -> None:
+    from chip import task_ledger
+
+    task_ledger.file_retro_ticket(
+        task_id="RETRO-PRIOR-SESSION",
+        claimed="Dirty uncommitted tree, and lane access absent from the checkout.",
+        verified="Working tree was clean at d6a88a6. Lane access was already on origin/main at 07b3225.",
+        catch="Sitreps must run git status and name the commit before describing dirty files or missing lane-access.",
+    )
+    retro = json.loads(task_ledger.retro_tickets_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert retro["task_id"] == "RETRO-PRIOR-SESSION"
+    assert "d6a88a6" in retro["verified"]
+    assert "07b3225" in retro["verified"]
+    assert "git status" in retro["catch"]
+
+
 def test_chipchatdev_build_wake_needs_named_go(pins: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     _claim("chipchatdev", "raz-g")
     ok, reason = lanes.chipchatdev_wake_allowed("vite build scope:raz-g", "dev")

@@ -133,11 +133,20 @@ def learning_path() -> Path:
     return config.data_dir() / "audit" / "tool_learning.jsonl"
 
 
-def decide(blob: str, persona_rules: list[tuple[str, str]]) -> str:
-    """Persona rules are applied in order. Global hard denies are appended last so they win."""
+def decide(
+    blob: str,
+    persona_rules: list[tuple[str, str]],
+    *,
+    room_go: str | None = None,
+) -> str:
+    """Persona rules first. Global denies are appended last so a later allow still loses."""
     ordered = list(persona_rules)
-    for frag in load_lanes().get("hard_denies") or []:
+    lanes = load_lanes()
+    for frag in lanes.get("hard_denies") or []:
         ordered.append(("deny", str(frag)))
+    if room_go is not None and os.environ.get(GO_ENV, "").strip() != room_go.strip():
+        for frag in lanes.get("go_denies") or []:
+            ordered.append(("deny", str(frag)))
     decision = "allow"
     low = _norm(blob)
     for effect, frag in ordered:
@@ -180,6 +189,15 @@ def record_outcome(
             "reflection": reflection.replace("\n", " ")[:200],
         },
     )
+    if exit_code != 0:
+        from chip import task_ledger
+
+        task_ledger.file_retro_ticket(
+            claimed=f"{persona} {tool_id} exited {exit_code}",
+            verified=reflection.replace("\n", " ")[:200],
+            catch="nonzero tool exit belongs on the task ledger before the next sitrep",
+            task_id=tool_id,
+        )
 
 
 def _build_lock(persona: str) -> Path:
