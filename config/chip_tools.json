@@ -91,7 +91,7 @@
       "argv": ["ufw", "reload"],
       "risk": "high",
       "allow_extra_args": false,
-      "description": "TIER-1 (RAZ-335 only): firewall rule reload, baked (no rule edits via this row; edits = proposal-only) + per-run named GO (scope:RAZ-335-t1-fw-reload). Refuse-and-page class untouched."
+      "description": "TIER-1 (RAZ-335 only): firewall rule reload, baked (no rule edits via this row; edits = proposal-only). Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-fw-reload). Refuse-and-page class untouched."
     },
     {
       "id": "qb-port-update",
