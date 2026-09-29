@@ -129,8 +129,15 @@ def list_sealed(board: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def protocol_turn(board: dict[str, Any], *, actor: str, body: str) -> dict[str, Any]:
+    from chip import store
+
     board = refresh(board)
-    return append_entry(board, actor=actor, body=body)
+    board = append_entry(board, actor=actor, body=body)
+    store.append_jsonl(
+        store.thread_path(str(board["room"])),
+        {"kind": "board", "version": board["version"]},
+    )
+    return board
 
 
 def refuse_board_mutation(path: Path, op: str) -> None:

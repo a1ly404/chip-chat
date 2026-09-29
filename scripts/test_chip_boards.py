@@ -99,3 +99,20 @@ def test_cli_board_append_bumps_version(data, capsys) -> None:
     assert main(["board", "append", "dev", "--as", "a", "-m", "via cli"]) == 0
     assert boards.load("dev")["version"] == 1
     assert boards.load("dev")["entries"][0]["body"] == "via cli"
+
+
+def test_protocol_turn_writes_thread_note(data) -> None:
+    from chip import store
+
+    out = boards.protocol_turn(boards.load("dev"), actor="a", body="noted")
+    lines = store.thread_path("dev").read_text(encoding="utf-8").splitlines()
+    note = json.loads(lines[-1])
+    assert note == {"kind": "board", "version": out["version"]}
+    path = boards.board_path("dev")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["schema"] = 2
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    before = store.thread_path("dev").read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        boards.protocol_turn(boards.load("dev"), actor="a", body="nope")
+    assert store.thread_path("dev").read_text(encoding="utf-8") == before
