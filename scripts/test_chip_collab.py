@@ -245,3 +245,9 @@ def test_dark_gate_blocks_critique_and_ab_without_ticket(data, monkeypatch) -> N
     with pytest.raises(spend.SpendCutoffError):
         collab.submit_hypothesis("dev", "a", "third")
 
+
+def test_rotate_chair_require_protocol_go_blocked(data, monkeypatch) -> None:
+    monkeypatch.delenv("CHIP_LANE_GO_TICKET", raising=False)
+    with pytest.raises(PermissionError, match="go"):
+        collab.rotate_chair("dev")
+
