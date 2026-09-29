@@ -12,7 +12,7 @@ Facts below are the **actual** live ops A/B outcome (not only the predicted flow
 
 | Fact | Value |
 | --- | --- |
-| GO token | `f4k9-wq2x-t7bz` (only token cited; do not invent others) |
+| GO token | `REDACTED` (only token cited; do not invent others) |
 | Result | **Tie 4/4** both arms |
 | Ally ruling | **Mothball** confirmed. **No re-grade.** |
 | Session cap | **Disarmed.** Nothing else fires on RAZ-335. |
@@ -59,7 +59,7 @@ Ally confirmed mothball for this session. Consequences:
 
 If Lyla later chooses rerun (separate from this mothball):
 
-- Requires a **new** GO token (new receipt / new env gate as the harness already requires). Do not reuse `f4k9-wq2x-t7bz` as if it were still live.
+- Requires a **new** GO token (new receipt / new env gate as the harness already requires). Do not reuse `REDACTED` as if it were still live.
 - Same scenario as the prior arms unless Lyla **names a different** ground-truth scenario.
 - Solo arm first, then trio, same session tracker rules as the pre-fire runbook.
 
