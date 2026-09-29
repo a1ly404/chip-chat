@@ -19,7 +19,7 @@ from chip import store
 LANES_FILE = config.REPO_ROOT / "config" / "chip_lanes.json"
 GO_ENV = "CHIP_LANE_GO_TICKET"
 
-LANE_PERSONAS = ("homelabdev", "opsdev", "buffrdev", "chipchatdev")
+LANE_PERSONAS = ("homelabdev", "opsdev", "buffrdev", "chipchatdev", "pm")
 
 
 def _ts() -> str:

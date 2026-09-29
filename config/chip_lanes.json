@@ -4,7 +4,8 @@
     "homelabdev": {"root_env": "CHIP_LANE_HOMELAB_ROOT"},
     "opsdev": {"root_env": "CHIP_LANE_OPS_ROOT"},
     "buffrdev": {"root_env": "CHIP_LANE_BUFFR_ROOT"},
-    "chipchatdev": {"root_env": "CHIP_LANE_CHIP_ROOT", "extra_root_envs": ["CHIP_LANE_RAZZORSTACK_ROOT"]}
+    "chipchatdev": {"root_env": "CHIP_LANE_CHIP_ROOT", "extra_root_envs": ["CHIP_LANE_RAZZORSTACK_ROOT"]},
+    "pm": {"root_env": "CHIP_LANE_PM_ROOT"}
   },
   "hard_denies": [
     "/mnt/nas/media",
