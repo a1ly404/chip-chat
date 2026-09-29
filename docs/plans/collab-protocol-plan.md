@@ -99,3 +99,9 @@ Every slice PR body contains that slice’s commit hash and the verbatim `pytest
 ## reopen (spec only, not callable)
 
 `reopen(room, actor, reason)` would require the dispatch-stamped speaker to be the chair and a non-empty reason code, then set `phase` from `converged` back to `revealed`. It is not implemented. Lyla decides after the RAZ-335 ops session. Until then `converged` is not Done and has no reopen path.
+
+## pm lane root and tool tier
+
+`config/chip_lanes.json` pins `pm` to `CHIP_LANE_PM_ROOT` only. Set that env to the writable chip-chat worktree. There is no razzorstack extra root. `hard_denies` still last-match-wins, so `/mnt/nas/media`, `boards/`, `.env`, and `tool_receipts.jsonl` refuse even inside a root that would otherwise allow them.
+
+pm's lane `tools` list is `pytest`, `git-add`, and `git-commit`. git add/commit paths and cwd must stay inside that root. The global manifest is unchanged for every other persona. RAZ-335 tier-1 rows `gluetun-restart`, `qb-restart`, `airvpn-port-regab`, `fw-rule-reload`, and `qb-port-update` are marked `audience: global-only` and are not on the pm list. `lanes.refuse_blob` still runs before spawn.

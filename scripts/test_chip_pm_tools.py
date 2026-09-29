@@ -105,3 +105,32 @@ def test_pm_refuses_push_shell_and_media(pm_root: Path, tmp_path: Path) -> None:
 def test_unknown_tool_still_need_tool_for_other_personas() -> None:
     with pytest.raises(NeedToolError):
         tool.run("git-add", execute=False)
+
+
+def test_pm_cannot_run_tier1_infra(pm_root: Path) -> None:
+    import json
+    from chip.config import REPO_ROOT
+
+    raw = json.loads((REPO_ROOT / "config" / "chip_tools.json").read_text(encoding="utf-8"))
+    tier1 = [
+        row["id"]
+        for row in raw["tools"]
+        if row.get("audience") == "global-only"
+    ]
+    assert set(tier1) == {
+        "gluetun-restart",
+        "qb-restart",
+        "airvpn-port-regab",
+        "fw-rule-reload",
+        "qb-port-update",
+    }
+    for tool_id in tier1:
+        with pytest.raises(tool.ToolNotAllowedError):
+            tool.run(
+                tool_id,
+                execute=True,
+                speaker="pm",
+                room="dev",
+                scope="raz-pm-tools",
+                cwd=pm_root,
+            )
