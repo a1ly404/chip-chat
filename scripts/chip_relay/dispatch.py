@@ -323,7 +323,8 @@ def handle_message(
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
 
-    reset_delegate_chain(room.id)
+    if incoming.author != "inject":
+        reset_delegate_chain(room.id)
 
     persona, persona_alert = resolve_persona_for_dispatch(
         room,

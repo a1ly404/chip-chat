@@ -163,7 +163,7 @@ def test_foreign_host_refuses_append(data) -> None:
         boards.protocol_turn(boards.load("dev"), actor="a", body="nope")
 
 
-def test_missing_phase_is_migrated(data) -> None:
+def test_missing_phase_hard_fails(data) -> None:
     import json
 
     from chip import boards
@@ -171,10 +171,8 @@ def test_missing_phase_is_migrated(data) -> None:
     path = boards.board_path("dev")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"schema": 1, "room": "dev", "version": 0, "entries": []}), encoding="utf-8")
-    loaded = boards.load("dev")
-    assert loaded["phase"] == "brainstorm"
-    log = (boards.config.data_dir() / "audit" / "board_events.jsonl").read_text(encoding="utf-8")
-    assert "board_phase_migrated" in log
+    with pytest.raises(ValueError, match="phase"):
+        boards.load("dev")
 
 
 def test_fake_chair_and_lane_denied_converge(data, monkeypatch) -> None:
@@ -216,6 +214,22 @@ def test_wake_includes_board_and_hides_foreign_body(data) -> None:
     assert "visible-goal" not in hidden
 
 
+def test_empty_critique_refused_and_abstain_satisfies(data, monkeypatch) -> None:
+    goal_id, idea = _opened()
+    with pytest.raises(PermissionError, match="substantive"):
+        collab.critique("dev", "a", idea, "   ")
+    with pytest.raises(PermissionError, match="early"):
+        collab.end_critique("dev")
+    with pytest.raises(PermissionError, match="reason"):
+        collab.abstain("dev", "a", "vibes")
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "a")
+    collab.abstain("dev", "a", "no_overlap")
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "b")
+    collab.critique("dev", "b", goal_id, "on the goal")
+    closed = collab.end_critique("dev")
+    assert closed["critique_closed"] is True
+
+
 def test_dark_gate_blocks_critique_and_ab_without_ticket(data, monkeypatch) -> None:
     from chip.collab_ab import run_ab
 
@@ -230,4 +244,10 @@ def test_dark_gate_blocks_critique_and_ab_without_ticket(data, monkeypatch) -> N
     monkeypatch.setattr(spend, "ledger_monthly_usd", lambda _ledger: 10.0)
     with pytest.raises(spend.SpendCutoffError):
         collab.submit_hypothesis("dev", "a", "third")
+
+
+def test_rotate_chair_require_protocol_go_blocked(data, monkeypatch) -> None:
+    monkeypatch.delenv("CHIP_LANE_GO_TICKET", raising=False)
+    with pytest.raises(PermissionError, match="go"):
+        collab.rotate_chair("dev")
 

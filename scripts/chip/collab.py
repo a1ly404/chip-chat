@@ -95,6 +95,8 @@ def critique(room: str, actor: str, target_id: str, body: str, go_ticket: str | 
         target = _entry(board, target_id)
         if target is None or target.get("kind") != "hypothesis":
             raise KeyError(target_id)
+        if not str(body or "").strip():
+            raise PermissionError("substantive")
         if target.get("author") == actor:
             raise PermissionError("self-critique")
         posted = [
@@ -138,7 +140,14 @@ def end_critique(room: str) -> dict[str, Any]:
                 if author and author != persona and author in participants:
                     covered = True
             if not covered:
-                raise PermissionError("early")
+                abstained = any(
+                    entry.get("kind") == "abstain"
+                    and entry.get("author") == persona
+                    and entry.get("round_id") == board.get("round_id")
+                    for entry in board["entries"]
+                )
+                if not abstained:
+                    raise PermissionError("early")
         board["critique_closed"] = True
         boards.save(board)
         return board
@@ -231,6 +240,35 @@ def reject_hypothesis(room: str, entry_id: str, reason: str) -> dict[str, Any]:
         ]
         board["entries"] = [row for row in board["entries"] if row.get("id") != entry_id]
         board["version"] = int(board["version"]) + 1
+        boards.save(board)
+        return board
+
+
+def abstain(room: str, actor: str, reason_code: str, go_ticket: str | None = None) -> dict[str, Any]:
+    require_protocol_go(go_ticket)
+    if reason_code not in {"no_overlap", "out_of_lane", "already_rejected"}:
+        raise PermissionError("reason")
+    with boards.board_lock(room):
+        board = _board(room)
+        if actor not in (board.get("participants") or []):
+            raise PermissionError("participant")
+        from chip.speaker import require_match
+
+        require_match(actor)
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"n{version}",
+                "author": actor,
+                "kind": "abstain",
+                "body": reason_code,
+                "reason_code": reason_code,
+                "round_id": board.get("round_id"),
+                "sealed": True,
+                "version": version,
+            }
+        ]
+        board["version"] = version
         boards.save(board)
         return board
 

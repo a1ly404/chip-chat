@@ -29,6 +29,7 @@ def pins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Path]:
         ("opsdev", "CHIP_LANE_OPS_ROOT"),
         ("buffrdev", "CHIP_LANE_BUFFR_ROOT"),
         ("chipchatdev", "CHIP_LANE_CHIP_ROOT"),
+        ("pm", "CHIP_LANE_PM_ROOT"),
     ):
         root = tmp_path / persona
         root.mkdir()
@@ -276,3 +277,39 @@ def test_failed_build_files_retro_template(pins: dict[str, Path]) -> None:
     assert retro["attempted"] == "lane-test"
     assert "exit 1" in retro["why"]
     assert "RAZ-F" in retro["envelope"]
+
+
+def test_pm_write_inside_root_and_refuse_outside(pins: dict[str, Path], tmp_path: Path) -> None:
+    _claim("pm", "raz-pm")
+    written = lanes.write_text(
+        persona="pm",
+        relpath="notes.txt",
+        content="owned",
+        ticket_id="RAZ-PM",
+        room="dev",
+        scope="raz-pm",
+    )
+    assert written.read_text(encoding="utf-8") == "owned"
+    assert written.is_relative_to(pins["pm"])
+    with pytest.raises(ValueError):
+        lanes.write_text(
+            persona="pm",
+            relpath=str(tmp_path / "outside.txt"),
+            content="no",
+            ticket_id="RAZ-PM",
+            room="dev",
+            scope="raz-pm",
+        )
+    assert lanes.decide(
+        "/mnt/nas/media/movie",
+        [("allow", "/mnt/nas/media"), ("allow", "pm")],
+    ) == "deny"
+    with pytest.raises(PermissionError, match="boards/"):
+        lanes.write_text(
+            persona="pm",
+            relpath="boards/dev.json",
+            content="no",
+            ticket_id="RAZ-PM",
+            room="dev",
+            scope="raz-pm",
+        )

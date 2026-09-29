@@ -19,7 +19,7 @@ from chip import store
 LANES_FILE = config.REPO_ROOT / "config" / "chip_lanes.json"
 GO_ENV = "CHIP_LANE_GO_TICKET"
 
-LANE_PERSONAS = ("homelabdev", "opsdev", "buffrdev", "chipchatdev")
+LANE_PERSONAS = ("homelabdev", "opsdev", "buffrdev", "chipchatdev", "pm")
 
 
 def _ts() -> str:
@@ -52,6 +52,19 @@ def persona_roots(persona: str) -> list[Path]:
         if path.is_dir():
             roots.append(path)
     return roots
+
+
+def persona_tool_allow(persona: str | None) -> frozenset[str] | None:
+    """Persona tool ids when the lane row lists them. None keeps the global manifest."""
+    if not persona:
+        return None
+    spec = (load_lanes().get("personas") or {}).get(persona.strip().lower())
+    if not isinstance(spec, dict):
+        return None
+    tools = spec.get("tools")
+    if not tools:
+        return None
+    return frozenset(str(item) for item in tools)
 
 
 def resolve_lane_path(persona: str, relpath: str) -> tuple[Path, Path] | None:

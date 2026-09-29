@@ -74,6 +74,7 @@ def authorize_execute(
     room: str | None,
     scope: str | None,
     is_human_or_inject: bool,
+    manifest: frozenset[str] | None = None,
 ) -> tuple[bool, str]:
     """Single gate into the executor — law id:authorize (Grok round 5/7).
 
@@ -94,7 +95,7 @@ def authorize_execute(
         room=room,
         tool=spec.id,
         is_human_or_inject=is_human_or_inject,
-        manifest=set(load_tools().keys()),
+        manifest=set(manifest) if manifest is not None else set(load_tools().keys()),
     )
 
 
@@ -125,6 +126,28 @@ def build_argv(spec: ToolSpec, extra_args: Sequence[str]) -> list[str]:
     return list(spec.argv) + extras
 
 
+_PM_GIT = {
+    "git-add": ToolSpec("git-add", ("git", "add", "--"), "low", True, "git add inside the pm root"),
+    "git-commit": ToolSpec("git-commit", ("git", "commit", "-m"), "low", True, "git commit inside the pm root"),
+}
+
+
+def _confine_pm_git(speaker: str, spec: ToolSpec, extra_args: Sequence[str], workdir: Path) -> None:
+    root = lanes.persona_root(speaker)
+    if root is None:
+        raise ToolNotAllowedError(f"{speaker} git tool requires a lane root")
+    root = root.resolve()
+    if not workdir.resolve().is_relative_to(root):
+        raise ToolNotAllowedError("git cwd is outside the persona root")
+    if spec.id == "git-add":
+        for arg in extra_args:
+            if arg.startswith("-"):
+                raise ToolNotAllowedError("git-add accepts paths only")
+            target = (workdir / arg).resolve()
+            if not target.is_relative_to(root):
+                raise ToolNotAllowedError("git-add path is outside the persona root")
+
+
 def run(
     tool_name: str,
     *extra_args: str,
@@ -150,7 +173,12 @@ def run(
     gated result (exit_code -1, executed=False) with the authorize reason in stderr
     and the audit ledger.
     """
+    allow = lanes.persona_tool_allow(speaker)
+    if allow is not None and tool_name not in allow:
+        raise ToolNotAllowedError(f"tool {tool_name!r} is outside the {speaker} allowlist")
     spec = resolve_tool(tool_name)
+    if spec is None and tool_name in _PM_GIT and allow is not None and tool_name in allow:
+        spec = _PM_GIT[tool_name]
     if spec is None:
         raise NeedToolError(tool_name)
     started = time.perf_counter()
@@ -176,6 +204,8 @@ def run(
 
     boards.assert_tool_cannot_touch_boards(list(argv))
     workdir = _resolve_cwd(cwd)
+    if spec.id in _PM_GIT:
+        _confine_pm_git(speaker or "", spec, extra_args, workdir)
     denied = lanes.refuse_blob(*(argv + [str(workdir)]), ticket_id=task_id)
     if denied:
         lanes.file_retro(
@@ -232,6 +262,7 @@ def run(
             room=room,
             scope=scope,
             is_human_or_inject=is_human_or_inject,
+            manifest=allow,
         )
         if not ok:
             result = ToolRunResult(
