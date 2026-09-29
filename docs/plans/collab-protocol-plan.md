@@ -98,7 +98,7 @@ Every slice PR body contains that slice’s commit hash and the verbatim `pytest
 
 ## reopen (spec only, not callable)
 
-`reopen(room, actor, reason)` would require the dispatch-stamped speaker to be the chair and a non-empty reason code, then set `phase` from `converged` back to `revealed`. It is not implemented. Lyla decides after the RAZ-335 ops session. Until then `converged` is not Done and has no reopen path.
+Stub pointer: full design is under **reopen (full design, pending Lyla post-RAZ-335)** below (`room`, `actor`, `reason_code`; chair stamp **and** `require_protocol_go`; converged → revealed only; one reopen per `round_id`). Not implemented.
 
 ## pm lane root and tool tier
 
@@ -108,47 +108,88 @@ pm's lane `tools` list is `pytest`, `git-add`, and `git-commit`. git add/commit 
 
 ## Lane correction — airvpn_port_grab.py
 
-`config/chip_tools.json` row `airvpn-port-regab` argv is `python3 scripts/airvpn_port_grab.py`. That file is not in chip-chat. It belongs on the razzorstack Windows checkout. The specialist is **homelabdev**. buffrdev is Buffr / gym-app only. Do not delegate this script to buffrdev. A room reply at 2026-09-29T14:47:40Z that said `delegate:buffrdev` is wrong and is superseded by this section. verified-as-of: 2026-09-29T15:15:00Z.
+`config/chip_tools.json` row `airvpn-port-regab` argv is `python3 scripts/airvpn_port_grab.py`. The script file may still be absent on disk; **absence is not cancellation**. Disposition after the RAZ-335 ops A/B: ownership **transferred to `cc` (chip-chat lane)** — not voided, not cancelled, not buffrdev, not "drop the tier-1 row". Do not treat the row as dead. Cross-ref mothball / disposition: [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md). A room reply at 2026-09-29T14:47:40Z that said `delegate:buffrdev` remains wrong. verified-as-of: `2026-09-29T17:29:07Z`.
 
 ## Canvas holes still without a code slice
 
-Slices 1–6 closed P1 (phase gate), P2 (sealed goal), P3 (stamped speaker), P5 (normalized reject + round id), P7 (wake block), and P10 (GO ticket + monthly cutoff, with `rotate_chair` covered by #117). Still open:
+**Sealed by landed slices (P1–P7, P10):** P1 phase gate, P2 sealed goal, P3 stamped speaker, P5 normalized reject + round id, P7 wake block, P10 GO ticket + monthly cutoff (`rotate_chair` dark-gate call site covered by merged #117 / commit `b4809d9`). P4 and P6 have **partial** seal only — remainders below. **P8 is not implemented.** **P9 is not spend proof.**
+
+Still open / remainder:
 
 - **P4 remainder.** Path scopes refuse outside the persona root. A slash-free ticket scope is still not checked against a charter. No slice yet.
 - **P6 remainder.** `end_critique` needs one cross-critique or one abstain. It does not require every hypothesis to be read. No slice yet.
-- **P8.** Cross-host flock. Spec below. Not implemented.
-- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. It is not spend proof. The live measurement is the ops harness, not this module.
+- **P8.** Cross-host flock. Spec below. **Not implemented.** POSIX `flock` cannot synchronize WSL and Hyper-V because they are different files.
+- **P9.** `run_ab` grade is `len(body)` and a synthetic `kill:` line. That is a **mock grade**, not spend proof. Live ops A/B under GO `f4k9-wq2x-t7bz` **completed**: tie 4/4 both arms; Ally mothball; session cap disarmed; spend `$0.0062` / `$0.25`; receipt RAZ-335 / `63b479a0`. See [`docs/ops/post-ab-runbook.md`](../ops/post-ab-runbook.md) for what happened (not only the predicted flow).
 
-## Cross-host flock (E3 successor, spec only)
+## Cross-host flock (E3 successor, spec only — do not implement in this doc PR)
 
-Local `flock` on `{data_dir}/boards/{room}.json.lock` is correct for one host. WSL `~/appdata/chip-chat` and the Hyper-V relay data dir are different files, so two writers can both append.
+Local `flock` on `{data_dir}/boards/{room}.json.lock` is correct for **one host**. WSL `~/appdata/chip-chat` and the Hyper-V relay data dir are **different files**, so two writers can both append and both believe they hold the lock. That is why P8 is open.
 
-Proposal, not code:
+### Proposal (design-only)
 
-1. One writer host. The relay container is the only process that calls `boards.save` for room `dev`. WSL agents read a snapshot or call the relay. They do not open the relay's lock file over a share.
-2. Stamp stays. `host` + `data_dir` on the board must match `local_host()` and the process data dir. Mismatch raises `PermissionError` `board_foreign_host` and logs `board_foreign_host`. That already refuses a copied file opened on the wrong machine. It does not merge two live files.
-3. Shared lock, if Lyla later wants two writers: a single lock service on the relay host (HTTP compare-and-swap on `version`, timeout 2s, one in-flight writer). Clients send the full board they read plus the next version. The server rejects when `version` is not current. No POSIX flock across SMB or 9p. No second claim registry.
-4. Until that service exists, the law is single-writer. A second host that sees a foreign stamp stops. It does not copy the board over and continue.
+1. **Single-writer relay host (preferred default).** The relay container is the only process that calls `boards.save` for room `dev`. WSL agents read a snapshot or call the relay HTTP surface. They do not open the relay's lock file over a share (SMB/9p/UNC).
+2. **Stamp stays (single-host fallback that already exists).** `host` + `data_dir` on the board must match `local_host()` and the process data dir. Mismatch raises `PermissionError` `board_foreign_host` and logs `board_foreign_host`. This refuses a copied file opened on the wrong machine. It does **not** merge two live writers; it is the **single-host fallback** until a shared lock exists.
+3. **HTTP compare-and-swap (optional second writer path).** If Lyla later wants two writers: a lock service on the relay host — HTTP CAS on `version`, timeout ~2s, one in-flight writer. Clients send the full board they read plus the next version. The server rejects when `version` is not current. No POSIX flock across SMB or 9p. No second claim registry.
+
+### Rejected heavier options (not proposed)
+
+- **Redis / Zookeeper / etcd** as the board lock: heavier ops surface, new failure domain, and no chip-chat deploy path today. List only as rejected unless Lyla explicitly GOs a cluster lock. Prefer single-writer or HTTP CAS on the relay.
+
+### Trade-offs
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| Single-writer relay | No new service; matches Discord lane already | WSL cannot mutate `dev` board locally; inject/relay becomes the write path |
+| Stamp-only fallback | Already shipped; fail-closed on foreign host | Does not prevent dual live writers on two data dirs |
+| HTTP CAS on relay | True multi-writer without shared flock | New endpoint, timeout/retry law, must not invent webhook URLs |
+| Redis/ZK | Familiar distributed lock | Rejected: weight, secrets, and ops out of chip-chat lane |
+
+Until a shared lock ships, the law is **single-writer**. A second host that sees a foreign stamp stops. It does not copy the board over and continue.
 
 ## reopen (full design, pending Lyla post-RAZ-335)
 
-Not callable. Do not add `reopen` to `chip_tools.json`.
+**Not callable. Do not implement code. Do not add `reopen` to `chip_tools.json`.**
 
-Signature: `reopen(room, actor, reason) -> board`.
+Signature: `reopen(room, actor, reason_code) -> board`.
+
+Fields (all required in the call and in the audit row):
+
+| Field | Law |
+| --- | --- |
+| `room` | Board id (e.g. `dev`). |
+| `actor` | Must equal chair-stamped speaker (`CHIP_TURN_SPEAKER`) **and** `board["chair"]`. |
+| `reason_code` | One of `new_evidence`, `aborted_claim`, `lyla_override`. Empty / unknown → `PermissionError` `reason`. |
 
 Preconditions, all required:
 
-- `require_protocol_go` passes (`CHIP_LANE_GO_TICKET` matches `RAZ-\d+`, monthly ledger under `$10`).
-- Dispatch has set `CHIP_TURN_SPEAKER`, and `actor` equals that speaker, and that speaker equals `board["chair"]`.
-- `board["phase"]` is `converged`.
-- `reason` is one of `new_evidence`, `aborted_claim`, `lyla_override`. Empty reason raises `PermissionError` `reason`.
+- **`require_protocol_go`** passes (`CHIP_LANE_GO_TICKET` matches `RAZ-\d+`, monthly ledger under `$10`).
+- **Chair-stamped speaker:** dispatch has set `CHIP_TURN_SPEAKER`, `actor` equals that speaker, and that speaker equals `board["chair"]`. Both gates — stamp **and** protocol GO — are required.
+- `board["phase"]` is `converged` only. No reopen from `brainstorm` / `revealed` / `idle`.
+- **One reopen per `round_id`:** if an audit/decision row already records `status=reopened` for this `round_id`, raise `PermissionError` `reopen-once`. A new brainstorm (new `round_id`) resets the budget.
 
-Effect: set `phase` to `revealed`. Leave `entries`, `rejected`, `round_id`, `host`, and `data_dir` in place. Append a decision row `status=reopened` with the reason, the actor, and a timestamp. Do not clear the previous `converged` decision. Log `board_reopened` to the board audit jsonl.
+Effect (converged → revealed only):
+
+- Set `phase` to `revealed`. Leave `entries`, `rejected`, `round_id`, `host`, and `data_dir` in place.
+- Append a decision/audit row with `status=reopened`, `reason_code`, `actor`, and **`verified-as-of`** (UTC ISO-8601) plus the human `reason` text if supplied alongside the code.
+- Do not clear the previous `converged` decision. Log `board_reopened` to the board audit jsonl.
 
 Non-effects: no tool tier change, no claim release, no delegate hop reset, no spend charge by itself.
 
-Blocked until Lyla rules after the RAZ-335 ops session. The names `chip.done_gate.reopen_required` and `chip.monitor.mark_human_reopen` are different APIs and stay as they are.
+**Post-RAZ-335 status:** live ops A/B mothballed (tie 4/4; see post-ab runbook). `reopen` remains **not callable** until Lyla explicitly GOs an implementation slice. The names `chip.done_gate.reopen_required` and `chip.monitor.mark_human_reopen` are different APIs and stay as they are.
 
-## Search receipt — scripts/chip hygiene
+verified-as-of: `2026-09-29T17:29:07Z`.
 
-Searched `scripts/chip/*.py` for bare `except:`, `time.sleep`, and `subprocess.`. No bare except. No `time.sleep`. The only `subprocess.run` is `tool.run`, which records `TimeoutExpired` and `OSError` and returns the exit code. Nothing to patch. verified-as-of: 2026-09-29T15:15:00Z.
+## Search receipt — scripts/chip hygiene (work-exhausted)
+
+Re-scanned `scripts/chip/**/*.py` on `origin/main` @ `b2cdf643a0c8d5225dae1c80ba9191d2d96589da` (pm churn post-merge). Patterns: bare `except:`, `time.sleep`, `subprocess.*`, `urlopen`/`requests`/`httpx` without timeout, Path reads that should catch `FileNotFoundError`, silent `except Exception: pass`.
+
+| Pattern | Result |
+| --- | --- |
+| bare `except:` | **none** |
+| `time.sleep` | **one** intentional retry backoff in `jev_router.py` (single retry then fallback). Not a silent hang bug; no fix PR. |
+| `subprocess.run` | **two:** `tool.run` (handles `TimeoutExpired` + `OSError`, returns exit code); `ops_session_a_b._chip_room_reply` (timeout=180, raises on nonzero `returncode`). Neither ignores returncode. |
+| HTTP without timeout | **none** — all `urlopen` call sites pass `timeout=…`. |
+| Path / FileNotFoundError | Config and loaders guard with `is_file()` or raise loudly; no silent miss found that warrants a patch. |
+| Silent swallow | `lanes` build path re-raises after receipt; collectors return typed failures. No bare pass-on-error bug found. |
+
+**Verdict:** no REAL bug → **no hygiene fix PR invented**. Prior receipt that claimed "no time.sleep / only tool.run" is stale; this row supersedes it. verified-as-of: `2026-09-29T16:36:31Z`.
