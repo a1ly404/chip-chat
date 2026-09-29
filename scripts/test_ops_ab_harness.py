@@ -22,6 +22,20 @@ opsy = importlib.import_module("chip.transcript_logger")
 ab = importlib.import_module("chip.ops_session_a_b")
 
 
+@pytest.fixture
+def hidden_collab(monkeypatch):
+    """Remove both the sys.modules entry and the package attr (post-merge main)."""
+    import chip
+
+    had_attr = hasattr(chip, "collab")
+    if had_attr:
+        monkeypatch.delattr(chip, "collab", raising=False)
+    monkeypatch.delitem(sys.modules, "chip.collab", raising=False)
+    yield
+    if had_attr:
+        monkeypatch.setattr(chip, "collab", sys.modules.get("chip.collab"), raising=False)
+
+
 def test_missing_ledger_file_starts_zero(tmp_path):
     tracker = osmod.SpendTracker(tmp_path / "unused-path" / "spend.jsonl")
     assert tracker.cumulative_usd == 0.0
@@ -102,20 +116,37 @@ def test_score_empty_transcript_is_zero(tmp_path):
     assert result["score"] == 0
 
 
+def _simulate_absent_collab():
+    """Force ImportError for chip.collab even if another test already imported it."""
+    import chip as chip_pkg
+
+    sentinel = sys.modules.get("chip.collab")
+    had_attr = hasattr(chip_pkg, "collab")
+    attr = getattr(chip_pkg, "collab", None) if had_attr else None
+    sys.modules["chip.collab"] = None
+    if had_attr:
+        delattr(chip_pkg, "collab")
+    return chip_pkg, sentinel, had_attr, attr
+
+
+def _restore_collab(chip_pkg, sentinel, had_attr, attr):
+    if sentinel is not None:
+        sys.modules["chip.collab"] = sentinel
+    elif "chip.collab" in sys.modules:
+        del sys.modules["chip.collab"]
+    if had_attr and attr is not None:
+        chip_pkg.collab = attr
+        sys.modules["chip.collab"] = attr
+
+
 def test_missing_collab_refuses(monkeypatch, tmp_path):
-    collabmod = sys.modules.get("chip.collab")
-    sentinel = sys.modules.pop("chip.collab", None)
-    sys.modules["chip.collab"] = None  # simulate absent
+    chip_pkg, sentinel, had_attr, attr = _simulate_absent_collab()
     try:
-        fakes = type(__import__("types").SimpleNamespace)  # placeholder ref
         with pytest.raises(RuntimeError) as exc:
             ab._maybe_collab()
         assert "fail-closed" in str(exc.value) or "refuses" in str(exc.value)
     finally:
-        if sentinel is not None:
-            sys.modules["chip.collab"] = sentinel
-        elif collabmod is None and "chip.collab" in sys.modules:
-            del sys.modules["chip.collab"]
+        _restore_collab(chip_pkg, sentinel, had_attr, attr)
 
 
 def test_live_double_gate_refuses():
@@ -162,14 +193,12 @@ def test_wake_text_size_guard(tmp_path, monkeypatch):
 def test_arm_flow_mock_blocked_premerge(tmp_path, monkeypatch):
     """Runner does nothing live pre-merge: _maybe_collab must refuse."""
     monkeypatch.setenv("CHIP_OPS_AB_LIVE", "0")
-    chip = sys.modules.get("chip")
-    sentinel = sys.modules.get("chip.collab")
-    sys.modules["chip.collab"] = None
+    chip_pkg, sentinel, had_attr, attr = _simulate_absent_collab()
     try:
         with pytest.raises(RuntimeError):
             ab._maybe_collab()
     finally:
-        del sys.modules["chip.collab"]
+        _restore_collab(chip_pkg, sentinel, had_attr, attr)
 
 
 def test_mock_arm_refused_by_default():
@@ -180,13 +209,11 @@ def test_mock_arm_refused_by_default():
 def test_mock_arm_allowed_with_explicit_flag(tmp_path, monkeypatch):
     """--allow-mock-mutation + absent collab still refuses (fail-closed)."""
     monkeypatch.delenv("CHIP_OPS_AB_GO", raising=False)
-    sentinel = sys.modules.get("chip.collab")
-    sys.modules["chip.collab"] = None
+    chip_pkg, sentinel, had_attr, attr = _simulate_absent_collab()
     try:
         assert ab.main(["--arm", "solo", "--allow-mock-mutation"]) == 1
     finally:
-        if sentinel is not None:
-            sys.modules["chip.collab"] = sentinel
+        _restore_collab(chip_pkg, sentinel, had_attr, attr)
 
 
 def test_record_call_signature_matches_runner(tmp_path):
