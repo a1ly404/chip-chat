@@ -175,3 +175,25 @@ def test_missing_phase_is_migrated(data) -> None:
     log = (boards.config.data_dir() / "audit" / "board_events.jsonl").read_text(encoding="utf-8")
     assert "board_phase_migrated" in log
 
+
+def test_fake_chair_and_lane_denied_converge(data, monkeypatch) -> None:
+    from chip import store
+
+    _ready()
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "b")
+    with pytest.raises(PermissionError, match="speaker"):
+        collab.converge("dev", "a", "stolen", [], [])
+    monkeypatch.setenv("CHIP_TURN_SPEAKER", "a")
+    board = collab.converge(
+        "dev",
+        "a",
+        "plan",
+        [{"persona": "b", "scope": "/mnt/nas/media/movie"}],
+        [],
+    )
+    assert board["decision"]["status"] == "aborted"
+    assert board["decision"]["denied_scope"] == "/mnt/nas/media/movie"
+    thread = store.thread_path("dev")
+    text = thread.read_text(encoding="utf-8") if thread.is_file() else ""
+    assert "claim:" not in text
+

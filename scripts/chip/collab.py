@@ -135,14 +135,43 @@ def converge(
     dissent: list[dict[str, str]],
 ) -> dict[str, Any]:
     from chip import taskflow
+    from chip.speaker import require_match
 
     board = _board(room)
     if not board.get("critique_closed"):
         raise PermissionError("early")
+    require_match(chair)
     if chair != board.get("chair"):
         raise PermissionError("chair")
     for row in assignments:
-        taskflow.claim_if_free(room, row["persona"], row["scope"])
+        try:
+            taskflow.claim_if_free(room, row["persona"], row["scope"])
+        except PermissionError:
+            with boards.board_lock(room):
+                board = _board(room)
+                board["decision"] = {
+                    "status": "aborted",
+                    "denied_scope": row["scope"],
+                    "plan": plan_body,
+                    "assignments": [],
+                    "dissent": [],
+                }
+                version = int(board["version"]) + 1
+                board["entries"] = list(board["entries"]) + [
+                    {
+                        "id": f"d{version}",
+                        "author": chair,
+                        "kind": "decision",
+                        "body": plan_body,
+                        "status": "aborted",
+                        "denied_scope": row["scope"],
+                        "sealed": True,
+                        "version": version,
+                    }
+                ]
+                board["version"] = version
+                boards.save(board)
+                return board
     with boards.board_lock(room):
         board = _board(room)
         stored = [{"author": row["author"], "text": row["text"]} for row in dissent]
