@@ -129,6 +129,8 @@ def critique(room: str, actor: str, target_id: str, body: str, go_ticket: str | 
 def end_critique(room: str) -> dict[str, Any]:
     with boards.board_lock(room):
         board = _board(room)
+        if board.get("critique_closed"):
+            return board
         participants = list(board.get("participants") or [])
         for persona in participants:
             covered = False

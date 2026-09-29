@@ -6,6 +6,8 @@ the landed main at c7b2825 without inventing new law.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from chip import collab
@@ -39,19 +41,31 @@ def _opened_pair():
 
 
 def test_end_critique_after_close_is_idempotent(data) -> None:
-    """Characterization: re-closing critique is safe vs converging later."""
+    """Characterization: second end_critique leaves the board unchanged."""
     _id_a, _id_b = _opened_pair()
     collab.critique("dev", "a", _id_b, "b's idea")
     collab.critique("dev", "b", _id_a, "a's idea")
     first = collab.end_critique("dev")
     assert first["critique_closed"] is True
+    snapshot = copy.deepcopy(first)
+    second = collab.end_critique("dev")
+    assert second["critique_closed"] is True
+    assert second == snapshot
 
 
 def test_reject_hypothesis_kind_mismatch_keyerror(data) -> None:
-    """Characterization: reject path on a critique kind entry = KeyError."""
+    """Characterization: reject refuses missing ids and non-hypothesis kinds."""
     _id_a, _id_b = _opened_pair()
     collab.critique("dev", "a", _id_b, "critiques b")
-    collab.critique("dev", "b", _id_a, "critiques a")
+    board = collab.critique("dev", "b", _id_a, "critiques a")
+    critique_ids = [
+        entry["id"]
+        for entry in board["entries"]
+        if entry.get("kind") == "critique"
+    ]
+    assert critique_ids, "expected critique entries for kind-mismatch coverage"
     collab.end_critique("dev")
     with pytest.raises(KeyError):
         collab.reject_hypothesis("dev", "c999-nonexistent", "nope")
+    with pytest.raises(KeyError):
+        collab.reject_hypothesis("dev", critique_ids[0], "not a hypothesis")
