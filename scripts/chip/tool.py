@@ -172,6 +172,9 @@ def run(
             raise ToolGatedError(blocked)
 
     argv = build_argv(spec, extra_args)
+    from chip import boards
+
+    boards.assert_tool_cannot_touch_boards(list(argv))
     workdir = _resolve_cwd(cwd)
     denied = lanes.refuse_blob(*(argv + [str(workdir)]), ticket_id=task_id)
     if denied:
