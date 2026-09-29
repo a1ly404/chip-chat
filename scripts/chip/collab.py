@@ -5,10 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from chip import boards
+from chip import config
 
 
 def _board(room: str) -> dict[str, Any]:
     return boards.load(room)
+
+
+def _norm_body(body: str) -> str:
+    return " ".join(body.casefold().split())
 
 
 def begin_brainstorm(room: str, goal: str, participants: list[str]) -> dict[str, Any]:
@@ -19,12 +24,19 @@ def begin_brainstorm(room: str, goal: str, participants: list[str]) -> dict[str,
     board["goal"] = goal
     board["participants"] = list(participants)
     board["chair"] = participants[0]
-    board["chair_history"] = [participants[0]]
-    board["rejected"] = []
+    board["chair_history"] = list(board.get("chair_history") or []) + [participants[0]]
+    board["rejected"] = list(board.get("rejected") or [])
     board["decision"] = None
     board["critique_closed"] = False
+    board["entries"] = []
+    board["round_id"] = f"r{int(board.get('version') or 0) + 1}"
+    board["host"] = boards.local_host()
+    board["data_dir"] = str(config.data_dir())
     boards.save(board)
-    return boards.protocol_turn(board, actor=participants[0], body=goal)
+    board = boards.protocol_turn(board, actor=participants[0], body=goal)
+    entry_id = board["entries"][-1]["id"]
+    # E5 reopen(room, actor, reason) is spec-only until Lyla after RAZ-335. Not callable.
+    return boards.seal_entry(board, actor=participants[0], entry_id=entry_id)
 
 
 def submit_hypothesis(room: str, actor: str, body: str) -> dict[str, Any]:
@@ -34,7 +46,7 @@ def submit_hypothesis(room: str, actor: str, body: str) -> dict[str, Any]:
     if actor not in (board.get("participants") or []):
         raise PermissionError("participant")
     for row in board.get("rejected") or []:
-        if row.get("body") == body:
+        if _norm_body(str(row.get("body") or "")) == _norm_body(body):
             raise PermissionError("rejected")
     board = boards.protocol_turn(board, actor=actor, body=body)
     entry_id = board["entries"][-1]["id"]
@@ -71,7 +83,9 @@ def critique(room: str, actor: str, target_id: str, body: str) -> dict[str, Any]
         posted = [
             entry
             for entry in board["entries"]
-            if entry.get("kind") == "critique" and entry.get("author") == actor
+            if entry.get("kind") == "critique"
+            and entry.get("author") == actor
+            and entry.get("round_id") == board.get("round_id")
         ]
         if len(posted) >= 3:
             raise PermissionError("cap")
@@ -83,6 +97,7 @@ def critique(room: str, actor: str, target_id: str, body: str) -> dict[str, Any]
                 "kind": "critique",
                 "body": body,
                 "target_id": target_id,
+                "round_id": board.get("round_id"),
                 "sealed": False,
                 "version": version,
             }
