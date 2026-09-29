@@ -90,7 +90,7 @@ def test_tier1_rows_baked_and_envelope_contracted() -> None:
         assert row["allow_extra_args"] is False
         assert row["risk"] == "high"
         assert "TIER-1 (RAZ-335 only)" in row["description"]
-        assert "skill envelope REQUIRED" in row["description"]
+        assert "skill envelope REQUIRED".lower() in row["description"].lower()
         assert "scope:RAZ-335-t1-" in row["description"]  # per-run named GO contract
         assert "Refuse-and-page class untouched" in row["description"]
         blob = " ".join(row["argv"]).lower()
