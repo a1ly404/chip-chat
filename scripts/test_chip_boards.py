@@ -82,3 +82,20 @@ def test_refresh_same_version_does_not_drop_entries(data) -> None:
     assert again["entries"][0]["body"] == "keep"
     assert again["version"] == board["version"]
     assert len(boards.load("dev")["entries"]) == 1
+
+
+def test_cli_board_show_schema_1(data, capsys) -> None:
+    from chip.cli import main
+
+    boards.save(boards.load("dev"))
+    assert main(["board", "show", "dev"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["schema"] == 1
+
+
+def test_cli_board_append_bumps_version(data, capsys) -> None:
+    from chip.cli import main
+
+    assert main(["board", "append", "dev", "--as", "a", "-m", "via cli"]) == 0
+    assert boards.load("dev")["version"] == 1
+    assert boards.load("dev")["entries"][0]["body"] == "via cli"

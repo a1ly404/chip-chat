@@ -751,6 +751,22 @@ def cmd_task_run(args: argparse.Namespace) -> int:
     return 0 if ok else 4
 
 
+def cmd_board_show(args: argparse.Namespace) -> int:
+    from chip import boards
+
+    doc = boards.load(args.room)
+    print(json.dumps(doc, ensure_ascii=False))
+    return 0
+
+
+def cmd_board_append(args: argparse.Namespace) -> int:
+    from chip import boards
+
+    doc = boards.protocol_turn(boards.load(args.room), actor=args.as_persona, body=args.message)
+    print(json.dumps({"version": doc["version"], "schema": doc["schema"]}, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -763,6 +779,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     spend_p = sub.add_parser("spend", parents=[common], help="Spend ledger + auth/key usage (no secrets)")
     spend_p.set_defaults(func=cmd_spend)
+
+    board_p = sub.add_parser("board", help="Room hypothesis board")
+    board_sub = board_p.add_subparsers(dest="board_cmd", required=True)
+    board_show = board_sub.add_parser("show", parents=[common], help="Print the room board JSON")
+    board_show.add_argument("room")
+    board_show.set_defaults(func=cmd_board_show)
+    board_append = board_sub.add_parser("append", parents=[common], help="Append one hypothesis")
+    board_append.add_argument("room")
+    board_append.add_argument("--as", dest="as_persona", required=True)
+    board_append.add_argument("-m", dest="message", required=True)
+    board_append.set_defaults(func=cmd_board_append)
 
     chat = sub.add_parser("chat", parents=[common], help="User ↔ default agent REPL")
     chat.add_argument("--thread", default="default", help="Thread id for JSONL log")
