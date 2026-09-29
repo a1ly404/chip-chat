@@ -51,7 +51,8 @@ class SpendTracker:
             row = json.loads(line)
             self.cumulative_usd += float(row["session_usd"])
 
-    def record_call(self, session_usd: float, label: str, on_refuse: Callable[[], None]) -> SpendRow:
+    def record_call(self, session_usd: float, label: str,
+                    on_refuse: Callable[[], None] | None = None) -> SpendRow:
         try:
             cost = float(session_usd)
         except (TypeError, ValueError) as exc:
@@ -59,6 +60,7 @@ class SpendTracker:
         if cost < 0:
             raise SpendRefused("negative spend row")
         if self.cumulative_usd + cost > self.cap:
+            on_refuse = on_refuse or (lambda: None)
             on_refuse()
             raise SpendRefused(
                 f"session cap {self.cap} would be exceeded: {self.cumulative_usd}+{cost}"

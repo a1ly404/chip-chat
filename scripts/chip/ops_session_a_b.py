@@ -90,6 +90,18 @@ def _chip_room_reply(repo_root: Path, room: str, persona: str, message: str,
     return payload
 
 
+_LIVE_STATE: dict = {"live": False, "token": ""}
+
+
+def is_live() -> bool:
+    """One live predicate for the whole harness: --live + go env + receipt."""
+    return bool(_LIVE_STATE.get("live"))
+
+
+def go_token() -> str:
+    return str(_LIVE_STATE.get("token") or "")
+
+
 def _maybe_collab():
     """Import chip.collab; refuse loudly if pm's slice state is absent."""
     try:
@@ -105,13 +117,15 @@ def _maybe_collab():
 
 def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
              go_token: str, room: str = "ab_solo") -> dict:
+    if is_live() and not go_token:
+        raise RuntimeError("live arm refused: empty GO token (gate threading law)")
     collab = _maybe_collab()
     board = collab.begin_brainstorm(room, SCENARIO_GOAL, SOLO_PARTICIPANTS)
-    log.event("board_op", "harness", json.dumps({"op": "begin_brainstorm", "room": room},
+    log.event("board_op", "harness", json.dumps({"op": "begin_brainstorm",
+                                                 "room": room, "go": go_token},
                                                 sort_keys=True))
     message = f"[sealed brainstorm] {SCENARIO_GOAL} reply with ONE hypothesis only."
-    spend.record_call(0.0, "gate/solo")  # zero-paid; real cost recorded on the reply call
-    reply = _chip_room_reply(repo_root, room, SOLO_PARTICIPANTS[0], message, live=_live())
+    reply = _chip_room_reply(repo_root, room, SOLO_PARTICIPANTS[0], message, live=is_live())
     spend.record_call(reply["session_usd"], "solo/hypothesis")
     log.event("prompt", SOLO_PARTICIPANTS[0], message)
     log.event("reply", SOLO_PARTICIPANTS[0], reply["reply"],
@@ -125,7 +139,7 @@ def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
     decision = _chip_room_reply(
         repo_root, room, SOLO_PARTICIPANTS[0],
         "[decision] Given the revealed board, state your final diagnosis + "
-        "fix shape + falsifiability check in <=120 words.", live=_live())
+        "fix shape + falsifiability check in <=120 words.", live=is_live())
     spend.record_call(decision["session_usd"], "solo/decision")
     log.event("decision", SOLO_PARTICIPANTS[0], decision["reply"],
               tokens_completion=decision.get("tokens_completion"),
@@ -135,14 +149,17 @@ def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
 
 def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
              go_token: str, room: str = "ab_trio") -> dict:
+    if is_live() and not go_token:
+        raise RuntimeError("live arm refused: empty GO token (gate threading law)")
     collab = _maybe_collab()
     board = collab.begin_brainstorm(room, SCENARIO_GOAL, TRIO_PARTICIPANTS)
-    log.event("board_op", "harness", json.dumps({"op": "begin_brainstorm"},
+    log.event("board_op", "harness", json.dumps({"op": "begin_brainstorm",
+                                                 "go": go_token},
                                                 sort_keys=True))
     message = f"[sealed brainstorm] {SCENARIO_GOAL} reply with ONE hypothesis only."
     replies: dict[str, dict] = {}
     for persona in TRIO_PARTICIPANTS:
-        reply = _chip_room_reply(repo_root, room, persona, message, live=_live())
+        reply = _chip_room_reply(repo_root, room, persona, message, live=is_live())
         spend.record_call(reply["session_usd"], f"trio/{persona}/hypothesis")
         log.event("prompt", persona, message)
         log.event("reply", persona, reply["reply"],
@@ -158,15 +175,13 @@ def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
         others = [a for a in TRIO_PARTICIPANTS if a != persona]
         target_author = others[TRIO_PARTICIPANTS.index(persona) % len(others)]
         target_id = entry_id_by_author[target_author]
-        other_bodies = "; ".join(others_a_body for others_a_body in
-                                 (others[0],))
         critique_msg = (
             "[cross critique] You may critique any OTHER participant's "
             "hypothesis besides your own. Separate hypothesis "
             f"(ID {target_id}) is available on the board alongside yours. "
             "Reply with your critique of it: what it gets right, what it "
             "misses, falsifiability of its fix shape.")
-        critical = _chip_room_reply(repo_root, room, persona, critique_msg, live=_live())
+        critical = _chip_room_reply(repo_root, room, persona, critique_msg, live=is_live())
         spend.record_call(critical["session_usd"], f"trio/{persona}/critique")
         log.event("critique", persona, critical["reply"],
                   target_id=target_id,
@@ -180,7 +195,7 @@ def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
         "[chair converge] State the trio's converged plan for RAZ-335 + "
         "evidence cites + disagreed parts + assumption ties + verification "
         "probe with pass/fail.")
-    conv = _chip_room_reply(repo_root, room, chair, conv_msg, live=_live())
+    conv = _chip_room_reply(repo_root, room, chair, conv_msg, live=is_live())
     spend.record_call(conv["session_usd"], f"trio/{chair}/converge")
     log.event("converge", chair, conv["reply"],
               tokens_completion=conv.get("tokens_completion"),
@@ -212,10 +227,6 @@ def score_arm(transcript_path: Path) -> dict:
     }
 
 
-def _live() -> bool:
-    return bool(__import__("os").environ.get("CHIP_OPS_AB_LIVE") == "1")
-
-
 def gate_check(go_receipt: Path) -> str:
     text = Path(go_receipt).read_text(encoding="utf-8").splitlines()[0]
     m = re.match(r"^GO RAZ-335-ops-ab (\S+)", text.strip())
@@ -232,33 +243,53 @@ def main(argv: list[str]) -> int:
     p.add_argument("--go-receipt", type=Path, default=None)
     p.add_argument("--score", type=Path, default=None,
                    help="grade an existing solo.jsonl/trio.jsonl")
+    p.add_argument("--allow-mock-mutation", action="store_true",
+                   help="permit protocol board mutation in mock mode "
+                        "(still refuses if collab is absent).")
     args = p.parse_args(argv)
     if args.score is not None:
         print(json.dumps(score_arm(args.score)))
         return 0
+    # ONE live predicate for the entire harness (pm review fix #2):
+    # live == --live AND CHIP_OPS_AB_GO=1 AND a parsed go receipt.
+    live = False
+    token = ""
     if args.live:
         if not args.go_receipt:
             print("LIVE refused: --go-receipt required (per-run named GO)", file=sys.stderr)
             return 2
-        gate_check(args.go_receipt)  # fail-closed; may SystemExit
-    import os
-    if _live() and str(os.environ.get("CHIP_OPS_AB_GO", "")) != "1":
-        print("LIVE refused: CHIP_OPS_AB_GO=1 env required (double gate)", file=sys.stderr)
-        return 3
+        import os
+        if str(os.environ.get("CHIP_OPS_AB_GO", "")) != "1":
+            print("LIVE refused: CHIP_OPS_AB_GO=1 env required (double gate)", file=sys.stderr)
+            return 3
+        token = gate_check(args.go_receipt)  # fail-closed; may SystemExit
+        live = True
+    _LIVE_STATE["live"] = live
+    _LIVE_STATE["token"] = token
+    if not live and not args.allow_mock_mutation:
+        print("REFUSED: arm run would mutate the room board (begin_brainstorm/"
+              "critique/converge). Pass --allow-mock-mutation for cheap "
+              "validation, or --live with the go receipt for the real session "
+              "(pm review fix #4: mock is gated like live).", file=sys.stderr)
+        return 4
     log_arm = args.arm if args.arm != "both" else "solo"
     log = TranscriptLogger(log_arm)
     spend = SpendTracker(ROOT / "spend.jsonl", arm=log_arm,
                          cap=SESSION_REFUSE_USD, alert=SESSION_ALERT_USD)
     repo_root = Path(__file__).resolve().parents[2]
-    if args.arm == "both":
-        result_solo = run_solo(repo_root, spend, TranscriptLogger("solo"), "")
-        result_trio = run_trio(repo_root, spend, TranscriptLogger("trio"), "")
-        print(json.dumps({"solo": result_solo, "trio": result_trio,
-                          "spend": spend.state()}))
-    elif args.arm == "solo":
-        print(json.dumps(run_solo(repo_root, spend, log, "")))
-    else:
-        print(json.dumps(run_trio(repo_root, spend, log, "")))
+    try:
+        if args.arm == "both":
+            result_solo = run_solo(repo_root, spend, TranscriptLogger("solo"), token)
+            result_trio = run_trio(repo_root, spend, TranscriptLogger("trio"), token)
+            print(json.dumps({"solo": result_solo, "trio": result_trio,
+                              "spend": spend.state()}))
+        elif args.arm == "solo":
+            print(json.dumps(run_solo(repo_root, spend, log, token)))
+        else:
+            print(json.dumps(run_trio(repo_root, spend, log, token)))
+    except RuntimeError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

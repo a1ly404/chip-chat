@@ -107,10 +107,16 @@ def test_go_receipt_gate(tmp_path):
         ab.gate_check(bad)
 
 
-def test_scenario_and_room_shapes():
-    assert "54543" in ab.SCENARIO_GOAL and "38.88.124.105" in ab.SCENARIO_GOAL
-    assert "qbittorrent-monitor" in ab.SCENARIO_GOAL and "source" in ab.SCENARIO_GOAL.lower()
-    assert ab.TrioPart if False else True  # placeholder for shape guard
+def test_participants_sealed_and_scenario_contents():
+    assert ab.SOLO_PARTICIPANTS == ["chipchatdev"]
+    assert ab.TRIO_PARTICIPANTS == ["opsdev", "homelabdev", "chipchatdev"]
+    assert len(ab.SOLO_PARTICIPANTS) < len(ab.TRIO_PARTICIPANTS)
+    # scenario contains the probing target + the confound, and no leaks
+    text = ab.SCENARIO_GOAL.lower()
+    for term in ("54543", "38.88.124.105", "probe source"):
+        assert term in text
+    for leak in ("inbound_reachable=false", "config actual_reachability"):
+        assert leak not in text
 
 
 def test_wake_text_size_guard(tmp_path, monkeypatch):
@@ -138,3 +144,43 @@ def test_arm_flow_mock_blocked_premerge(tmp_path, monkeypatch):
             ab._maybe_collab()
     finally:
         del sys.modules["chip.collab"]
+
+
+def test_mock_arm_refused_by_default():
+    """pm review fix #4: default arm run must not mutate the room board."""
+    assert ab.main(["--arm", "solo"]) == 4
+
+
+def test_mock_arm_allowed_with_explicit_flag(tmp_path, monkeypatch):
+    """--allow-mock-mutation + absent collab still refuses (fail-closed)."""
+    monkeypatch.delenv("CHIP_OPS_AB_GO", raising=False)
+    sentinel = sys.modules.get("chip.collab")
+    sys.modules["chip.collab"] = None
+    try:
+        assert ab.main(["--arm", "solo", "--allow-mock-mutation"]) == 1
+    finally:
+        if sentinel is not None:
+            sys.modules["chip.collab"] = sentinel
+
+
+def test_record_call_signature_matches_runner(tmp_path):
+    """pm review fix #1: runner calls record_call(cost, label) w/o on_refuse."""
+    tracker = osmod.SpendTracker(tmp_path / "s.jsonl", arm="t")
+    row = tracker.record_call(0.01, "solo/hypothesis")  # no on_refuse kwarg
+    assert row.cumulative_usd == 0.01
+
+
+def test_live_token_threaded_and_refused_empty(monkeypatch, tmp_path):
+    receipt = tmp_path / "go.txt"
+    receipt.write_text("GO RAZ-335-ops-ab lyla\n")
+    token = ab.gate_check(receipt)
+    assert token == "lyla"
+    monkeypatch.setattr(ab, "_LIVE_STATE", {"live": True, "token": ""})
+    with pytest.raises(RuntimeError):
+        ab.run_solo(Path("/tmp"), osmod.SpendTracker(tmp_path / "s.jsonl"),
+                    opsy.TranscriptLogger("solo", root=tmp_path), "")
+
+
+def test_one_live_predicate(tmp_path):
+    """pm review fix #2: is_live() is fed only by main's --live path."""
+    assert ab.is_live() is False
