@@ -163,7 +163,7 @@ def test_foreign_host_refuses_append(data) -> None:
         boards.protocol_turn(boards.load("dev"), actor="a", body="nope")
 
 
-def test_missing_phase_is_migrated(data) -> None:
+def test_missing_phase_hard_fails(data) -> None:
     import json
 
     from chip import boards
@@ -171,10 +171,8 @@ def test_missing_phase_is_migrated(data) -> None:
     path = boards.board_path("dev")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"schema": 1, "room": "dev", "version": 0, "entries": []}), encoding="utf-8")
-    loaded = boards.load("dev")
-    assert loaded["phase"] == "brainstorm"
-    log = (boards.config.data_dir() / "audit" / "board_events.jsonl").read_text(encoding="utf-8")
-    assert "board_phase_migrated" in log
+    with pytest.raises(ValueError, match="phase"):
+        boards.load("dev")
 
 
 def test_fake_chair_and_lane_denied_converge(data, monkeypatch) -> None:

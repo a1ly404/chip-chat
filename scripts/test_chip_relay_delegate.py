@@ -14,6 +14,7 @@ from chip_relay.delegate import (
     known_persona_ids,
     parse_delegate,
     parse_delegate_line,
+    record_delegate_chain_hop,
 )
 
 _SPECIALIST_PERSONAS = ("buffrdev", "homelabdev", "opsdev", "chipchatdev")
@@ -290,6 +291,36 @@ def test_hop_cap_refuses_fourth_delegate_in_chain(tmp_path: Path, monkeypatch: p
     last = json.loads(path.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert last["relay_handoff"]["refused"] is True
     assert last["relay_handoff"]["hop"] == MAX_DELEGATE_HOPS + 1
+
+
+def test_inject_does_not_reset_delegate_hop_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    room = RoomBinding(
+        id="dev",
+        as_agent="pm",
+        webhook_env="CHIP_WEBHOOK_DEV",
+        discord_channel="chip-dev",
+        speakers_by_id={"1": "pm"},
+    )
+    config = RelayConfig(channel="chip-relay", turn_limit=1, auto=False, rooms=(room,))
+    record_delegate_chain_hop("dev", MAX_DELEGATE_HOPS)
+    calls: list[int] = []
+
+    def chip(args: list[str], timeout: int) -> ChipResult:
+        del args, timeout
+        calls.append(1)
+        return ChipResult(0, '{"reply": "delegate:dev again"}')
+
+    result = handle_message(
+        Incoming("chip-dev", "again", "inject", author_id="1"),
+        config,
+        chip=chip,
+        webhook=lambda *_a: WebhookResult(204),
+        environ=_env(),
+    )
+    assert result.delegate_hops == 0
+    assert result.alert == f"delegate hop cap ({MAX_DELEGATE_HOPS})"
+    assert calls == [1]
 
 
 def test_auto_false_does_not_invent_delegate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

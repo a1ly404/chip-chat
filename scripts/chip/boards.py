@@ -15,7 +15,7 @@ from chip.lanes import decide
 
 SCHEMA = 1
 # Slice 6 sets this false. Until then a missing phase is stamped, not a permanent bypass.
-ALLOW_PHASE_MIGRATION = True
+ALLOW_PHASE_MIGRATION = False
 
 
 def local_host() -> str:
