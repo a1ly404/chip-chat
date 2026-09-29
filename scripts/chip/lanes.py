@@ -54,6 +54,19 @@ def persona_roots(persona: str) -> list[Path]:
     return roots
 
 
+def persona_tool_allow(persona: str | None) -> frozenset[str] | None:
+    """Persona tool ids when the lane row lists them. None keeps the global manifest."""
+    if not persona:
+        return None
+    spec = (load_lanes().get("personas") or {}).get(persona.strip().lower())
+    if not isinstance(spec, dict):
+        return None
+    tools = spec.get("tools")
+    if not tools:
+        return None
+    return frozenset(str(item) for item in tools)
+
+
 def resolve_lane_path(persona: str, relpath: str) -> tuple[Path, Path] | None:
     """Pick the pinned root (primary or extras) whose containment holds for relpath.
 

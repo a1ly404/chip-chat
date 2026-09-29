@@ -5,7 +5,10 @@
     "opsdev": {"root_env": "CHIP_LANE_OPS_ROOT"},
     "buffrdev": {"root_env": "CHIP_LANE_BUFFR_ROOT"},
     "chipchatdev": {"root_env": "CHIP_LANE_CHIP_ROOT", "extra_root_envs": ["CHIP_LANE_RAZZORSTACK_ROOT"]},
-    "pm": {"root_env": "CHIP_LANE_PM_ROOT"}
+    "pm": {
+      "root_env": "CHIP_LANE_PM_ROOT",
+      "tools": ["pytest", "git-add", "git-commit"]
+    }
   },
   "hard_denies": [
     "/mnt/nas/media",
