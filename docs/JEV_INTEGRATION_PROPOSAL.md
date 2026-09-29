@@ -61,9 +61,13 @@ false wake with **zero speaking-model spend** — the calibration set.
    (true stochastic jitter, measured directly).
 4. **No live branch while the noise floor ≥ half the narrowest intended band
    gap** (today 0.15 ⇒ ±0.10 kills every band).
-5. Wake-auto stays **shadowed** until ≥1 shadow-auto row carries an independent
-   reject-or-accept label. Done-gate never leaves the shadow: it has no auto to
-   enable.
+5. **Wake-auto shadow law (Disposition 0, fixed):** v3's "shadowed until ≥1
+   shadow-auto row has a label" REQUIRED a false wake to unlock — inverted.
+   Amended law: **one reject must LENGTHEN the shadow; zero shadow-auto rows
+   forever is the acceptable failure.** No minimum count turns auto on; the
+   AUTO switch waits for independent blind reject-or-accept labels on the gray
+   residue, and stays off while its denominator is thin. Done-gate never
+   leaves the shadow: it has no auto to enable.
 
 ## 3. Where a mute scorer sits (v4: side ledger + missing-field router)
 
@@ -94,12 +98,21 @@ Ordered, all four:
 - Sleep (or dropout) fallback for score-delta: 0.05 stays a necessary signal,
   but never sufficient; **dropped entirely if null-mutation spread ≈ 0.05+**
   (a noise-sized delta cannot be a success test).
+- **Noise-floor law (Disposition 3):** if the protocol determines the shifts
+  are anywhere near the band gaps, the threshold-comparator role is a paid
+  no-op — **shut Jev off** (`CHIP_JEV_LIVE=0` again; the side ledger continues
+  recording facts for a future model only, never read for behavior).
 - Real progress that no current counter can see = **a new counter in the
   registry** — certified by Ally, never by a score. That is a build diff, not a
   Jev success (see §5 jurisdiction rules).
 - Loose-counter hazard answer: the registry used in step 4 is the entry
   **logged before call 1**; adding a counter between the calls invalidates the
   hop (it was not the frozen registry).
+- **Missing-SET law (Disposition 2b):** the registry (not Jev) declares the
+  missing SET before the call; call 2 may add every key in that set and none
+  outside it — one re-call still. Empty missing-set → no revision hop starts
+  at all. A post-flip second fact = a NEW room turn + a new pre-call log line,
+  never a smuggled second key inside the same hop.
 
 ## 5. Counter registry — the only authority for "does a counter exist"
 
@@ -127,7 +140,33 @@ Ordered, all four:
   acked explicitly. The numeric cut never leaves the site spec while shadow
   labels are accumulating.
 
-## 7. Verification checklist (unchanged core + this iteration)
+## 7. Verification checklist (v4 + the four added rows — run in the build PRs)
+
+The four rows from Lyla's checklist migrate to the +three+ build PRs per
+Disposition 4 (this iteration is the amendment to the v3 sequence):
+
+| row | verifying PR |
+| --- | --- |
+| registry pre-call `counter_id=none` logging | Registry PR (chip/counter_registry.py + chip/jev_router.py's `precheck_state` ledger-writes; verified by mock fixtures) |
+| row-#1 fixture failing Jev-client reach | Registry PR's `may_call_jev` guard (returns False for the row-#1 shape; asserted by test in the same PR) |
+| shadow row shape with `band_hypothetical` | Client PR (jev_router writes conf + `band_hypothetical` from a mock scorer in CI; live behind GO) |
+| missing-field blank shape | Room-line emitter PR (template exactness test; defers until §5 protocol + blind labels) |
+
+(All four statuses are PASS-by-acceptance-criteria inside each build PR; the
+spec stays unchanged for the contract's text.)
+
+## 8. Build order (Disposition 4, supersedes all prior ones)
+
+1. **Registry PR: chip/counter_registry.json + chip/counter_registry.py +
+   may_call_jev(state), with row-#1's fixture pointed AT THAT FUNCTION (no
+   client import); registry stays green on main; `Done ∧ boxes>0 ∧
+   receipts=0` fails CI if may_call_jev is true.**
+2. **Client PR: the network entry calls may_call_jev and refuses when false
+   (spy test); shadow fields conf/band_hypothetical written HERE from a mock
+   scorer in CI; live calls only behind Lyla GO; no room line, no branch.**
+3. **Room-line emitter PR — only after the noise protocol AND the blind-label
+   rule exist; until then nothing lawful to post.**
+4. (Distance clause: Phase B/C cadence + strict flip remain Ally-gate.)
 
 - Same OpenRouter key (single `OPENROUTER_CC_API_KEY`; no zen/free-tier surface).
 - Slug pinned (zero `jev-latest` hits anywhere, forever).
