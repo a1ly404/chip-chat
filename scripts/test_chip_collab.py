@@ -106,3 +106,23 @@ def test_chair_gets_no_extra_tool_powers(data) -> None:
     assert decide(blob, [("allow", "boards/")]) == "deny"
     with pytest.raises(PermissionError, match="boards/"):
         run("pytest", "boards/dev.json", execute=False, speaker=rotated["chair"], room="dev")
+
+
+def test_ab_runner_both_arms_cost_accounting(data) -> None:
+    from chip.collab_ab import run_ab
+
+    ticks = iter([7])
+    board = run_ab(
+        "dev",
+        "Should the health port stay 48082?",
+        ["pm", "chipchatdev", "opsdev"],
+        clock=lambda: next(ticks),
+    )
+    comparison = board["comparison"]
+    assert comparison["hypotheses"]["solo"] == 1
+    assert comparison["hypotheses"]["trio"] >= 1
+    assert comparison["critiques_that_killed"] == 1
+    assert comparison["time_ms"] == 7
+    assert sum(comparison["tokens_by_persona"].values()) > 0
+    assert comparison["grade"] == "pass"
+
