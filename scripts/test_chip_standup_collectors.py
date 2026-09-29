@@ -149,3 +149,32 @@ def test_format_keys_match_contract():
         "Blockers",
     ):
         assert key in text
+
+
+def test_gha_resolves_workflow_when_configured_filename_404s(monkeypatch):
+    """Configured CHIP_STANDUP_GHA_WORKFLOW may not match the live path."""
+    monkeypatch.setenv("GITHUB_TOKEN", "test")
+    monkeypatch.setenv("CHIP_STANDUP_GHA_WORKFLOW", "missing-name.yml")
+
+    def http_get(url: str, headers: dict, timeout: float) -> tuple[int, str]:
+        if "workflows/missing-name.yml/runs" in url:
+            return 404, "not found"
+        if "workflows/gym-app.yaml/runs" in url:
+            return 200, json.dumps(
+                {
+                    "workflow_runs": [
+                        {
+                            "name": "Gym App",
+                            "conclusion": "success",
+                            "html_url": "https://example/run/9",
+                        }
+                    ]
+                }
+            )
+        if url.endswith("/actions/workflows?per_page=100"):
+            return 200, json.dumps({"workflows": []})
+        return 404, ""
+
+    result = sc.collect_gha_workflow(http_get=http_get)
+    assert result.ok is True
+    assert "success" in result.summary
