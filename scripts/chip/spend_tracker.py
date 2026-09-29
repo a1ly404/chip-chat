@@ -47,9 +47,17 @@ class SpendTracker:
         self.alert = float(alert)
         self.cumulative_usd = 0.0
         self.alerted = False
-        for line in self.ledger_path.read_text(encoding="utf-8").splitlines() if self.ledger_path.exists() else []:
-            row = json.loads(line)
-            self.cumulative_usd += float(row["session_usd"])
+        if self.ledger_path.exists():
+            for line in self.ledger_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                    self.cumulative_usd += float(row["session_usd"])
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                    raise SpendRefused(
+                        f"fail-closed ledger row not parseable: {line[:80]!r}"
+                    ) from exc
 
     def record_call(self, session_usd: float, label: str,
                     on_refuse: Callable[[], None] | None = None) -> SpendRow:

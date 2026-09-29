@@ -22,6 +22,32 @@ opsy = importlib.import_module("chip.transcript_logger")
 ab = importlib.import_module("chip.ops_session_a_b")
 
 
+def test_missing_ledger_file_starts_zero(tmp_path):
+    tracker = osmod.SpendTracker(tmp_path / "unused-path" / "spend.jsonl")
+    assert tracker.cumulative_usd == 0.0
+
+
+def test_corrupt_jsonl_row_fails_closed(tmp_path):
+    ledger = tmp_path / "spend.jsonl"
+    ledger.write_text('{"session_usd": 0.01}\nnot-json-garbage\n')
+    with pytest.raises(osmod.SpendRefused):
+        osmod.SpendTracker(ledger)
+
+
+def test_older_numeric_field_in_row_fails(tmp_path):
+    ledger = tmp_path / "spend.jsonl"
+    ledger.write_text('{"session_usd": "abc"}\n')
+    with pytest.raises(osmod.SpendRefused):
+        osmod.SpendTracker(ledger)
+
+
+def test_blank_lines_between_rows_count_correctly(tmp_path):
+    ledger = tmp_path / "spend.jsonl"
+    ledger.write_text('{"session_usd": 0.10}\n\n{"session_usd": 0.05}\n')
+    tracker = osmod.SpendTracker(ledger)
+    assert abs(tracker.cumulative_usd - 0.15) < 1e-9
+
+
 def test_session_cap_refuses(tmp_path):
     tracker = osmod.SpendTracker(tmp_path / "spend.jsonl", arm="t", cap=0.25)
     import subprocess, sys as _sys
