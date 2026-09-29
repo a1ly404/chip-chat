@@ -74,3 +74,11 @@ def test_board_schema_is_1(data) -> None:
     path.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(ValueError, match="schema"):
         boards.load("dev")
+
+
+def test_refresh_same_version_does_not_drop_entries(data) -> None:
+    board = boards.protocol_turn(boards.load("dev"), actor="a", body="keep")
+    again = boards.refresh(board)
+    assert again["entries"][0]["body"] == "keep"
+    assert again["version"] == board["version"]
+    assert len(boards.load("dev")["entries"]) == 1
