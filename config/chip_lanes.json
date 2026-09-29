@@ -9,6 +9,7 @@
   "hard_denies": [
     "/mnt/nas/media",
     "tool_receipts.jsonl",
+    "boards/",
     ".env"
   ],
   "go_denies": [
