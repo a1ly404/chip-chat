@@ -129,7 +129,8 @@ def test_collectors_site_fail_marks_miss_banner(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Missed standup payload" in out
     sig = json.loads((tmp_path / "sig.json").read_text())
-    day = sig["2026-09-28"]["gymlog"]
+    day_key = next(key for key in sig if key[:4] == "2026")
+    day = sig[day_key]["gymlog"]
     assert day["received"] is True
     assert day["missed_payload"] is True
     assert day["collectors_live"] is False

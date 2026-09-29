@@ -126,3 +126,52 @@ def test_ab_runner_both_arms_cost_accounting(data) -> None:
     assert sum(comparison["tokens_by_persona"].values()) > 0
     assert comparison["grade"] == "pass"
 
+
+def test_post_reveal_append_as_chair_refused(data) -> None:
+    collab.begin_brainstorm("dev", "goal", ["a", "b"])
+    collab.close_brainstorm("dev")
+    from chip import boards
+
+    board = boards.load("dev")
+    assert board["chair"] == "a"
+    with pytest.raises(PermissionError, match="reveal"):
+        boards.protocol_turn(board, actor="a", body="late as chair")
+
+
+def test_rephrased_dead_end_resubmission_refused(data) -> None:
+    from chip import boards
+
+    _goal, idea = _opened()
+    body = boards.load("dev")["entries"]
+    idea_body = next(entry["body"] for entry in body if entry["id"] == idea)
+    collab.reject_hypothesis("dev", idea, "dead end")
+    board = boards.load("dev")
+    board["phase"] = "brainstorm"
+    boards.save(board)
+    with pytest.raises(PermissionError, match="rejected"):
+        collab.submit_hypothesis("dev", "b", idea_body.upper())
+
+
+def test_foreign_host_refuses_append(data) -> None:
+    from chip import boards
+
+    board = collab.begin_brainstorm("dev", "goal", ["a"])
+    board["host"] = "not-this-host"
+    boards.save(board)
+    with pytest.raises(PermissionError, match="board_foreign_host"):
+        boards.protocol_turn(boards.load("dev"), actor="a", body="nope")
+
+
+def test_missing_phase_is_migrated(data) -> None:
+    import json
+
+    from chip import boards
+
+    path = boards.board_path("dev")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema": 1, "room": "dev", "version": 0, "entries": []}), encoding="utf-8")
+    loaded = boards.load("dev")
+    assert loaded["phase"] == "brainstorm"
+    log = (boards.config.data_dir() / "audit" / "board_events.jsonl").read_text(encoding="utf-8")
+    assert "board_phase_migrated" in log
+
