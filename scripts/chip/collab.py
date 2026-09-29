@@ -47,3 +47,66 @@ def close_brainstorm(room: str) -> dict[str, Any]:
     board["phase"] = "revealed"
     boards.save(board)
     return board
+
+
+def _entry(board: dict[str, Any], entry_id: str) -> dict[str, Any] | None:
+    for entry in board["entries"]:
+        if entry.get("id") == entry_id:
+            return entry
+    return None
+
+
+def critique(room: str, actor: str, target_id: str, body: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        if board.get("phase") != "revealed" or board.get("critique_closed"):
+            raise PermissionError("phase")
+        if actor not in (board.get("participants") or []):
+            raise PermissionError("participant")
+        target = _entry(board, target_id)
+        if target is None or target.get("kind") != "hypothesis":
+            raise KeyError(target_id)
+        if target.get("author") == actor:
+            raise PermissionError("self-critique")
+        posted = [
+            entry
+            for entry in board["entries"]
+            if entry.get("kind") == "critique" and entry.get("author") == actor
+        ]
+        if len(posted) >= 3:
+            raise PermissionError("cap")
+        version = int(board["version"]) + 1
+        board["entries"] = list(board["entries"]) + [
+            {
+                "id": f"c{version}",
+                "author": actor,
+                "kind": "critique",
+                "body": body,
+                "target_id": target_id,
+                "sealed": False,
+                "version": version,
+            }
+        ]
+        board["version"] = version
+        boards.save(board)
+        return board
+
+
+def end_critique(room: str) -> dict[str, Any]:
+    with boards.board_lock(room):
+        board = _board(room)
+        participants = list(board.get("participants") or [])
+        for persona in participants:
+            covered = False
+            for entry in board["entries"]:
+                if entry.get("kind") != "critique" or entry.get("author") != persona:
+                    continue
+                target = _entry(board, str(entry.get("target_id")))
+                author = (target or {}).get("author")
+                if author and author != persona and author in participants:
+                    covered = True
+            if not covered:
+                raise PermissionError("early")
+        board["critique_closed"] = True
+        boards.save(board)
+        return board
