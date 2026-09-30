@@ -3,4 +3,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+# The 11:25 crontab row is `VAR=… cd "$ROOT" && ./bin/chip-standup-morning`.
+# POSIX assignment prefixes bind to `cd` only, so the script must supply
+# the same paths itself. A value already in the environment wins.
+: "${CHIP_CHAT_DATA_DIR:=${HOME}/appdata/chip-chat}"
+: "${CHIP_CHAT_STANDUP_SIGNAL_FILE:=${CHIP_CHAT_DATA_DIR}/standup_signal.json}"
+export CHIP_CHAT_DATA_DIR CHIP_CHAT_STANDUP_SIGNAL_FILE
+if [[ -z "${TZ:-}" ]]; then
+  export TZ=America/Los_Angeles
+fi
 exec python3 -m chip.standup_morning "$@"
