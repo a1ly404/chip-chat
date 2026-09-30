@@ -162,17 +162,17 @@ def write_standup_fact(fact: str) -> None:
 
 def emit_monthly_warn(monthly_usd: float) -> None:
     msg = (
-        f"WARN: Chip Chat OpenRouter monthly spend ${monthly_usd:.4f} "
+        f"WARN: Chip Chat OpenRouter monthly spend ${monthly_usd:.2f} "
         f">= ${WARN_MONTHLY_USD:.2f} (OPENROUTER_CC_API_KEY)"
     )
     print(msg, file=sys.stderr)
-    write_standup_fact(f"chip-chat: monthly spend WARN ${monthly_usd:.4f} (threshold ${WARN_MONTHLY_USD:.2f})")
+    write_standup_fact(f"chip-chat: monthly spend WARN ${monthly_usd:.2f} (threshold ${WARN_MONTHLY_USD:.2f})")
 
 
 def enforce_cutoff(monthly_usd: float) -> None:
     if monthly_usd >= CUTOFF_MONTHLY_USD:
         raise SpendCutoffError(
-            f"Chip Chat spend cutoff: monthly ${monthly_usd:.4f} >= ${CUTOFF_MONTHLY_USD:.2f}. "
+            f"Chip Chat spend cutoff: monthly ${monthly_usd:.2f} >= ${CUTOFF_MONTHLY_USD:.2f}. "
             "Live OpenRouter calls refused (mock mode still allowed)."
         )
 
