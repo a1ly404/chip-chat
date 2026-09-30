@@ -267,3 +267,6 @@ python3 -m pytest scripts/test_chip_relay_delegate.py scripts/test_chip_relay_ga
 **Violation recovery:** `git status` on main must stay clean; park accidental main edits via stash/patch into the correct worktree branch before push.
 
 **SoT doc cross-ref:** razzorstack [DEVELOPMENT.md](https://github.com/a1ly404/razzorstack/blob/main/docs/setup/DEVELOPMENT.md#single-writable-clone-raz-237) (Windows SoT); this section is the chip-chat equivalent.
+
+
+**Razzorstack (homelab) — separate repo:** Chip Chat deliverables stay in **chip-chat** (WSL worktrees above). **OCgo, chipchatdev, and Cursor** may edit **razzorstack** on **Windows** via `C:\Users\17783\HyperV-flip\repos\razzorstack-worktrees\<branch>` (or `/mnt/c/...` same path). WSL `~/Tools/razzorstack` remains **read-only**; do not commit homelab changes from the chip-chat repo tree.
