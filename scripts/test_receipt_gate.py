@@ -1,0 +1,56 @@
+"""Receipt schema gate: bad sitreps become an ERROR line, never a channel post of the body."""
+
+from chip_relay.receipt_gate import ERROR_PREFIX, gate_channel_body
+
+GOOD = "\n".join(
+    [
+        "claim: doc edit only",
+        "status: done",
+        "evidence: sha:dc2d851",
+        "next: none",
+    ]
+)
+
+
+def test_valid_doc_receipt_passes() -> None:
+    assert gate_channel_body(GOOD) == GOOD
+
+
+def test_missing_fields() -> None:
+    out = gate_channel_body("claim: hi\nstatus: done")
+    assert out == f"{ERROR_PREFIX}missing fields"
+
+
+def test_done_without_evidence() -> None:
+    body = "claim: finished\nstatus: done\nevidence: none\nnext: none"
+    assert gate_channel_body(body) == f"{ERROR_PREFIX}done-without-evidence"
+
+
+def test_unlabeled_table_spam() -> None:
+    body = "| a | b |\n|---|---|\n| 1 | 2 |\nlooks fine"
+    assert gate_channel_body(body) == f"{ERROR_PREFIX}unlabeled-table"
+
+
+def test_malformed_body() -> None:
+    assert gate_channel_body("   ") == f"{ERROR_PREFIX}malformed body"
+    bad_status = "claim: x\nstatus: shipped\nevidence: none\nnext: none"
+    assert gate_channel_body(bad_status) == f"{ERROR_PREFIX}malformed body"
+
+
+def test_execution_claim_needs_tool_receipt() -> None:
+    body = "\n".join(
+        [
+            "claim: ran the crontab comment",
+            "status: done",
+            "evidence: sha:11968de",
+            "next: none",
+        ]
+    )
+    assert gate_channel_body(body) == f"{ERROR_PREFIX}execution-without-tool-receipt"
+    ok = body.replace("evidence: sha:11968de", "evidence: tool:cron-disable-1")
+    assert gate_channel_body(ok) == ok
+
+
+def test_blocked_allows_none() -> None:
+    body = "claim: waiting on soak\nstatus: blocked\nevidence: none\nnext: recheck logs"
+    assert gate_channel_body(body) == body

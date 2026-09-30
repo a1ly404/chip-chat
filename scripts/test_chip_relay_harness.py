@@ -52,7 +52,9 @@ def test_message_create_calls_chip_and_webhook() -> None:
     result, calls, posts = _deliver()
     assert result.ok
     assert calls == [["room", "dev", "-m", "hello from the guild", "--as", "dev", "--json", "--turn-limit", "1"]]
-    assert posts == [("https://example.invalid/dev", "dev", "canned")]
+    assert posts[0][0] == "https://example.invalid/dev"
+    assert posts[0][1] == "dev"
+    assert posts[0][2].startswith("[chip-relay] ERROR: receipt schema:")
     assert result.chip_calls == 1
 
 

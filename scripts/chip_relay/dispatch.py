@@ -20,6 +20,7 @@ from chip_relay.delegate import (
     reset_delegate_chain,
 )
 from chip_relay.personas import resolve_persona_for_dispatch
+from chip_relay.receipt_gate import gate_channel_body
 from chip_relay.wake import apply_wake_to_turn, parse_inbound_handoff
 
 MAX_MESSAGE_CHARS = 2000
@@ -284,7 +285,7 @@ def handle_inbound_delegate(
         return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
-    posted: WebhookResult = webhook(url, request.persona, follow_reply)
+    posted: WebhookResult = webhook(url, request.persona, gate_channel_body(follow_reply))
     webhook_calls = 1
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
@@ -363,7 +364,7 @@ def handle_message(
         return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
-    posted: WebhookResult = webhook(url, persona, reply)
+    posted: WebhookResult = webhook(url, persona, gate_channel_body(reply))
     webhook_calls = 1
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
@@ -414,7 +415,7 @@ def handle_message(
             reply_alert = _chip_reply_failure(follow_reply)
             if reply_alert:
                 return _fail(logs, reply_alert, chip_calls=chip_calls)
-            posted = webhook(url, request.persona, follow_reply)
+            posted = webhook(url, request.persona, gate_channel_body(follow_reply))
             webhook_calls += 1
             if posted.status >= 400:
                 return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)

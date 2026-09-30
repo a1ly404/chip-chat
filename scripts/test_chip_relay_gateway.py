@@ -257,7 +257,9 @@ def test_inbound_delegate_wakes_target(tmp_path: Path, monkeypatch: pytest.Monke
     assert result.delegate_hops == 1
     assert calls[0][calls[0].index("--as") + 1] == "dev"
     assert calls[0][calls[0].index("-m") + 1] == "Reply with exactly: hop-ok"
-    assert posts == [("https://example.invalid/dev", "dev", "hop-ok")]
+    assert posts[0][0] == "https://example.invalid/dev"
+    assert posts[0][1] == "dev"
+    assert posts[0][2].startswith("[chip-relay] ERROR: receipt schema:")
 
 
 def test_human_still_maps_to_pm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
