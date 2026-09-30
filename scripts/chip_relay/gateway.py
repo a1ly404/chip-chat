@@ -53,6 +53,8 @@ def format_channel_dispatch_error(alert: str) -> str:
 
 def run_chip(args: list[str], timeout: int) -> ChipResult:
     try:
+        env = os.environ.copy()
+        env["CHIP_STORE_GATED"] = "1"
         proc = subprocess.run(
             [str(LAUNCHER), *args],
             cwd=REPO,
@@ -60,6 +62,7 @@ def run_chip(args: list[str], timeout: int) -> ChipResult:
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return ChipResult(returncode=-1, stdout="", timed_out=True)

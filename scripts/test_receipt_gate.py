@@ -1,6 +1,6 @@
 """Receipt schema gate: bad sitreps become an ERROR line, never a channel post of the body."""
 
-from chip_relay.receipt_gate import ERROR_PREFIX, gate_channel_body
+from chip_relay.receipt_gate import ERROR_PREFIX, body_for_store, gate_channel_body
 
 GOOD = "\n".join(
     [
@@ -54,3 +54,11 @@ def test_execution_claim_needs_tool_receipt() -> None:
 def test_blocked_allows_none() -> None:
     body = "claim: waiting on soak\nstatus: blocked\nevidence: none\nnext: recheck logs"
     assert gate_channel_body(body) == body
+
+
+def test_relay_store_uses_gated_body() -> None:
+    raw = "[mock PM] got it."
+    assert body_for_store(raw, {}) == raw
+    stored = body_for_store(raw, {"CHIP_STORE_GATED": "1"})
+    assert stored == f"{ERROR_PREFIX}missing fields"
+    assert body_for_store(GOOD, {"CHIP_STORE_GATED": "1"}) == GOOD

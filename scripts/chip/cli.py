@@ -370,7 +370,9 @@ def _room_demo_turn(
         use_mock=use_mock,
         command="room",
     )
-    store.log_message(room, "assistant", reply, agent=agent_name, model=routed)
+    from chip_relay.receipt_gate import body_for_store
+
+    store.log_message(room, "assistant", body_for_store(reply), agent=agent_name, model=routed)
     print(f"{agent_name}> {reply}")
     _print_spend_summary(ledger)
     return reply
@@ -488,10 +490,12 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
             call_cost,
             memory_ops,
         )
+    from chip_relay.receipt_gate import body_for_store
+
     store.log_message(
         room,
         "assistant",
-        text,
+        body_for_store(text),
         agent=agent,
         model=routed,
         extra={

@@ -74,3 +74,13 @@ def gate_channel_body(body: str) -> str:
     if reason is None:
         return body
     return f"{ERROR_PREFIX}{reason}"
+
+
+def body_for_store(body: str, environ: dict[str, str] | None = None) -> str:
+    """Relay shots store the gated body. Local room shots store the model text."""
+    import os
+
+    env = os.environ if environ is None else environ
+    if env.get("CHIP_STORE_GATED") == "1":
+        return gate_channel_body(body)
+    return body
