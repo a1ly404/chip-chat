@@ -56,6 +56,15 @@ def test_blocked_allows_none() -> None:
     assert gate_channel_body(body) == body
 
 
+def test_al9501_refusal_is_a_blocked_receipt() -> None:
+    from chip_relay.refusal import HUMAN_FOLLOWUP, REFUSAL
+
+    assert gate_channel_body(REFUSAL) == REFUSAL
+    assert gate_channel_body(HUMAN_FOLLOWUP) == HUMAN_FOLLOWUP
+    assert "propose-only" in REFUSAL
+    assert "no fix from this channel" in HUMAN_FOLLOWUP
+
+
 def test_relay_store_uses_gated_body() -> None:
     raw = "[mock PM] got it."
     assert body_for_store(raw, {}) == raw
