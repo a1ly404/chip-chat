@@ -73,6 +73,27 @@ def test_output_passes_voice_checks() -> None:
             _lint_output(reply)
 
 
+def _law_section(path: str) -> str:
+    text = open(path, encoding="utf-8").read().lower()
+    start = text.index("## law")
+    end = text.find("## memory", start)
+    return text[start:] if end < 0 else text[start:end]
+
+
+def test_prompts_and_channel_law_drop_status_board() -> None:
+    personas = config.load_personas()
+    for pid in CHAT_PERSONAS:
+        system = personas[pid]["system"].lower()
+        assert "done =" not in system, pid
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    for name in ("pm.md", "dev.md"):
+        law = _law_section(str(repo / "config" / "chip_chat" / "channels" / name))
+        assert "done =" not in law, name
+        assert "pm lane:" not in law, name
+
+
 def test_learnings_voice_block_loaded() -> None:
     for pid in CHAT_PERSONAS:
         block = learnings.render_learnings_block(pid)
