@@ -21,6 +21,7 @@ DEFAULT_REGISTRY: dict[str, str] = {
     "post-learning": "auto",
     # propose = Ally reviews the proposal card
     "compose-recreate": "propose",
+    "al-9501-dead-image": "propose",
     "disk-cleanup": "propose",
     "encode": "propose",
     # blocked = never autonomous (incident classes)

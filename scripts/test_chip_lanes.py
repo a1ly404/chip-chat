@@ -457,3 +457,25 @@ def test_chipchatdev_build_wake_needs_named_go(pins: dict[str, Path], monkeypatc
     monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-G")
     ok, reason = lanes.chipchatdev_wake_allowed("GO: RAZ-G vite build scope:raz-g", "dev")
     assert ok is True
+
+
+def test_deploy_absorb_needs_fingerprint_lane_and_expiry(pins: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    _claim("chipchatdev", "al-9501")
+    monkeypatch.setenv("CHIP_LANE_GO_TICKET", "al-9501")
+    wide = "GO: al-9501 absorb the lane and deploy scope:al-9501"
+    ok, reason = lanes.chipchatdev_wake_allowed(wide, "dev")
+    assert ok is False
+    assert "fp=" in reason
+    scoped = (
+        "GO: al-9501 fp=al-9501 lane=razzorstack exp=2099-01-01T00:00:00Z "
+        "deploy scope:al-9501"
+    )
+    ok, reason = lanes.chipchatdev_wake_allowed(scoped, "dev")
+    assert ok is True
+    expired = (
+        "GO: al-9501 fp=al-9501 lane=razzorstack exp=2000-01-01T00:00:00Z "
+        "deploy scope:al-9501"
+    )
+    ok, reason = lanes.chipchatdev_wake_allowed(expired, "dev")
+    assert ok is False
+    assert "expired" in reason

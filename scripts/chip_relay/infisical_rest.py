@@ -103,3 +103,54 @@ def fetch_runtime_secrets(environ: dict[str, str] | None = None) -> dict[str, st
     if absent:
         raise InfisicalAccessError("missing runtime secrets: " + ", ".join(absent))
     return found
+
+
+STANDUP_KEYS = (
+    "CHIP_STANDUP_GITHUB_TOKEN",
+    "LINEAR_API_KEY",
+    "CHIP_ALERT_INGEST_TOKEN",
+)
+
+
+def fetch_keys(names: tuple[str, ...], environ: dict[str, str] | None = None) -> dict[str, str]:
+    """Return present values for ``names``. Missing names are omitted. Login failure returns {}."""
+    source = dict(os.environ if environ is None else environ)
+    if missing_boot(source):
+        return {}
+    try:
+        host = (source.get("INFISICAL_API_URL") or DEFAULT_API_URL).rstrip("/")
+        headers = _cf_headers(source)
+        headers["Content-Type"] = "application/json"
+        status, ctype, raw = _request(
+            host + "/api/v1/auth/universal-auth/login",
+            headers=headers,
+            method="POST",
+            body={
+                "clientId": source["INFISICAL_CLIENT_ID"],
+                "clientSecret": source["INFISICAL_CLIENT_SECRET"],
+            },
+        )
+        if "json" not in ctype.lower() or not raw.lstrip().startswith("{"):
+            return {}
+        token = json.loads(raw).get("accessToken") or ""
+        if not token or status != 200:
+            return {}
+        project = source.get("INFISICAL_PROJECT_ID") or DEFAULT_PROJECT_ID
+        read_headers = _cf_headers(source)
+        read_headers["Authorization"] = "Bearer " + token
+        query = (
+            f"?workspaceId={project}&environment=prod&secretPath=/&viewSecretValue=true"
+        )
+        status, ctype, raw = _request(host + "/api/v3/secrets/raw" + query, headers=read_headers)
+        if status != 200 or "json" not in ctype.lower():
+            return {}
+        wanted = set(names)
+        found: dict[str, str] = {}
+        for item in json.loads(raw).get("secrets") or []:
+            key = item.get("secretKey")
+            value = str(item.get("secretValue") or "")
+            if key in wanted and value.strip():
+                found[str(key)] = value
+        return found
+    except (InfisicalAccessError, OSError, ValueError, json.JSONDecodeError):
+        return {}
