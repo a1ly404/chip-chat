@@ -178,3 +178,18 @@ def test_gha_resolves_workflow_when_configured_filename_404s(monkeypatch):
     result = sc.collect_gha_workflow(http_get=http_get)
     assert result.ok is True
     assert "success" in result.summary
+
+
+def test_apply_standup_secrets_fills_present_keys_only(monkeypatch) -> None:
+    from chip import standup_secrets
+
+    monkeypatch.setattr(
+        standup_secrets,
+        "fetch_keys",
+        lambda names, env: {"LINEAR_API_KEY": "lin_secret"},
+    )
+    env: dict[str, str] = {}
+    loaded = standup_secrets.apply_standup_secrets(env)
+    assert loaded == ["LINEAR_API_KEY"]
+    assert env["LINEAR_API_KEY"] == "lin_secret"
+    assert "CHIP_STANDUP_GITHUB_TOKEN" not in env

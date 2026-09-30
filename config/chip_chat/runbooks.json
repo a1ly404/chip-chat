@@ -4,6 +4,7 @@
   "re-run-health-probe": "auto",
   "post-learning": "auto",
   "discord-bot-loop-restart": "propose",
+  "al-9501-dead-image": "propose",
   "compose-recreate": "propose",
   "disk-cleanup": "propose",
   "encode": "propose",

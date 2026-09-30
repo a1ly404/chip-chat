@@ -53,4 +53,5 @@ def test_runbook_classes_and_fail_closed():
     assert runbooks.may_autorun("remux") is False
     assert runbooks.may_autorun("plex-restart") is False  # blocked (SYSTEM AutoFix incident)
     assert runbooks.runbook_class("never-seen-before") == "propose"  # unknown fail-closed
+    assert runbooks.runbook_class("al-9501-dead-image") == "propose"
     assert runbooks.may_autorun("never-seen-before") is False

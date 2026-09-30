@@ -350,6 +350,14 @@ def chipchatdev_wake_allowed(task: str, room: str) -> tuple[bool, str]:
         pinned = os.environ.get(GO_ENV, "").strip()
         if not named or pinned != named:
             return False, "above read needs GO naming the ticket"
+        from chip.go_scope import needs_scoped_go, parse_scoped_go
+
+        if needs_scoped_go(text):
+            fields, reason = parse_scoped_go(text)
+            if fields is None:
+                return False, reason
+            if fields["fp"] != named:
+                return False, "scoped GO fingerprint must match the GO ticket"
         return True, "go names ticket"
     owner = claims.claim_owner(room, scope)
     if owner != "chipchatdev":

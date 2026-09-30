@@ -171,6 +171,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Receipt issued_at stamp (default: now PT-ish via env CHIP_STANDUP_ISSUED_AT)",
     )
     args = parser.parse_args(argv)
+    from chip.standup_secrets import apply_standup_secrets
+
+    loaded = apply_standup_secrets()
+    missing = [
+        name
+        for name in ("CHIP_STANDUP_GITHUB_TOKEN", "LINEAR_API_KEY", "CHIP_ALERT_INGEST_TOKEN")
+        if not os.environ.get(name, "").strip()
+    ]
+    print(
+        "standup-secrets: loaded "
+        + (",".join(loaded) if loaded else "none")
+        + "; absent "
+        + (",".join(missing) if missing else "none")
+    )
     issued = args.issued_at.strip() or os.environ.get("CHIP_STANDUP_ISSUED_AT") or f"{_pt_day()} 11:25 PT"
     result = run_morning(
         receipts_dir=args.receipts_dir,

@@ -185,16 +185,24 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
     )
     assert first.alert == "slow_call_killed"
     written: list[str] = []
+    posted: list[str] = []
+
+    def _webhook(_url: str, _user: str, body: str) -> WebhookResult:
+        posted.append(body)
+        return WebhookResult(204)
+
     second = handle_message(
         Incoming("chip-dev", "again", "harness_member", author_id="900000000000000002"),
         config,
         chip=chip,
-        webhook=lambda *a: WebhookResult(204),
+        webhook=_webhook,
         environ=_env(),
         record=lambda room, reply, agent: written.append(f"{room}:{agent}:{reply}"),
     )
     assert second.ok
-    assert written == ["dev:dev:canned"]
+    gated = "[chip-relay] ERROR: receipt schema: missing fields"
+    assert written == [f"dev:dev:{gated}"]
+    assert posted == [gated]
     assert calls == [1, 1]
     assert tmp_path is not None
 

@@ -285,12 +285,13 @@ def handle_inbound_delegate(
         return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
-    posted: WebhookResult = webhook(url, request.persona, gate_channel_body(follow_reply))
+    posted_body = gate_channel_body(follow_reply)
+    posted: WebhookResult = webhook(url, request.persona, posted_body)
     webhook_calls = 1
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
     if record is not None:
-        record(room.id, follow_reply, request.persona)
+        record(room.id, posted_body, request.persona)
     logs.append(f"delegated {from_persona} -> {request.persona} hop={next_hop}")
     logs.append(f"posted {request.persona} to {room.discord_channel}")
     return DispatchResult(
@@ -364,12 +365,13 @@ def handle_message(
         return _fail(logs, reply_alert, chip_calls=chip_calls)
 
     url = environ.get(room.webhook_env, "")
-    posted: WebhookResult = webhook(url, persona, gate_channel_body(reply))
+    posted_body = gate_channel_body(reply)
+    posted: WebhookResult = webhook(url, persona, posted_body)
     webhook_calls = 1
     if posted.status >= 400:
         return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
     if record is not None:
-        record(room.id, reply, persona)
+        record(room.id, posted_body, persona)
 
     delegate_hops = 0
     request = parse_delegate(reply)
@@ -415,12 +417,13 @@ def handle_message(
             reply_alert = _chip_reply_failure(follow_reply)
             if reply_alert:
                 return _fail(logs, reply_alert, chip_calls=chip_calls)
-            posted = webhook(url, request.persona, gate_channel_body(follow_reply))
+            posted_body = gate_channel_body(follow_reply)
+            posted = webhook(url, request.persona, posted_body)
             webhook_calls += 1
             if posted.status >= 400:
                 return _fail(logs, f"webhook {posted.status}", chip_calls=chip_calls)
             if record is not None:
-                record(room.id, follow_reply, request.persona)
+                record(room.id, posted_body, request.persona)
             logs.append(f"delegated {persona} -> {request.persona} hop={next_hop}")
 
     logs.append(f"posted {persona} to {incoming.channel}")
