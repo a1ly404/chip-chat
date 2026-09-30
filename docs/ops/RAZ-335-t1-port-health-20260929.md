@@ -24,3 +24,11 @@ Everything is receipted in scripts/airvn_port_grab.py (RAZ-335 lane, PR a1ly404/
 - PR #576 (airvn typo fixed to airvn_port_grab.py) open.
 - RAZ-335 (Linear 63b479a0, 99233ef7) carries the falsification + the exact starting packet for the manual lane.
 - No further work before Lyla's Client-Area lane decision.
+
+## Addendum — WireGuard pivot landscape (2026-09-29T21:2xZ, read-only)
+
+- Fleet tunnel = WireGuard now: `wireguard` container (wg0 10.163.143.194/32, route table 51820), new config = AirVPN_CA-Vancouver_**Ginan**_UDP-1637-Entry3.conf; live egress via wg0 = **207.81.55.234** (new exit vs Pisces' 38.88.124.105).
+- gluetun STILL runs + its API surface answers ({"port":0,"ports":[]}, publicip cached = 192.30.89.27): the monitoring/alert chain still reads gluetun = stale context; the bot text carries Pisces-era values (reserved 54543 at 38.88.124.105).
+- qBittorrent netns = the **wireguard** container (container:ca19539d…) — listener bound wg0+eth0+localhost; `nc 127.0.0.1:54543` = SUCCESS in-netns.
+- External dial to 207.81.55.234:54543 (home-WAN vantage, probe-source validated on both stacks) = rc124 TIMEOUT with WG netns-listener alive — same edge-delivery failure class as gluetun's stack: the parked Client-Area item is unchanged by the pivot, PLUS a new open check: WG container's inbound iptables/nft for 54543 (no FIREWALL_VPN_INPUT_PORTS analog present on the surface — gluetun's rule died with the stack swap).
+- The load-bearing diagnostic surface moved from gluetun's API to the WG netns: `airvn_port_health` (and any monitoring) needs a WG-shape re-derivation or it keeps alerting a phantom stack.
