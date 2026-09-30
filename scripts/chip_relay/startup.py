@@ -122,7 +122,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Set CHIP_CHAT_MOCK=1 for this inject (no OpenRouter spend)",
     )
+    drill_p = sub.add_parser(
+        "refuse-drill",
+        help="Post the canned al-9501 refusal and store that same body",
+    )
+    drill_p.add_argument("--room", default="dev")
     args = parser.parse_args(argv)
+    if args.command == "refuse-drill":
+        from chip_relay.refusal import post_refusal
+
+        secret_rc = apply_runtime_secrets()
+        if secret_rc is not None:
+            return secret_rc
+        body = post_refusal(room_id=args.room)
+        print(body)
+        return 0
     if args.command == "inject":
         from chip_relay.inject import run_inject
 
