@@ -52,6 +52,27 @@
       "description": "BUILD tier: gym-app vite build (npm run build)."
     },
     {
+      "id": "docker-inspect",
+      "argv": ["docker", "inspect", "--format", "{{json .}}", "qbittorrent"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only docker inspect of qbittorrent. No run, rm, compose, restart, or exec."
+    },
+    {
+      "id": "docker-logs",
+      "argv": ["docker", "logs", "--tail", "80", "monitoring-api"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only docker logs --tail 80 monitoring-api. No run, rm, compose, restart, or exec."
+    },
+    {
+      "id": "wg-show",
+      "argv": ["wg", "show", "wg0", "latest-handshakes"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only wg show wg0 latest-handshakes. Stale handshake threshold is 180s in the feed. No mutations."
+    },
+    {
       "id": "task-show",
       "argv": ["python3", "-m", "chip", "task", "show"],
       "risk": "low",

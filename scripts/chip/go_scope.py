@@ -21,6 +21,15 @@ def needs_scoped_go(text: str) -> bool:
     return _DEPLOY.search(text or "") is not None
 
 
+def propose_go_marker(text: str, *, now: datetime | None = None) -> tuple[dict[str, str] | None, str]:
+    """Propose/write actions require the same fp/lane/exp marker as deploy/absorb.
+
+    This pass adds no homelab write tools. Callers that only receipt must not
+    treat a parsed marker as permission to mutate.
+    """
+    return parse_scoped_go(text, now=now)
+
+
 def parse_scoped_go(text: str, *, now: datetime | None = None) -> tuple[dict[str, str] | None, str]:
     """Return fields when fingerprint, lane, and unexpired exp are all present."""
     raw = text or ""

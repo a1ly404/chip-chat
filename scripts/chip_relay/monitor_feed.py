@@ -28,6 +28,7 @@ from typing import Any
 
 from chip import config, monitor, text_sources
 from chip_relay.dispatch import stand_down
+from chip_relay.homelab_probes import collect_alerts as _collect_homelab
 
 DEFAULT_HOST = "host.docker.internal"
 DEFAULT_PORT_POLICY = {"monitoring-api": 48082}
@@ -40,6 +41,9 @@ FEED_HOST_ENV = "CHIP_FEED_HOST"
 FEED_INTERVAL_ENV = "CHIP_FEED_INTERVAL_S"
 FEED_TARGETS_ENV = "CHIP_FEED_TARGETS"
 FEED_TIMEOUT_ENV = "CHIP_FEED_TIMEOUT_S"
+FEED_HOMELAB_ENV = "CHIP_FEED_HOMELAB"
+FEED_QB_URL_ENV = "CHIP_FEED_QB_URL"
+FEED_DOWNLOADS_ENV = "CHIP_FEED_DOWNLOADS"
 WEBHOOK_ENV = "CHIP_WEBHOOK_DEV"
 
 _POST_COOLDOWN_S = 4 * 3600  # one #chip-dev line per fingerprint per 4h
@@ -247,14 +251,50 @@ def ingest_text_sources(environ: dict[str, str] | None = None) -> dict[str, obje
     return {"enabled": True, **out}
 
 
+def homelab_enabled(environ: dict[str, str] | None = None) -> bool:
+    env = environ if environ is not None else os.environ
+    return env.get(FEED_HOMELAB_ENV, "").strip().lower() in _TRUE_VALUES
+
+
+def collect_homelab_alerts(environ: dict[str, str] | None = None) -> list[dict[str, object]]:
+    """Homelab faults. Off unless CHIP_FEED_HOMELAB=1 so a healthy quiet host stays quiet."""
+    env = environ if environ is not None else os.environ
+    if not homelab_enabled(env):
+        return []
+    path = (env.get(FEED_DOWNLOADS_ENV) or "/downloads").strip()
+    try:
+        return _collect_homelab(
+            downloads_path=path or None,
+            qb_url=(env.get(FEED_QB_URL_ENV) or "").strip(),
+        )
+    except Exception as exc:  # noqa: BLE001 — one blocked receipt, never a crash loop
+        return [
+            {
+                "key": "homelab-probes",
+                "detail": "tool:homelab-probes.unreachable",
+                "ok": False,
+                "receipt": (
+                    "claim: homelab probes unreachable from relay\n"
+                    f"status: blocked\n"
+                    f"evidence: tool:homelab-probes.unreachable-{exc.__class__.__name__}\n"
+                    "next: read-only receipt; no mutate from the feed"
+                ),
+            }
+        ]
+
+
 def tick(*, persist: bool = False, environ: dict[str, str] | None = None) -> dict[str, object]:
     healths: dict[str, dict[str, object]] = {}
     host = _env(FEED_HOST_ENV, DEFAULT_HOST)
     for name, port in _targets(environ).items():
         healths[name] = _fetch_health(host, port, name)
     text = ingest_text_sources(environ)
+    homelab = collect_homelab_alerts(environ)
     receipt = classify_receipts(
-        healths, environ=environ, persist=persist, extra_alerts=text.get("alerts")
+        healths,
+        environ=environ,
+        persist=persist,
+        extra_alerts=list(text.get("alerts") or []) + homelab,
     )
     receipt["text_sources"] = {
         "enabled": text.get("enabled", False),
@@ -346,10 +386,14 @@ def post_alerts(
         last = state.get(fp)
         if last is not None and now - float(last) < _POST_COOLDOWN_S:
             continue
-        line = (
-            f"[chip-feed] {verdict.get('key')} {verdict.get('verdict')} "
-            f"({str(verdict.get('detail', ''))[:120]}) — dark: log-only, no recover without Ally ack"
-        )
+        receipt_body = str(verdict.get("receipt") or "").strip()
+        if receipt_body:
+            line = receipt_body
+        else:
+            line = (
+                f"[chip-feed] {verdict.get('key')} {verdict.get('verdict')} "
+                f"({str(verdict.get('detail', ''))[:120]}) — dark: log-only, no recover without Ally ack"
+            )
         result = webhook(url, "chip-relay", line[:1900])
         status = int(getattr(result, "status", 0))
         if 200 <= status < 300:

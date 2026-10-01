@@ -1,0 +1,193 @@
+"""Homelab feed receipts, read-only allowlist, scoped GO stub."""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from chip.go_scope import propose_go_marker
+from chip_relay import homelab_probes, monitor_feed
+
+REPO = Path(__file__).resolve().parents[1]
+_NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+
+
+def _runner(mapping):
+    def run(argv):
+        homelab_probes.assert_read_argv(argv)
+        return mapping.get(tuple(argv), (127, "", "unreachable: missing"))
+    return run
+
+
+def test_read_tools_are_narrow() -> None:
+    spec = json.loads((REPO / "config" / "chip_tools.json").read_text(encoding="utf-8"))
+    by_id = {t["id"]: t for t in spec["tools"]}
+    assert by_id["docker-inspect"]["argv"] == homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]
+    assert by_id["docker-logs"]["argv"] == homelab_probes.DOCKER_LOGS_ARGV
+    assert by_id["wg-show"]["argv"] == homelab_probes.WG_SHOW_ARGV
+    for tid in ("docker-inspect", "docker-logs", "wg-show"):
+        assert by_id[tid]["allow_extra_args"] is False
+        blob = " ".join(by_id[tid]["argv"])
+        for banned in (" run", " rm", "compose", "restart", " exec"):
+            assert banned not in f" {blob}"
+
+
+def test_runbook_classes_unchanged() -> None:
+    from chip import runbooks
+
+    assert runbooks.runbook_class("al-9501-dead-image") == "propose"
+    assert runbooks.runbook_class("compose-recreate") == "propose"
+    assert runbooks.runbook_class("disk-cleanup") == "propose"
+    assert runbooks.runbook_class("remux") == "blocked"
+    assert runbooks.may_autorun("docker-inspect") is False
+    assert runbooks.may_autorun("restart-named-service") is True
+
+
+def test_missing_wg0_and_low_disk_and_image_line() -> None:
+    fresh = ""
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (1, "", "Unable to access interface: No such device"),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "Error: No such image: monitoring-api:dead\n", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": []}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    keys = {a["key"] for a in alerts}
+    assert "wg0-missing" in keys
+    assert "no-such-image" in keys
+    assert "downloads-mount" in keys
+    for a in alerts:
+        body = str(a["receipt"])
+        assert body.startswith("claim:")
+        assert "\nstatus:" in body and "\nevidence:" in body and "\nnext:" in body
+    assert fresh == ""
+
+
+def test_stale_handshake_and_firewalled_up_container(tmp_path: Path) -> None:
+    old = "peerkey 1\n"
+    mounts = {
+        "State": {"Status": "running"},
+        "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents", "Type": "volume"}],
+    }
+    path = tmp_path / "dl"
+    path.mkdir()
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, old, ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "ok\n", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (0, json.dumps(mounts), ""),
+        }),
+        downloads_path=str(path),
+        qb_url="",
+        now=10_000,
+    )
+    by = {a["key"]: a for a in alerts}
+    assert "wg0-handshake" in by
+    assert "stale" in str(by["wg0-handshake"]["receipt"])
+    assert "downloads-free" not in by or "under-2gib" in str(by.get("downloads-free", {}).get("receipt", ""))
+
+
+def test_unreachable_is_blocked_not_raise() -> None:
+    alerts = homelab_probes.collect_alerts(
+        runner=lambda argv: (127, "", "unreachable: docker not on PATH"),
+        downloads_path=None,
+        qb_url="http://127.0.0.1:9/api/v2/transfer/info",
+    )
+    assert alerts
+    assert all("status: blocked" in str(a["receipt"]) for a in alerts)
+
+
+def test_feed_posts_four_line_once_per_cooldown(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/hook")
+    posted = []
+
+    def hook(url, username, content):
+        posted.append(content)
+        class R:
+            status = 204
+        return R()
+
+    receipt = {
+        "verdicts": [
+            {
+                "key": "wg0-missing",
+                "detail": "tool:wg-show.missing-wg0",
+                "verdict": "actionable",
+                "receipt": homelab_probes.four_line(
+                    "wg0 interface missing",
+                    "refused",
+                    "tool:wg-show.missing-wg0",
+                    "propose compose-recreate only after scoped GO",
+                ),
+            }
+        ]
+    }
+    n = monitor_feed.post_alerts(receipt, webhook=hook, now=1_000.0, only_fps=None)
+    assert n == 1
+    assert posted[0].splitlines()[0].startswith("claim:")
+    assert len(posted[0].splitlines()) == 4
+    n2 = monitor_feed.post_alerts(receipt, webhook=hook, now=1_100.0, only_fps=None)
+    assert n2 == 0
+
+
+def test_homelab_off_adds_no_alerts(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("CHIP_FEED_HOMELAB", raising=False)
+    assert monitor_feed.collect_homelab_alerts() == []
+
+
+def test_text_line_no_such_image() -> None:
+    from chip import text_sources
+
+    out = text_sources.ingest_lines([{"text": "pull failed: No such image: dead:tag"}])
+    assert any(a["key"] == "no-such-image" for a in out["alerts"])
+
+
+def test_propose_stub_requires_future_scoped_go() -> None:
+    missing, why = propose_go_marker("GO: do the thing")
+    assert missing is None and "fp=" in why
+    ok, _ = propose_go_marker(
+        "GO: fp=wg0-missing lane=razzorstack exp=2026-10-01T00:00:00Z",
+        now=_NOW,
+    )
+    assert ok is not None
+    expired, why2 = propose_go_marker(
+        "GO: fp=wg0-missing lane=razzorstack exp=2020-01-01T00:00:00Z",
+        now=_NOW,
+    )
+    assert expired is None and "expired" in why2
+
+
+def test_wrong_mount_and_firewalled(monkeypatch) -> None:
+    body = json.dumps({
+        "State": {"Status": "running"},
+        "Mounts": [{"Destination": "/downloads", "Name": "overlay", "Source": "/var/lib/docker/overlay2"}],
+    })
+
+    def run(argv):
+        if argv[:2] == ["wg", "show"]:
+            return 0, "peer 9999999999\n", ""
+        if argv[:2] == ["docker", "logs"]:
+            return 0, "", ""
+        return 0, body, ""
+
+    class Resp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b'{"connection_status":"firewalled"}'
+
+    monkeypatch.setattr(homelab_probes.urllib.request, "urlopen", lambda *a, **k: Resp())
+    alerts = homelab_probes.collect_alerts(runner=run, downloads_path=None, qb_url="http://qb/api", now=100)
+    keys = {a["key"] for a in alerts}
+    assert "downloads-mount" in keys
+    assert "qb-connection" in keys

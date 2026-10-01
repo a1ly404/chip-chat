@@ -113,6 +113,19 @@ def ingest_lines(
             ignored += 1
             continue
         alerts.extend(_advisor_alerts(obj))
+        blob = json.dumps(obj, default=str)
+        if "No such image" in blob:
+            alerts.append({
+                "key": "no-such-image",
+                "detail": "tool:text-source.no-such-image",
+                "ok": False,
+                "receipt": (
+                    "claim: monitoring log line No such image\n"
+                    "status: refused\n"
+                    "evidence: tool:text-source.no-such-image\n"
+                    "next: al-9501-dead-image stays propose"
+                ),
+            })
         zero = _pgs_zero(obj)
         if zero is not None:
             sid = str(obj.get("source_id") or "pgs")
