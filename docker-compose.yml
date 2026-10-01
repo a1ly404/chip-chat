@@ -16,7 +16,6 @@ services:
       - chip-chat-data:/data/chip-chat
       - ./.env:/app/.env:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - razzor-nas-torrents:/downloads:ro
     healthcheck:
       test:
         [
@@ -32,6 +31,3 @@ services:
 
 volumes:
   chip-chat-data:
-  razzor-nas-torrents:
-    external: true
-    name: razzor-nas-torrents
