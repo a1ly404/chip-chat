@@ -9,9 +9,14 @@ services:
     environment:
       CHIP_CHAT_DATA_DIR: /data/chip-chat
       CHIP_FEED_ENABLED: "1"
+      # Read-only homelab receipts. Unreachable docker/wg becomes status blocked.
+      CHIP_FEED_HOMELAB: "1"
+      CHIP_FEED_DOWNLOADS: /downloads
     volumes:
       - chip-chat-data:/data/chip-chat
       - ./.env:/app/.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - razzor-nas-torrents:/downloads:ro
     healthcheck:
       test:
         [
@@ -27,3 +32,6 @@ services:
 
 volumes:
   chip-chat-data:
+  razzor-nas-torrents:
+    external: true
+    name: razzor-nas-torrents
