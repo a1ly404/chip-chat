@@ -149,7 +149,7 @@ def test_enqueue_one_delegate_hop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert posts[0][1] == "dev"
     assert posts[1][0] == "https://example.invalid/dev"
     assert posts[1][1] == "tester"
-    assert posts[1][2].startswith("[chip-relay] ERROR: receipt schema:")
+    assert posts[1][2] == "tests noted"
     transcript = store.thread_path("dev").read_text(encoding="utf-8")
     assert "relay_handoff" in transcript
 

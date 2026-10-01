@@ -16,6 +16,11 @@ def test_valid_doc_receipt_passes() -> None:
     assert gate_channel_body(GOOD) == GOOD
 
 
+def test_prose_answer_is_not_a_sitrep() -> None:
+    prose = "Latest Ted Lasso is not on disk yet. I have not checked Sonarr."
+    assert gate_channel_body(prose) == prose
+
+
 def test_missing_fields() -> None:
     out = gate_channel_body("claim: hi\nstatus: done")
     assert out == f"{ERROR_PREFIX}missing fields"
@@ -68,6 +73,8 @@ def test_al9501_refusal_is_a_blocked_receipt() -> None:
 def test_relay_store_uses_gated_body() -> None:
     raw = "[mock PM] got it."
     assert body_for_store(raw, {}) == raw
-    stored = body_for_store(raw, {"CHIP_STORE_GATED": "1"})
+    assert body_for_store(raw, {"CHIP_STORE_GATED": "1"}) == raw
+    partial = "claim: hi"
+    stored = body_for_store(partial, {"CHIP_STORE_GATED": "1"})
     assert stored == f"{ERROR_PREFIX}missing fields"
     assert body_for_store(GOOD, {"CHIP_STORE_GATED": "1"}) == GOOD

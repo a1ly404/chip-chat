@@ -106,4 +106,4 @@ def test_dispatch_uses_mapped_persona_for_chip_and_webhook() -> None:
     assert calls[0][calls[0].index("--as") + 1] == "pm"
     assert posts[0][0] == "https://example.invalid/dev"
     assert posts[0][1] == "pm"
-    assert posts[0][2].startswith("[chip-relay] ERROR: receipt schema:")
+    assert posts[0][2] == "ok"
