@@ -45,10 +45,14 @@ def receipt_error(body: str) -> str | None:
     if not text:
         return "malformed body"
     table_lines = sum(1 for line in text.splitlines() if _TABLE.match(line))
+    field_lines = sum(1 for line in text.splitlines() if _FIELD.match(line.strip()))
     fields = _parse(text)
     if fields is None:
         if table_lines >= 3:
             return "unlabeled-table"
+        # A human reply with no receipt lines is conversation, not a failed sitrep.
+        if field_lines == 0:
+            return None
         return "missing fields"
     status = fields["status"].lower()
     if status not in _STATUS:

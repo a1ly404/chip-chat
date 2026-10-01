@@ -54,7 +54,7 @@ def test_message_create_calls_chip_and_webhook() -> None:
     assert calls == [["room", "dev", "-m", "hello from the guild", "--as", "dev", "--json", "--turn-limit", "1"]]
     assert posts[0][0] == "https://example.invalid/dev"
     assert posts[0][1] == "dev"
-    assert posts[0][2].startswith("[chip-relay] ERROR: receipt schema:")
+    assert posts[0][2] == "canned"
     assert result.chip_calls == 1
 
 
@@ -174,7 +174,7 @@ def test_timeout_then_next_message_still_runs(tmp_path: Path) -> None:
         calls.append(1)
         if len(calls) == 1:
             return ChipResult(returncode=-1, stdout="", timed_out=True)
-        return ChipResult(0, '{"reply": "canned"}')
+        return ChipResult(0, '{"reply": "claim: canned"}')
 
     first = handle_message(
         Incoming("chip-dev", "hi", "harness_member", author_id="900000000000000002"),
