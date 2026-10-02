@@ -30,7 +30,11 @@ from typing import Any
 
 from chip import config, monitor, text_sources
 from chip_relay.dispatch import stand_down
-from chip_relay.homelab_probes import collect_alerts as _collect_homelab
+from chip_relay.homelab_probes import (
+    FEED_QB_PASSWORD_ENV,
+    FEED_QB_USER_ENV,
+    collect_alerts as _collect_homelab,
+)
 
 DEFAULT_HOST = "host.docker.internal"
 DEFAULT_PORT_POLICY = {"monitoring-api": 48082}
@@ -275,6 +279,8 @@ def collect_homelab_alerts(environ: dict[str, str] | None = None) -> list[dict[s
         return _collect_homelab(
             downloads_path=path or None,
             qb_url=(env.get(FEED_QB_URL_ENV) or "").strip(),
+            qb_user=(env.get(FEED_QB_USER_ENV) or "").strip() or None,
+            qb_password=(env.get(FEED_QB_PASSWORD_ENV) or "").strip() or None,
         )
     except Exception as exc:  # noqa: BLE001 — one blocked receipt, never a crash loop
         return [

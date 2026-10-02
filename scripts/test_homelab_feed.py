@@ -233,6 +233,89 @@ def test_propose_stub_requires_future_scoped_go() -> None:
     assert expired is None and "expired" in why2
 
 
+def test_api_base_from_transfer_url() -> None:
+    assert homelab_probes._api_base_from_transfer_url(
+        "http://host.docker.internal:8080/api/v2/transfer/info"
+    ) == "http://host.docker.internal:8080"
+
+
+def test_qb_403_without_credentials_is_blocked(monkeypatch) -> None:
+    monkeypatch.setattr(
+        homelab_probes,
+        "_read_transfer_info",
+        lambda opener, url, timeout: (None, "HTTPError403"),
+    )
+    status, err = homelab_probes._fetch_connection("http://qb:8080/api/v2/transfer/info")
+    assert status is None
+    assert err == "HTTPError403"
+
+
+def test_qb_403_login_then_transfer_info(monkeypatch) -> None:
+    attempts = {"n": 0}
+    login_calls: list[tuple[str, str, str]] = []
+
+    def read_info(opener, url, timeout):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return None, "HTTPError403"
+        return {"connection_status": "connected"}, None
+
+    def login(opener, base, user, password, timeout):
+        login_calls.append((base, user, password))
+        return None
+
+    monkeypatch.setattr(homelab_probes, "_read_transfer_info", read_info)
+    monkeypatch.setattr(homelab_probes, "_qb_login", login)
+    status, err = homelab_probes._fetch_connection(
+        "http://qb:8080/api/v2/transfer/info",
+        qb_user="relay",
+        qb_password="secret-not-in-receipts",
+    )
+    assert err is None
+    assert status == "connected"
+    assert login_calls == [("http://qb:8080", "relay", "secret-not-in-receipts")]
+    alerts = homelab_probes.collect_alerts(
+        runner=lambda argv: (0, "", ""),
+        downloads_path=None,
+        qb_url="http://qb:8080/api/v2/transfer/info",
+        qb_user="relay",
+        qb_password="secret-not-in-receipts",
+    )
+    receipt_blob = json.dumps(alerts)
+    assert "secret-not-in-receipts" not in receipt_blob
+
+
+def test_qb_login_failure_blocked(monkeypatch) -> None:
+    monkeypatch.setattr(
+        homelab_probes,
+        "_read_transfer_info",
+        lambda opener, url, timeout: (None, "HTTPError403"),
+    )
+    monkeypatch.setattr(
+        homelab_probes,
+        "_qb_login",
+        lambda opener, base, user, password, timeout: "login-failed",
+    )
+    status, err = homelab_probes._fetch_connection(
+        "http://qb:8080/api/v2/transfer/info",
+        qb_user="u",
+        qb_password="p",
+    )
+    assert status is None
+    assert err == "login-failed"
+    alerts = homelab_probes.collect_alerts(
+        runner=lambda argv: (127, "", "unreachable"),
+        downloads_path=None,
+        qb_url="http://qb:8080/api/v2/transfer/info",
+        qb_user="u",
+        qb_password="p",
+    )
+    qb = [a for a in alerts if a["key"] == "qb-connection"]
+    assert qb
+    assert "login-failed" in str(qb[0]["receipt"])
+    assert "status: blocked" in str(qb[0]["receipt"])
+
+
 def test_wrong_mount_and_firewalled(monkeypatch) -> None:
     body = json.dumps({
         "State": {"Status": "running"},

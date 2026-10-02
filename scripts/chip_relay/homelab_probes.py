@@ -13,19 +13,26 @@ one older than that, is a fault. Missing docker CLI or failed exec is status
 ``/downloads`` must be the ``razzor-nas-torrents`` mount (inspect Mounts),
 and that filesystem must have at least 2 GiB free when the path is visible
 in this container. qBittorrent ``connection_status`` is read from
-``CHIP_FEED_QB_URL`` when set; ``firewalled`` is a fault.
+``CHIP_FEED_QB_URL`` when set (optional ``CHIP_FEED_QB_USER`` /
+``CHIP_FEED_QB_PASSWORD`` for WebUI login from Docker); ``firewalled`` is a fault.
 """
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 import shutil
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable
+
+FEED_QB_USER_ENV = "CHIP_FEED_QB_USER"
+FEED_QB_PASSWORD_ENV = "CHIP_FEED_QB_PASSWORD"
+_TRANSFER_INFO_SUFFIX = "/api/v2/transfer/info"
 
 HANDSHAKE_STALE_S = 180
 DOWNLOADS_MIN_BYTES = 2 * 1024 * 1024 * 1024
@@ -262,16 +269,78 @@ def log_image_alert(text: str) -> dict[str, object] | None:
     )
 
 
-def _fetch_connection(url: str) -> tuple[str | None, str | None]:
-    """Return (status, error). status None + error None means skipped."""
-    if not url:
-        return None, None
+def _api_base_from_transfer_url(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path or ""
+    if path.endswith(_TRANSFER_INFO_SUFFIX):
+        path = path[: -len(_TRANSFER_INFO_SUFFIX)]
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path.rstrip("/"), "", ""))
+
+
+def _qb_opener() -> urllib.request.OpenerDirector:
+    jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def _read_transfer_info(
+    opener: urllib.request.OpenerDirector, url: str, timeout: float
+) -> tuple[dict | None, str | None]:
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        with opener.open(url, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return None, "HTTPError403"
+        return None, exc.__class__.__name__
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
         return None, exc.__class__.__name__
     if not isinstance(body, dict):
+        return None, "unreadable"
+    return body, None
+
+
+def _qb_login(
+    opener: urllib.request.OpenerDirector,
+    base: str,
+    user: str,
+    password: str,
+    timeout: float,
+) -> str | None:
+    login_url = f"{base.rstrip('/')}/api/v2/auth/login"
+    payload = urllib.parse.urlencode({"username": user, "password": password}).encode("utf-8")
+    req = urllib.request.Request(login_url, data=payload, method="POST")
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return "login-failed"
+    except urllib.error.HTTPError:
+        return "login-failed"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return exc.__class__.__name__
+    return None
+
+
+def _fetch_connection(
+    url: str,
+    *,
+    qb_user: str | None = None,
+    qb_password: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[str | None, str | None]:
+    """Return (connection_status, error). status None + error None means skipped."""
+    if not url:
+        return None, None
+    opener = _qb_opener()
+    body, err = _read_transfer_info(opener, url, timeout)
+    if err == "HTTPError403" and qb_user and qb_password:
+        base = _api_base_from_transfer_url(url)
+        login_err = _qb_login(opener, base, qb_user, qb_password, timeout)
+        if login_err:
+            return None, login_err
+        body, err = _read_transfer_info(opener, url, timeout)
+    if err:
+        return None, err
+    if body is None:
         return None, "unreadable"
     return str(body.get("connection_status") or ""), None
 
@@ -281,6 +350,8 @@ def collect_alerts(
     runner: Runner | None = None,
     downloads_path: str | None = DOWNLOADS_PATH,
     qb_url: str | None = None,
+    qb_user: str | None = None,
+    qb_password: str | None = None,
     now: float | None = None,
 ) -> list[dict[str, object]]:
     """Never raises. Unreachable probes become blocked receipts."""
@@ -320,7 +391,11 @@ def collect_alerts(
         if free:
             alerts.append(free)
 
-    status, qerr = _fetch_connection(qb_url or "")
+    status, qerr = _fetch_connection(
+        qb_url or "",
+        qb_user=qb_user,
+        qb_password=qb_password,
+    )
     if qerr:
         alerts.append(_blocked("qb-connection", "qbittorrent connection_status unreachable", f"tool:qb-connection.unreachable-{qerr}"))
     elif inspect_body:

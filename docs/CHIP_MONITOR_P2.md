@@ -32,6 +32,8 @@ Unreachable docker/wg/qB API → **`status: blocked`** on the receipt (no crash 
 | `CHIP_FEED_HOMELAB_WAKE` | **off** | Ally GO — allow homelab faults to post to `#chip-dev` |
 | `CHIP_FEED_DOWNLOADS` | `/downloads` | Path for `statvfs` free-space check; Hyper-V compose mounts external `razzor-nas-torrents` at `/downloads:ro` (see `docker-compose.yml`). Without that mount, `downloads-df` is **blocked** (`FileNotFoundError`). |
 | `CHIP_FEED_QB_URL` | unset | qBittorrent API URL for `connection_status`; unset skips firewalled check |
+| `CHIP_FEED_QB_USER` | unset | WebUI username when qB returns HTTP 403 from Docker (POST `/api/v2/auth/login`, read-only) |
+| `CHIP_FEED_QB_PASSWORD` | unset | WebUI password for the login above; never echoed in receipts |
 | `CHIP_WEBHOOK_DEV` | Infisical | Target webhook for tell-tier posts |
 
 Health probes (`monitoring-api`, `discord-bot`) use the same tell-tier path but **do not** require `CHIP_FEED_HOMELAB_WAKE`.
@@ -50,6 +52,9 @@ Health probes (`monitoring-api`, `discord-bot`) use the same tell-tier path but 
    ```
 
    Adjust `CHIP_FEED_QB_URL` to the homelab-reachable qBittorrent API (read-only GET).
+   From the relay container, bare GET often returns **403** (LocalHostAuth does not apply across Docker networks). Set **`CHIP_FEED_QB_USER`** and **`CHIP_FEED_QB_PASSWORD`** to the read-only WebUI account so the probe can log in, then GET `transfer/info`. Failed login stays **`status: blocked`** with `tool:qb-connection.unreachable-*` (no secret in the receipt).
+
+   After auth works, a running qBit may still report **`connection_status: firewalled`** — that is a separate fault (`tool:qb-connection.firewalled`), not a probe 403.
 
 4. `docker compose up -d --no-build --force-recreate chip-relay` (or `./scripts/chip_relay_up.sh` if stuck in `Created`).
 5. **Rehearse:** induce or wait for a real fault; expect one four-line receipt on `#chip-dev` after two feed ticks (~10 min at 300s interval). Evidence line must cite a `tool:*` slug from the table above.
