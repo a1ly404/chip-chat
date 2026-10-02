@@ -32,6 +32,19 @@ DOWNLOADS_MIN_BYTES = 2 * 1024 * 1024 * 1024
 DOWNLOADS_PATH = "/downloads"
 TORRENT_VOLUME = "razzor-nas-torrents"
 
+# Keys produced by ``collect_alerts`` (P2 homelab tell-tier). Used by the feed to
+# gate Discord wake until ``CHIP_FEED_HOMELAB_WAKE=1`` (Ally GO).
+HOMELAB_ALERT_KEYS = frozenset(
+    {
+        "wg0-handshake",
+        "wg0-missing",
+        "downloads-mount",
+        "downloads-free",
+        "qb-connection",
+        "homelab-probes",
+    }
+)
+
 Runner = Callable[[list[str]], tuple[int, str, str]]
 
 DOCKER_INSPECT_ARGV = [
@@ -52,6 +65,16 @@ WG_SHOW_ARGV = [
 ]
 
 _FORBIDDEN = (" run", " rm", " compose", " restart")
+
+
+def is_homelab_feed_alert(alert: dict[str, object]) -> bool:
+    """True when the alert came from homelab read-only probes (not health HTTP)."""
+    key = str(alert.get("key", ""))
+    if key in HOMELAB_ALERT_KEYS:
+        return True
+    if key == "no-such-image":
+        return str(alert.get("detail", "")).startswith("tool:")
+    return False
 
 
 def four_line(claim: str, status: str, evidence: str, nxt: str) -> str:

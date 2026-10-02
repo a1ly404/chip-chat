@@ -9,7 +9,8 @@ services:
     environment:
       CHIP_CHAT_DATA_DIR: /data/chip-chat
       CHIP_FEED_ENABLED: "1"
-      # Read-only homelab receipts. Unreachable docker/wg becomes status blocked.
+      # Read-only homelab probes each tick. Discord wake needs Ally GO:
+      # CHIP_FEED_HOMELAB_WAKE=1 (see docs/CHIP_MONITOR_P2.md).
       CHIP_FEED_HOMELAB: "1"
       CHIP_FEED_DOWNLOADS: /downloads
     volumes:

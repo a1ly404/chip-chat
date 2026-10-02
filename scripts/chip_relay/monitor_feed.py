@@ -1,17 +1,19 @@
-"""Phase-A monitoring feed (Grok go-live, ENVELOPES.md phase table).
+"""Monitor feed — health probes + homelab read-only checks (ENVELOPES.md).
 
-In-container poller: reads monitoring-api + discord-bot health endpoints from
-INSIDE the container (via `host.docker.internal`), derives synthetic alerts, and
-pushes them through ``chip.monitor`` (noise floor) — **log-only** during Phase A.
+In-container poller: GETs monitoring-api + discord-bot ``/health`` via
+``host.docker.internal``, optional homelab probes (``CHIP_FEED_HOMELAB``), and
+optional text sources. Everything flows through ``chip.monitor`` (noise floor)
+and persists under ``CHIP_CHAT_DATA_DIR/monitoring/latest.json``.
 
-Law (docs/ENVELOPES.md go-live table):
-- Phase A is DARK: no agent turns, no delegate hops, no webhook posts, no tool
-  executions. The feed only writes receipts + a snapshot under
-  ``CHIP_CHAT_DATA_DIR/monitoring/`` so a later fixer phase can rebuild a wake
-  payload without re-probing.
-- Stand-down respected: classify still runs (state freshness), but receipts are
-  tagged ``stand_down: true`` and no wake would ever fire from this module.
-- Skip keys (plex/sonarr/radarr native-profile false alerts) never wake.
+Tell-tier (#chip-dev only, never ``#monitoring-logs``):
+- Health-derived actionable/dead-letter verdicts post when ``CHIP_FEED_ENABLED=1``,
+  ``CHIP_WEBHOOK_DEV`` is set, verify-twice passes, and stand-down is off.
+- Homelab fault receipts (wg handshake, ``/downloads`` mount, qBit firewalled)
+  also require ``CHIP_FEED_HOMELAB_WAKE=1`` (Ally GO — see ``docs/CHIP_MONITOR_P2.md``).
+  Probes may run with only ``CHIP_FEED_HOMELAB=1``; Discord wake stays dark until GO.
+
+No agent turns, delegate hops, or tool executions from this module. Skip keys
+(plex/sonarr/radarr) never wake.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ FEED_INTERVAL_ENV = "CHIP_FEED_INTERVAL_S"
 FEED_TARGETS_ENV = "CHIP_FEED_TARGETS"
 FEED_TIMEOUT_ENV = "CHIP_FEED_TIMEOUT_S"
 FEED_HOMELAB_ENV = "CHIP_FEED_HOMELAB"
+FEED_HOMELAB_WAKE_ENV = "CHIP_FEED_HOMELAB_WAKE"
 FEED_QB_URL_ENV = "CHIP_FEED_QB_URL"
 FEED_DOWNLOADS_ENV = "CHIP_FEED_DOWNLOADS"
 WEBHOOK_ENV = "CHIP_WEBHOOK_DEV"
@@ -256,6 +259,12 @@ def homelab_enabled(environ: dict[str, str] | None = None) -> bool:
     return env.get(FEED_HOMELAB_ENV, "").strip().lower() in _TRUE_VALUES
 
 
+def homelab_wake_enabled(environ: dict[str, str] | None = None) -> bool:
+    """Discord posts for homelab probe faults — requires explicit Ally GO env."""
+    env = environ if environ is not None else os.environ
+    return env.get(FEED_HOMELAB_WAKE_ENV, "").strip().lower() in _TRUE_VALUES
+
+
 def collect_homelab_alerts(environ: dict[str, str] | None = None) -> list[dict[str, object]]:
     """Homelab faults. Off unless CHIP_FEED_HOMELAB=1 so a healthy quiet host stays quiet."""
     env = environ if environ is not None else os.environ
@@ -361,9 +370,13 @@ def post_alerts(
       present in the PREVIOUS tick may post — single-tick transients stay silent;
       a real outage posts once, ≤1 interval late.
     - stand-down → no posts (pauses feed tell-tier; never wakes fixers either).
-    - system line, no LLM spend: ``[chip-feed] <key> <verdict> (<detail>)``.
+    - homelab probe verdicts → no Discord until ``CHIP_FEED_HOMELAB_WAKE=1``.
+    - system line, no LLM spend: ``[chip-feed] <key> <verdict> (<detail>)`` when
+      no four-line ``receipt`` is attached.
     Returns the number of posts actually sent.
     """
+    from chip_relay.homelab_probes import is_homelab_feed_alert
+
     env = environ if environ is not None else os.environ
     now = time.time() if now is None else now
     if not _truthy(env) or stand_down(env):
@@ -379,6 +392,8 @@ def post_alerts(
     posted = 0
     for verdict in receipt.get("verdicts", []):
         if verdict.get("verdict") not in _POSTABLE_VERDICTS:
+            continue
+        if is_homelab_feed_alert(verdict) and not homelab_wake_enabled(env):
             continue
         fp = monitor.fingerprint_for(str(verdict.get("key", "")), str(verdict.get("detail", "")))
         if only_fps is not None and fp not in only_fps:

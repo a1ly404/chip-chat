@@ -113,9 +113,38 @@ def test_unreachable_is_blocked_not_raise() -> None:
     assert all("status: blocked" in str(a["receipt"]) for a in alerts)
 
 
+def test_homelab_wake_gate_blocks_discord(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/hook")
+    posted = []
+
+    def hook(url, username, content):
+        posted.append(content)
+        class R:
+            status = 204
+        return R()
+
+    receipt = {
+        "verdicts": [
+            {
+                "key": "wg0-missing",
+                "detail": "tool:wg-show.missing-wg0",
+                "verdict": "actionable",
+                "receipt": homelab_probes.four_line("x", "refused", "tool:wg-show.missing-wg0", "next"),
+            }
+        ]
+    }
+    assert monitor_feed.post_alerts(receipt, webhook=hook, now=1_000.0, only_fps=None) == 0
+    assert posted == []
+    monkeypatch.setenv("CHIP_FEED_HOMELAB_WAKE", "1")
+    assert monitor_feed.post_alerts(receipt, webhook=hook, now=1_000.0, only_fps=None) == 1
+
+
 def test_feed_posts_four_line_once_per_cooldown(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.setenv("CHIP_FEED_HOMELAB_WAKE", "1")
     monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/hook")
     posted = []
 
@@ -146,6 +175,34 @@ def test_feed_posts_four_line_once_per_cooldown(monkeypatch, tmp_path: Path) -> 
     assert len(posted[0].splitlines()) == 4
     n2 = monitor_feed.post_alerts(receipt, webhook=hook, now=1_100.0, only_fps=None)
     assert n2 == 0
+
+
+def test_is_homelab_feed_alert_classifies_keys() -> None:
+    assert homelab_probes.is_homelab_feed_alert({"key": "wg0-handshake", "detail": "tool:wg-show.stale"})
+    assert homelab_probes.is_homelab_feed_alert({"key": "no-such-image", "detail": "tool:docker-logs.no-such-image"})
+    assert not homelab_probes.is_homelab_feed_alert({"key": "monitoring-api", "detail": "status=degraded"})
+    assert not homelab_probes.is_homelab_feed_alert({"key": "no-such-image", "detail": "pull failed"})
+
+
+def test_tick_homelab_faults_classify_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CHIP_FEED_HOMELAB", "1")
+    monkeypatch.setattr(monitor_feed, "_fetch_health", lambda host, port, name: {})
+    monkeypatch.setattr(
+        monitor_feed,
+        "collect_homelab_alerts",
+        lambda environ=None: [
+            {
+                "key": "downloads-mount",
+                "detail": "tool:docker-inspect.downloads-overlay",
+                "ok": False,
+                "receipt": homelab_probes.four_line("m", "refused", "tool:docker-inspect.downloads-overlay", "next"),
+            }
+        ],
+    )
+    receipt = monitor_feed.tick(persist=False)
+    keys = {v["key"]: v.get("verdict") for v in receipt["verdicts"]}
+    assert keys.get("downloads-mount") == "actionable"
 
 
 def test_homelab_off_adds_no_alerts(monkeypatch, tmp_path: Path) -> None:

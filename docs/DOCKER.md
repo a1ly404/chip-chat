@@ -28,7 +28,7 @@ docker compose up -d --no-build --force-recreate chip-relay
 
 Use `--no-build` when the host already has the `chip-relay:latest` tag you built elsewhere. Optional operator stamp: write `BUILD_SHA.txt` at the repo root on the host with the git commit you deployed (not baked into the image today).
 
-Homelab feed env (`CHIP_FEED_HOMELAB`, `CHIP_FEED_DOWNLOADS`) is documented under compose; `/downloads` is **not** a required volume mount — when absent, `downloads-df` stays a **blocked** receipt instead of preventing recreate (see PR #145).
+Homelab feed env (`CHIP_FEED_HOMELAB`, `CHIP_FEED_DOWNLOADS`, optional `CHIP_FEED_QB_URL`) is documented in `docs/CHIP_MONITOR_P2.md`. `/downloads` is **not** a required volume mount — when absent, `downloads-df` stays a **blocked** receipt instead of preventing recreate (see PR #145). Homelab faults post to `#chip-dev` only after **`CHIP_FEED_HOMELAB_WAKE=1`** (Ally GO).
 
 ## Data directory
 

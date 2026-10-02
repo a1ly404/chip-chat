@@ -72,7 +72,8 @@ First signal: monitoring-api structured health for `discord-bot` (`/health` / `l
 
 - In-container poller (relay gateway thread, `CHIP_FEED_ENABLED=1` in compose): GETs `http://host.docker.internal:48080/health` (discord-bot) + `:48082/health` (monitoring-api) every `CHIP_FEED_INTERVAL_S` (default 300s, min 60).
 - Derives alerts → `chip.monitor` noise floor (dedup 30m / flap ≥4/h / dead-letter / skip-keys) → persist state in `CHIP_CHAT_DATA_DIR/monitor_state.json` + latest receipt in `CHIP_CHAT_DATA_DIR/monitoring/latest.json`.
-- **DARK discipline (hard):** log/state only. No Discord posts, no delegate hops, no chip room calls, no tool executions from this module. Fixer wakes are Phase B+ and still require Ally ack per id:auto-heal.
+- **Tell-tier (health):** actionable/dead-letter health faults may post one line to `#chip-dev` (`CHIP_WEBHOOK_DEV`) with verify-twice + 4h cooldown — no agent turns, no tool runs from the feed.
+- **P2 homelab slice:** read-only wg/downloads/qBit probes (`CHIP_FEED_HOMELAB=1`); Discord wake for those faults requires **`CHIP_FEED_HOMELAB_WAKE=1` (Ally GO)**. Details: `docs/CHIP_MONITOR_P2.md`.
 - Env: `CHIP_FEED_TARGETS` (add `name=port` pairs), `CHIP_FEED_HOST` (default `host.docker.internal`).
 
 ## handoff (transfer)

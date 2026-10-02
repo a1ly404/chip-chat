@@ -291,6 +291,14 @@ class _RecordingWebhook:
         return type("R", (), {"status": self.status})()
 
 
+def test_post_alerts_health_ok_without_homelab_wake_go(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
+    monkeypatch.delenv("CHIP_FEED_HOMELAB_WAKE", raising=False)
+    monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
+    hook = _RecordingWebhook()
+    assert monitor_feed.post_alerts(_receipt_actionable(), environ=dict(os.environ), webhook=hook) == 1
+
+
 def test_post_alerts_posts_new_fingerprint(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CHIP_FEED_ENABLED", "1")
     monkeypatch.setenv("CHIP_WEBHOOK_DEV", "https://example.invalid/dev")
