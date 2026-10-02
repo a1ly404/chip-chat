@@ -23,6 +23,7 @@ _PERSONA_DETECT_ORDER = (
     "dev",
 )
 _HOP_OK = re.compile(r"hop-ok[-\w]*", re.IGNORECASE)
+_ORCHESTRATOR_TICK = "orchestrator-tick:"
 
 
 def mock_auth_key() -> dict[str, Any]:
@@ -97,16 +98,24 @@ def mock_completion(model: str, messages: list[dict[str, str]]) -> dict[str, Any
         text = f"[mock Builder] On «{last[:80]}»: implement step 1 with a tiny CLI proof."
     else:
         persona = _detect_persona(system)
-        delegate_line = _delegate_line_from_user(last)
-        if delegate_line is not None:
-            label = _persona_label(persona or "pm")
-            text = f"[mock {label}] on it.\n{delegate_line}"
-        elif persona in _SPECIALISTS:
-            text = _specialist_reply(persona, last)
-        elif persona:
-            text = f"[mock {_persona_label(persona)}] got it."
+        if persona == "pm" and _ORCHESTRATOR_TICK in last:
+            text = (
+                "claim: orchestrator closed specialist slice\n"
+                "status: done\n"
+                "evidence: RAZ-16\n"
+                "next: none"
+            )
         else:
-            text = "[mock Chip] got it."
+            delegate_line = _delegate_line_from_user(last)
+            if delegate_line is not None:
+                label = _persona_label(persona or "pm")
+                text = f"[mock {label}] on it.\n{delegate_line}"
+            elif persona in _SPECIALISTS:
+                text = _specialist_reply(persona, last)
+            elif persona:
+                text = f"[mock {_persona_label(persona)}] got it."
+            else:
+                text = "[mock Chip] got it."
 
     return {
         "id": "chip-mock-completion",

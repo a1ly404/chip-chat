@@ -27,6 +27,9 @@ def test_config_pm_hub_interface_and_swarm_mothballed() -> None:
     assert cfg["delegate"]["no_agent_to_agent_reply_chains"] is True
     assert cfg["swarm"]["mothballed"] is True
     assert cfg["relay"]["auto_multi_persona_fanout"] is False
+    orch = cfg.get("pm_orchestrator") or {}
+    assert orch.get("enabled_default") is False
+    assert topology.pm_orchestrator_tick_enabled({}) is False
 
 
 def test_delegate_hop_cap_matches_config_and_at_most_three() -> None:

@@ -91,7 +91,7 @@ pm: frame the slice for Ally
 
 ### Inject without Discord (automation / CI)
 
-`inject` loads **Infisical runtime secrets** the same way as `--listen` (`apply_runtime_secrets` in `scripts/chip_relay/startup.py`), then runs one `handle_message` turn:
+`inject` loads **Infisical runtime secrets** the same way as `--listen` (`apply_runtime_secrets` in `scripts/chip_relay/startup.py`), except **`--mock` skips Infisical** (local/CI smoke with `CHIP_WEBHOOK_*` set). Then one `handle_message` turn:
 
 ```bash
 # Mock — no OpenRouter spend; webhook URL still required in env for dispatch
@@ -119,6 +119,8 @@ delegate:<persona> <task>
 Example: `delegate:chipchatdev run pytest on relay delegate tests`. Relay posts the primary reply under the **source** persona’s webhook `username`, logs `relay_handoff` to `threads/<room>.jsonl`, then runs **one** follow-up `chip room` as `<persona>` with `<task>` as `-m`. The specialist posts **its own** receipt on the **same** `#chip-dev` webhook with `username=<specialist>`, then **stops** — **no agent↔agent reply chains**. Nested `delegate:` in the same dispatch completion is **not** chained; policy forbids ping-pong threads ([docs/CHIP_RELAY.md](docs/CHIP_RELAY.md)).
 
 **Hop cap:** At most **3** nested delegate hops **per handoff chain** (resets on each **human or inject-bot** turn). A fourth `delegate:` is refused with `[chip-relay] ERROR: delegate hop cap (3)` (`MAX_DELEGATE_HOPS` in `scripts/chip_relay/delegate.py`).
+
+**PM orchestrator tick (v1, default off):** After a specialist delegate receipt, relay may schedule **one** follow-up as **pm** only (`CHIP_RELAY_PM_ORCHESTRATOR=1`). Job board under `jobs/<room>/<id>.json`; see `docs/plans/pm-orchestrator-v1.md` and `docs/CHIP_RELAY.md`. Not swarm; not agent reply chains.
 
 **Topology (binding):** **PM hub** + visible `#chip-dev` (one webhook, distinct usernames) — **not** trio/swarm or multi-agent coherence. Collab harnesses are **mothballed** (`config/chip_topology.json`; `scripts/chip/topology.py`). RAZ-337 failure mode: agent chains + false Done.
 
@@ -249,6 +251,14 @@ docker compose exec chip-relay python3 -c \
 ```bash
 pip install -e '.[dev]'
 python3 -m pytest scripts/test_chip_relay_delegate.py scripts/test_chip_relay_gateway.py -q
+```
+
+**Mock orchestrator path (flag on):**
+
+```bash
+export CHIP_WEBHOOK_DEV=https://example.invalid/dev
+export CHIP_RELAY_PM_ORCHESTRATOR=1
+CHIP_CHAT_MOCK=1 ./bin/chip-relay inject --as-ally -m "GO: delegate chipchatdev hop-ok-chipchatdev" --mock
 ```
 
 ---

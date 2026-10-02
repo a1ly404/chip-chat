@@ -140,9 +140,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inject":
         from chip_relay.inject import run_inject
 
-        secret_rc = apply_runtime_secrets()
-        if secret_rc is not None:
-            return secret_rc
+        if not args.mock:
+            secret_rc = apply_runtime_secrets()
+            if secret_rc is not None:
+                return secret_rc
         return run_inject(
             room_id=args.room,
             message=args.message,

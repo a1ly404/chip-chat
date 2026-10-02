@@ -107,3 +107,18 @@ def enforce_ops_ab_arm(arm: str) -> None:
 def relay_auto_fanout_enabled() -> bool:
     relay = load().get("relay") or {}
     return bool(relay.get("auto_multi_persona_fanout", False))
+
+
+def pm_orchestrator_tick_enabled(environ: dict[str, str] | None = None) -> bool:
+    """True when relay may schedule one pm tick after a specialist receipt."""
+    block = load().get("pm_orchestrator") or {}
+    if not block.get("tick_after_specialist_receipt", True):
+        return False
+    key = str(block.get("unlock_env") or "CHIP_RELAY_PM_ORCHESTRATOR")
+    env = environ if environ is not None else os.environ
+    val = (env.get(key) or "").strip().lower()
+    if val in {"1", "true", "yes", "on"}:
+        return True
+    if val in {"0", "false", "off", "no"}:
+        return False
+    return bool(block.get("enabled_default", False))

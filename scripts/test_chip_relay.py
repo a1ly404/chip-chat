@@ -129,6 +129,16 @@ def test_inject_main_fetches_runtime_secrets_before_dispatch(monkeypatch: pytest
 
     code = main(["inject", "-m", "hi", "--as-ally", "--mock"])
     assert code == 0
+    assert order == ["inject"]
+
+    order.clear()
+
+    def fake_apply() -> None:
+        order.append("fetch")
+        return None
+
+    monkeypatch.setattr("chip_relay.startup.apply_runtime_secrets", fake_apply)
+    main(["inject", "-m", "hi", "--as-ally"])
     assert order == ["fetch", "inject"]
 
 

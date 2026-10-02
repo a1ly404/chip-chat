@@ -51,6 +51,24 @@ delegate:<persona> <task>
 
 Example: `delegate:chipchatdev fix the flake in chip-selftest` (or `delegate:buffrdev …` / `homelabdev` / `opsdev` for those charters). The persona id must exist in `config/chip_chat_personas.json` (same ids as `--as`). Relay posts the primary reply under the source persona's webhook username, logs the handoff to `threads/<room>.jsonl` (`role=relay`, `relay_handoff` metadata with `hop`), then runs one follow-up shot as `<persona>` with `<task>` as `-m` (`--turn-limit 1` each). Nested `delegate:` lines in the follow-up reply are **not** processed in the same dispatch; the next hop is handled when that persona's webhook posts `delegate:…`. At most **3** nested delegate hops **per handoff chain** (reset on each human or inject-bot turn); a fourth `delegate:` in the same chain is recorded as refused, surfaces `[chip-relay] ERROR: delegate hop cap (3)` in-channel, and does not call chip.
 
+### PM orchestrator tick (optional, default off)
+
+Design: `docs/plans/pm-orchestrator-v1.md`. After a **specialist** delegate receipt is posted, relay may run **one** extra `chip room` as **`pm`** (“orchestrator tick”) so pm can mark Done, queue the next job slice, or escalate — without Ally mid-hop. This is **not** a delegate hop and **not** swarm unlock.
+
+- Flag: `CHIP_RELAY_PM_ORCHESTRATOR=1` (config `pm_orchestrator.enabled_default` is **false**).
+- Job board: `$CHIP_CHAT_DATA_DIR/jobs/<room>/<id>.json` — `./bin/chip job create|list|show`.
+- Inject summary includes `orchestrator_ticks=` when enabled.
+
+**Ally → pm → delegate → specialist receipt → pm Done (mock):**
+
+```bash
+export CHIP_WEBHOOK_DEV=https://example.invalid/dev
+export CHIP_RELAY_PM_ORCHESTRATOR=1
+CHIP_CHAT_MOCK=1 ./bin/chip job create dev --goal "slice" --acceptance "pm done" --stop "inject" --job-id mock01
+CHIP_CHAT_MOCK=1 ./bin/chip-relay inject --as-ally -m "GO: delegate chipchatdev hop-ok-chipchatdev" --mock
+# stdout: chip_calls=3 delegate_hops=1 orchestrator_ticks=1
+```
+
 ### Wake a persona (@mention / `persona:`)
 
 In addition to speaker-map defaults, the **first line** of an inbound human or inject-bot message can wake a specific persona:

@@ -6,6 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from chip import config, store
@@ -110,6 +111,7 @@ class DispatchResult:
     webhook_calls: int = 0
     logs: list[str] = field(default_factory=list)
     delegate_hops: int = 0
+    orchestrator_ticks: int = 0
 
 
 def _fail(logs: list[str], alert: str, chip_calls: int = 0) -> DispatchResult:
@@ -177,6 +179,47 @@ def log_delegate_handoff(
         if reason:
             extra["relay_handoff"]["reason"] = reason
     store.log_message(room_id, "relay", content, agent=from_persona, extra=extra)
+
+
+def _maybe_pm_orchestrator_tick(
+    room: RoomBinding,
+    *,
+    specialist: str,
+    specialist_receipt: str,
+    chip,
+    webhook,
+    environ: dict[str, str],
+    url: str,
+    record,
+    logs: list[str],
+) -> tuple[int, int, int, str]:
+    """Returns (chip_calls, webhook_calls, orchestrator_ticks, alert)."""
+    from chip_relay.orchestrator import (
+        orchestrator_tick_enabled,
+        run_orchestrator_tick,
+        should_tick_after_specialist,
+    )
+
+    if not orchestrator_tick_enabled(environ):
+        return 0, 0, 0, ""
+    if not should_tick_after_specialist(specialist):
+        return 0, 0, 0, ""
+    ok, alert, extra_chip, extra_webhook = run_orchestrator_tick(
+        room,
+        specialist=specialist,
+        specialist_receipt=specialist_receipt,
+        chip=chip,
+        webhook=webhook,
+        environ=environ,
+        url=url,
+        record=record,
+        chip_timeout=CHIP_TIMEOUT_S,
+    )
+    if not ok:
+        logs.append(alert or "orchestrator tick failed")
+        return extra_chip, extra_webhook, 0, alert
+    logs.append(f"orchestrator tick pm after {specialist}")
+    return extra_chip, extra_webhook, 1, ""
 
 
 def _run_chip_shot(
@@ -294,12 +337,28 @@ def handle_inbound_delegate(
         record(room.id, posted_body, request.persona)
     logs.append(f"delegated {from_persona} -> {request.persona} hop={next_hop}")
     logs.append(f"posted {request.persona} to {room.discord_channel}")
+    orchestrator_ticks = 0
+    extra_chip, extra_webhook, orchestrator_ticks, tick_alert = _maybe_pm_orchestrator_tick(
+        room,
+        specialist=request.persona,
+        specialist_receipt=follow_reply or "",
+        chip=chip,
+        webhook=webhook,
+        environ=environ,
+        url=url,
+        record=record,
+        logs=logs,
+    )
+    chip_calls += extra_chip
+    webhook_calls += extra_webhook
     return DispatchResult(
-        ok=True,
+        ok=tick_alert == "",
+        alert=tick_alert,
         chip_calls=chip_calls,
         webhook_calls=webhook_calls,
         logs=logs,
         delegate_hops=delegate_hops,
+        orchestrator_ticks=orchestrator_ticks,
     )
 
 
@@ -374,6 +433,7 @@ def handle_message(
         record(room.id, posted_body, persona)
 
     delegate_hops = 0
+    orchestrator_ticks = 0
     request = parse_delegate(reply)
     cap_alert = f"delegate hop cap ({MAX_DELEGATE_HOPS})"
     if request is not None:
@@ -425,6 +485,29 @@ def handle_message(
             if record is not None:
                 record(room.id, posted_body, request.persona)
             logs.append(f"delegated {persona} -> {request.persona} hop={next_hop}")
+            extra_chip, extra_webhook, orchestrator_ticks, tick_alert = _maybe_pm_orchestrator_tick(
+                room,
+                specialist=request.persona,
+                specialist_receipt=follow_reply or "",
+                chip=chip,
+                webhook=webhook,
+                environ=environ,
+                url=url,
+                record=record,
+                logs=logs,
+            )
+            chip_calls += extra_chip
+            webhook_calls += extra_webhook
+            if tick_alert:
+                return DispatchResult(
+                    ok=False,
+                    alert=tick_alert,
+                    chip_calls=chip_calls,
+                    webhook_calls=webhook_calls,
+                    logs=logs,
+                    delegate_hops=delegate_hops,
+                    orchestrator_ticks=orchestrator_ticks,
+                )
 
     logs.append(f"posted {persona} to {incoming.channel}")
     hop_cap_alert = cap_alert if request is not None and refused else ""
@@ -435,4 +518,5 @@ def handle_message(
         webhook_calls=webhook_calls,
         logs=logs,
         delegate_hops=delegate_hops,
+        orchestrator_ticks=orchestrator_ticks,
     )

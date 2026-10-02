@@ -70,6 +70,7 @@ def run_inject(
         return 5
     print(
         f"inject ok room={room_id} author_id={resolved_author} chip_calls={result.chip_calls} "
-        f"delegate_hops={result.delegate_hops} monthly_usd={monthly}"
+        f"delegate_hops={result.delegate_hops} orchestrator_ticks={result.orchestrator_ticks} "
+        f"monthly_usd={monthly}"
     )
     return 0

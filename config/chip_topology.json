@@ -51,5 +51,11 @@
   "relay": {
     "turn_limit": 1,
     "auto_multi_persona_fanout": false
+  },
+  "pm_orchestrator": {
+    "enabled_default": false,
+    "unlock_env": "CHIP_RELAY_PM_ORCHESTRATOR",
+    "tick_after_specialist_receipt": true,
+    "description": "After a specialist delegate receipt, relay may run one pm orchestrator tick (not a delegate hop). Separate from swarm unlock."
   }
 }

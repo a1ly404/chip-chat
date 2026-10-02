@@ -761,6 +761,44 @@ def cmd_task_run(args: argparse.Namespace) -> int:
     return 0 if ok else 4
 
 
+def cmd_job_create(args: argparse.Namespace) -> int:
+    from chip import jobs
+
+    doc = jobs.create_job(
+        args.room,
+        owner_persona=args.owner,
+        goal=args.goal,
+        acceptance=args.acceptance,
+        stop=args.stop,
+        job_id=args.job_id or None,
+    )
+    if args.json:
+        print(json.dumps(doc, ensure_ascii=False))
+    else:
+        print(f"job {doc['id']} room={args.room} status={doc['status']}")
+    return 0
+
+
+def cmd_job_show(args: argparse.Namespace) -> int:
+    from chip import jobs
+
+    try:
+        doc = jobs.load_job(args.room, args.job_id)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(doc, ensure_ascii=False))
+    return 0
+
+
+def cmd_job_list(args: argparse.Namespace) -> int:
+    from chip import jobs
+
+    rows = jobs.list_jobs(args.room, status=args.status)
+    print(json.dumps(rows, ensure_ascii=False))
+    return 0
+
+
 def cmd_board_show(args: argparse.Namespace) -> int:
     from chip import boards
 
@@ -789,6 +827,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     spend_p = sub.add_parser("spend", parents=[common], help="Spend ledger + auth/key usage (no secrets)")
     spend_p.set_defaults(func=cmd_spend)
+
+    job_p = sub.add_parser("job", help="PM orchestrator job board")
+    job_sub = job_p.add_subparsers(dest="job_cmd", required=True)
+    job_create = job_sub.add_parser("create", parents=[common], help="Create a job slice")
+    job_create.add_argument("room")
+    job_create.add_argument("--owner", default="pm", help="Owner persona (default pm)")
+    job_create.add_argument("--goal", required=True)
+    job_create.add_argument("--acceptance", required=True)
+    job_create.add_argument("--stop", required=True)
+    job_create.add_argument("--job-id", default="", help="Optional fixed id (smoke)")
+    job_create.add_argument("--json", action="store_true")
+    job_create.set_defaults(func=cmd_job_create)
+    job_show = job_sub.add_parser("show", parents=[common], help="Show one job JSON")
+    job_show.add_argument("room")
+    job_show.add_argument("job_id")
+    job_show.set_defaults(func=cmd_job_show)
+    job_list = job_sub.add_parser("list", parents=[common], help="List jobs in a room")
+    job_list.add_argument("room")
+    job_list.add_argument("--status", default=None, help="Filter by status")
+    job_list.set_defaults(func=cmd_job_list)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)
