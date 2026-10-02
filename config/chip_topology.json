@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "verified_as_of": "2026-09-30T19:30:00Z",
+  "source_doc": "docs/plans/topology-verdict.md",
+  "default_topology": "pm_hub",
+  "one_persona_per_go": true,
+  "interface": {
+    "human_talks_to": "pm",
+    "ally_inject_maps_to": "pm",
+    "pm_executes_and_posts_receipt_as_pm": true,
+    "description": "Ally/human addresses PM only. PM owns the GO turn and posts the four-line receipt under webhook username pm unless a charter delegate fires."
+  },
+  "specialists": {
+    "are_charters_and_path_denies_only": true,
+    "not_a_second_conversation": true,
+    "persona_ids": ["buffrdev", "homelabdev", "opsdev", "chipchatdev"],
+    "description": "Specialists are lane charters + tool/path limits — not a parallel chat room or agents agreeing with each other."
+  },
+  "visible_room": {
+    "shared_channel": "chip-dev",
+    "one_webhook_url_per_room": true,
+    "distinct_username_per_persona": true,
+    "goal_is_human_visibility_not_agent_coherence": true,
+    "raz_337_failure_mode": "agent_to_agent_reply_chains_and_false_done",
+    "description": "One Discord channel, one webhook, different username= per persona — visibility for Ally, not multi-agent coherence."
+  },
+  "swarm": {
+    "mothballed": true,
+    "description": "Multi-persona collab rounds (trio brainstorm/critique/converge, collab_ab, ops A/B trio arm). Agent↔agent agreement chains — not the interface.",
+    "min_participants": 2,
+    "unlock_env": "CHIP_TOPOLOGY_SWARM_GO"
+  },
+  "ops_ab_harness": {
+    "mothballed": true,
+    "description": "RAZ-335 live ops solo/trio A/B — Ally mothball 2026-09-29; session cap disarmed.",
+    "trio_requires_swarm_unlock": true
+  },
+  "collab_ab": {
+    "mothballed": true,
+    "description": "Offline mock A/B harness in chip.collab_ab.run_ab — includes trio arm."
+  },
+  "delegate": {
+    "enabled": true,
+    "charter_cross_lane_only": true,
+    "one_explicit_hop_at_a_time": true,
+    "max_hops_per_chain": 3,
+    "specialist_posts_own_receipt_then_stops": true,
+    "no_agent_to_agent_reply_chains": true,
+    "description": "delegate: only when another lane's charter owns the files. Relay runs one follow-up chip room per hop; specialist posts receipt on the same #chip-dev webhook with username=<persona>, then stops — no ping-pong threads between agents."
+  },
+  "relay": {
+    "turn_limit": 1,
+    "auto_multi_persona_fanout": false
+  }
+}

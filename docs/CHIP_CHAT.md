@@ -8,6 +8,8 @@ Runs on **WSL2 Ubuntu** or native **Ubuntu** with Python 3.11+ and bash. No razz
 
 Lanes constrain hands, not minds. Any persona may reason about any lane in the room. Execution stays pinned to that persona’s root and the global denies. A collaboration chair is conversational authority only: the same lanes, the same tool tiers, and the same GO gates, with no extra permission to run tools.
 
+**Topology (binding — PM hub):** Ally talks **only to `pm`**; PM posts the GO receipt as `pm`. Specialists (`chipchatdev`, `homelabdev`, …) are **charters + path denies**, not a second conversation. `delegate:` only for cross-charter file ownership — one hop at a time, cap 3; specialist posts its receipt on the same `#chip-dev` webhook with a different `username`, then stops (no agent↔agent chains). **Visible room ≠ multi-agent coherence** (RAZ-337). Config: `config/chip_topology.json`; enforcement: `scripts/chip/topology.py`. Trio/swarm harnesses **mothballed** unless `CHIP_TOPOLOGY_SWARM_GO=1` under ticket law. See [docs/plans/topology-verdict.md](plans/topology-verdict.md).
+
 ## Install (WSL / Ubuntu)
 
 ```bash

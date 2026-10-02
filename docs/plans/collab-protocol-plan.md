@@ -4,6 +4,8 @@ Base: `main` at `4c247d1` (`4c247d19356e65229e3c927e5a4dcf2c8c725367`), pull req
 Suite baseline: **433 passed / 1 skipped**. It must stay green and grow.
 Branch: `chipchatdev/collab-protocol`. Slices A–E are draft PRs stacked on this plan commit. Nothing in those PRs merges to `main`.
 
+**Topology lock (Ally 2026-09-30):** **PM hub** is binding — Ally → `pm` only; specialists are charters, not agent conversations ([`topology-verdict.md`](topology-verdict.md), `config/chip_topology.json`). Multi-persona collab (`begin_brainstorm` with ≥2 participants), `collab_ab.run_ab`, and ops A/B trio arms are **mothballed** unless `CHIP_TOPOLOGY_SWARM_GO=1` plus GO ticket law. Visible `#chip-dev` ≠ multi-agent coherence (RAZ-337). This spec is historical contract only.
+
 This file is the spec. Behavior not named here is out of scope. Mid-flight deviations are named in the PR body.
 
 Substrate reused from #101 (`scripts/chip/boards.py`): `protocol_turn` (unchanged), `reveal_all`, `seal_entry`, flock + version CAS, schema 1, last-match-wins, `boards/` mutation law.

@@ -33,6 +33,9 @@ def _norm_body(body: str) -> str:
 
 def begin_brainstorm(room: str, goal: str, participants: list[str], go_ticket: str | None = None) -> dict[str, Any]:
     require_protocol_go(go_ticket)
+    from chip import topology
+
+    topology.enforce_swarm_allowed(len(participants))
     if not participants:
         raise ValueError("participants required")
     board = _board(room)

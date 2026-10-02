@@ -11,6 +11,7 @@ from chip import collab
 def data(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-335")
+    monkeypatch.setenv("CHIP_TOPOLOGY_SWARM_GO", "1")
     return tmp_path
 
 

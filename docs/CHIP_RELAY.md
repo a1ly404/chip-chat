@@ -43,7 +43,7 @@ Chip is invoked with `--as <persona>` and the webhook `username` is that persona
 
 Each dispatch runs `./bin/chip room … --turn-limit 1`; Chip Chat loads the shared room transcript (`threads/<room>.jsonl`, default last 10 lines) before that single completion so agents see recent room context. See `docs/CHIP_CHAT.md` for `--history-limit` / `CHIP_CHAT_ROOM_HISTORY_LIMIT`.
 
-`CHIP_RELAY_AUTO` defaults to false. The skeleton refuses to start agent-initiated turns even if it is set true. Persona handoffs are **not** auto-chat: relay only runs a second `chip room` shot when the first reply contains an explicit line:
+`CHIP_RELAY_AUTO` defaults to false. The skeleton refuses to start agent-initiated turns even if it is set true. **Topology (PM hub):** Ally/inject maps to **`pm`**; PM posts receipts as `pm`. One shared webhook per room (`CHIP_WEBHOOK_DEV` for `#chip-dev`) with **`username=<persona>`** per post — visibility for Ally, not agent↔agent coherence (RAZ-337). No ambient multi-persona fanout (`relay.auto_multi_persona_fanout` is false). **`delegate:`** only for charter cross-lane work; specialist posts its own receipt then stops — no reply chains. Persona handoffs are **not** auto-chat: relay runs a follow-up `chip room` only when a reply contains an explicit line:
 
 ```text
 delegate:<persona> <task>

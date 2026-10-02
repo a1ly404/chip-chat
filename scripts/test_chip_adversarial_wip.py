@@ -16,6 +16,7 @@ from chip import collab
 @pytest.fixture(autouse=True)
 def go_env(monkeypatch):
     monkeypatch.setenv("CHIP_LANE_GO_TICKET", "RAZ-335")
+    monkeypatch.setenv("CHIP_TOPOLOGY_SWARM_GO", "1")
     yield
 
 

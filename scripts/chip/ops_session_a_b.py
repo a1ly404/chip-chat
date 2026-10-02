@@ -178,6 +178,9 @@ def run_solo(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
 
 def run_trio(repo_root: Path, spend: SpendTracker, log: TranscriptLogger,
              go_token: str, room: str = "ab_trio", arm_scope: str = "RAZ-335-ops-ab-trio") -> dict:
+    from chip import topology
+
+    topology.enforce_ops_ab_arm("trio")
     if is_live() and not go_token:
         raise RuntimeError("live arm refused: empty GO token (gate threading law)")
     collab = _maybe_collab()
@@ -278,6 +281,13 @@ def main(argv: list[str]) -> int:
                    help="permit protocol board mutation in mock mode "
                         "(still refuses if collab is absent).")
     args = p.parse_args(argv)
+    from chip import topology
+
+    try:
+        topology.enforce_ops_ab_arm(args.arm)
+    except PermissionError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 5
     if args.score is not None:
         print(json.dumps(score_arm(args.score)))
         return 0

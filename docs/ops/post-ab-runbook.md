@@ -46,6 +46,8 @@ Facts below are the **actual** live ops A/B outcome (not only the predicted flow
 
 ## Mothball (chosen)
 
+Encoded in repo: `config/chip_topology.json` and [`docs/plans/topology-verdict.md`](../plans/topology-verdict.md) (PM hub interface; trio/swarm refuse unless `CHIP_TOPOLOGY_SWARM_GO=1` under ticket law).
+
 Ally confirmed mothball for this session. Consequences:
 
 - **Do not** disable monthly spend gates (`$5` WARN / `$10` refuse) or lane denies.

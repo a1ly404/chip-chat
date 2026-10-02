@@ -12,6 +12,7 @@ This file is for **non-human operators**: OpenCode, Go bots, Cursor Cloud Agents
 | Infisical / Discord ids | [docs/SECRETS.md](docs/SECRETS.md) |
 | Hyper-V Docker relay | [docs/DOCKER.md](docs/DOCKER.md) |
 | Phase history | [docs/SPRINT_LOG.md](docs/SPRINT_LOG.md) |
+| Topology (PM hub, mothballed trio/swarm) | [docs/plans/topology-verdict.md](docs/plans/topology-verdict.md) · `config/chip_topology.json` |
 
 ---
 
@@ -103,17 +104,23 @@ CHIP_CHAT_MOCK=1 ./bin/chip-relay inject --as-ally -m "GO: validation ping" --mo
 
 `--as-ally` uses snowflake `187044496872046592` → `pm`. Alternative: `--as-author-id <snowflake>` or `CHIP_RELAY_INJECT_AUTHOR_ID`.
 
-### Delegate handoffs (agent → agent)
+### PM hub (human interface)
 
-Agents emit a **single line** in the reply:
+Ally talks **only to `pm`** (inject `--as-ally` → `pm`). PM runs the GO and posts the receipt under **`username=pm`**. Specialists are **charters + path denies**, not a parallel conversation. See [docs/plans/topology-verdict.md](docs/plans/topology-verdict.md).
+
+### Delegate handoffs (charter cross-lane only)
+
+Use **`delegate:`** only when another lane’s charter owns the files. Agents emit **one line**:
 
 ```text
 delegate:<persona> <task>
 ```
 
-Example: `delegate:chipchatdev run pytest on relay delegate tests`. Relay posts the primary reply under the **source** persona’s webhook `username`, logs `relay_handoff` to `threads/<room>.jsonl`, then runs **one** follow-up `chip room` as `<persona>` with `<task>` as `-m`. Nested `delegate:` in the same dispatch completion is **not** chained; the next hop happens when that persona’s webhook posts `delegate:…` ([docs/CHIP_RELAY.md](docs/CHIP_RELAY.md)).
+Example: `delegate:chipchatdev run pytest on relay delegate tests`. Relay posts the primary reply under the **source** persona’s webhook `username`, logs `relay_handoff` to `threads/<room>.jsonl`, then runs **one** follow-up `chip room` as `<persona>` with `<task>` as `-m`. The specialist posts **its own** receipt on the **same** `#chip-dev` webhook with `username=<specialist>`, then **stops** — **no agent↔agent reply chains**. Nested `delegate:` in the same dispatch completion is **not** chained; policy forbids ping-pong threads ([docs/CHIP_RELAY.md](docs/CHIP_RELAY.md)).
 
-**Hop cap:** At most **3** nested delegate hops **per handoff chain** (resets on each **human or inject-bot** turn — not a lifetime room total). A fourth `delegate:` in the same chain is refused, logged, and relay posts in-channel: `[chip-relay] ERROR: delegate hop cap (3)` without calling chip ([docs/CHIP_RELAY.md](docs/CHIP_RELAY.md), `MAX_DELEGATE_HOPS` in `scripts/chip_relay/delegate.py`).
+**Hop cap:** At most **3** nested delegate hops **per handoff chain** (resets on each **human or inject-bot** turn). A fourth `delegate:` is refused with `[chip-relay] ERROR: delegate hop cap (3)` (`MAX_DELEGATE_HOPS` in `scripts/chip_relay/delegate.py`).
+
+**Topology (binding):** **PM hub** + visible `#chip-dev` (one webhook, distinct usernames) — **not** trio/swarm or multi-agent coherence. Collab harnesses are **mothballed** (`config/chip_topology.json`; `scripts/chip/topology.py`). RAZ-337 failure mode: agent chains + false Done.
 
 ### Long messages and `message.txt`
 

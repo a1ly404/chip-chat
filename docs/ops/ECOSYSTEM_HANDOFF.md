@@ -50,6 +50,8 @@ The transcript stores the gated body (`CHIP_STORE_GATED=1` in `scripts/chip_rela
 
 Scoped GO: deploy and absorb need `fp=` `lane=` `exp=` with a future timestamp matching the ticket (`scripts/chip/go_scope.py`). Bare `GO` is not enough for those words. Example shape: `GO: al-9501 fp=al-9501 lane=razzorstack exp=<ISO-8601 Z>`.
 
+**Topology (binding — PM hub):** Ally talks only to `pm`; specialists are charters, not a second chat. Same `#chip-dev` webhook, different `username=` for visibility — not agent↔agent coherence (RAZ-337). `config/chip_topology.json` + `docs/plans/topology-verdict.md`. Trio/swarm mothballed; `delegate:` charter-only, cap 3.
+
 Runbook classes in `config/chip_chat/runbooks.json` (unknown ids fail closed to propose):
 
 | Class | Ids |
