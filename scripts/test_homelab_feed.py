@@ -14,7 +14,14 @@ _NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
 def _runner(mapping):
     def run(argv):
         homelab_probes.assert_read_argv(argv)
-        return mapping.get(tuple(argv), (127, "", "unreachable: missing"))
+        key = tuple(argv)
+        if key in mapping:
+            return mapping[key]
+        if key == tuple(homelab_probes.WG_ROUTE_ARGV):
+            return (0, "default dev wg0\n", "")
+        if key in (tuple(homelab_probes.WG_IPTABLES_ARGV), tuple(homelab_probes.WG_IP6TABLES_ARGV)):
+            return (0, "", "")
+        return (127, "", "unreachable: missing")
     return run
 
 
@@ -40,6 +47,9 @@ def test_read_tools_are_narrow() -> None:
     for banned in (" run", " rm", "compose", "restart"):
         assert banned not in f" {wg_blob}"
     assert by_id["wg-show"]["argv"][:5] == ["docker", "exec", "wireguard", "wg", "show"]
+    assert by_id["wg-route"]["argv"] == homelab_probes.WG_ROUTE_ARGV
+    assert by_id["wg-iptables-drop"]["argv"] == homelab_probes.WG_IPTABLES_ARGV
+    assert by_id["wg-ip6tables-drop"]["argv"] == homelab_probes.WG_IP6TABLES_ARGV
 
 
 def test_runbook_classes_unchanged() -> None:
@@ -175,6 +185,43 @@ def test_feed_posts_four_line_once_per_cooldown(monkeypatch, tmp_path: Path) -> 
     assert len(posted[0].splitlines()) == 4
     n2 = monitor_feed.post_alerts(receipt, webhook=hook, now=1_100.0, only_fps=None)
     assert n2 == 0
+
+
+def test_killswitch_faults_when_route_or_drop_missing() -> None:
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
+            tuple(homelab_probes.WG_ROUTE_ARGV): (0, "default via 192.168.1.1 dev eth0\n", ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}]}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    hit = [a for a in alerts if a["key"] == "wg-killswitch"]
+    assert hit
+    assert "not-wg0" in str(hit[0]["receipt"])
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
+            tuple(homelab_probes.WG_IPTABLES_ARGV): (1, "", "Bad rule"),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}]}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    hit = [a for a in alerts if a["key"] == "wg-killswitch"]
+    assert hit and "missing-drop" in str(hit[0]["receipt"])
+    assert homelab_probes.is_homelab_feed_alert(hit[0])
 
 
 def test_is_homelab_feed_alert_classifies_keys() -> None:

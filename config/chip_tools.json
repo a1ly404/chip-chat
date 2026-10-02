@@ -81,6 +81,27 @@
       "description": "Read-only wg show via docker exec wireguard (wg0 is not in relay netns). Stale handshake threshold is 180s in the feed. No mutations."
     },
     {
+      "id": "wg-route",
+      "argv": ["docker", "exec", "wireguard", "ip", "-4", "route", "show", "default"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only default route inside wireguard. Fault when it is not dev wg0. No mutations."
+    },
+    {
+      "id": "wg-iptables-drop",
+      "argv": ["docker", "exec", "wireguard", "iptables", "-C", "WGKS_OUT", "-o", "eth0", "-j", "DROP"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only iptables -C for the eth0 DROP rule. No mutations."
+    },
+    {
+      "id": "wg-ip6tables-drop",
+      "argv": ["docker", "exec", "wireguard", "ip6tables", "-C", "WGKS6_OUT", "-o", "eth0", "-j", "DROP"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only ip6tables -C for the eth0 DROP rule. No mutations."
+    },
+    {
       "id": "task-show",
       "argv": ["python3", "-m", "chip", "task", "show"],
       "risk": "low",
