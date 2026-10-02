@@ -88,6 +88,14 @@
       "description": "Show a task envelope by id (requires task id as first extra arg)"
     },
     {
+      "id": "airvpn-portal-scrape",
+      "audience": "read-only",
+      "argv": ["python3", "-m", "chip.airvpn_portal"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "READ-ONLY: attach to local Chrome CDP (127.0.0.1 only) and scrape AirVPN client-area port/exit text into a JSON receipt. Not tier-1 destructive; no portal clicks/Save/rebind; no credentials."
+    },
+    {
       "id": "razzorstack-diagnose",
       "argv": ["python3", "scripts/airvpn_port_health.py", "--diagnose-only"],
       "risk": "medium",
