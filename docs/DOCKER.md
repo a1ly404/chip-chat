@@ -28,7 +28,7 @@ docker compose up -d --no-build --force-recreate chip-relay
 
 Use `--no-build` when the host already has the `chip-relay:latest` tag you built elsewhere. Optional operator stamp: write `BUILD_SHA.txt` at the repo root on the host with the git commit you deployed (not baked into the image today).
 
-Homelab feed env (`CHIP_FEED_HOMELAB`, `CHIP_FEED_DOWNLOADS`, optional `CHIP_FEED_QB_URL`) is documented in `docs/CHIP_MONITOR_P2.md`. `/downloads` is **not** a required volume mount — when absent, `downloads-df` stays a **blocked** receipt instead of preventing recreate (see PR #145). Homelab faults post to `#chip-dev` only after **`CHIP_FEED_HOMELAB_WAKE=1`** (Ally GO).
+Homelab feed env (`CHIP_FEED_HOMELAB`, `CHIP_FEED_DOWNLOADS`, optional `CHIP_FEED_QB_URL`) is documented in `docs/CHIP_MONITOR_P2.md`. On Hyper-V deploy, `docker-compose.yml` mounts the external named volume **`razzor-nas-torrents`** at **`/downloads:ro`** so `CHIP_FEED_DOWNLOADS` can run `statvfs` (same volume qbittorrent uses). The volume must already exist on the Docker host (`external: true`). Homelab faults post to `#chip-dev` only after **`CHIP_FEED_HOMELAB_WAKE=1`** (Ally GO).
 
 ## Data directory
 

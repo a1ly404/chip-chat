@@ -116,7 +116,7 @@ bin/chip-relay inject --as-ally -m "GO: validation ping" --mock
 
 ## Startup
 
-`bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. With `--listen`, boot creds come from `.env` (or the environment), runtime Discord/OpenRouter values are loaded from Infisical, then the live gateway starts. An internal HTTP server answers `GET /health` on port **48082** (env `CHIP_RELAY_HEALTH_PORT`): **503** until Discord `on_ready`, then **200**. Docker deploy: `docs/DOCKER.md`. If Hyper-V leaves the relay container stuck in **Created**, run `./scripts/chip_relay_up.sh` (see **Hyper-V: chip-relay stuck in `Created`** in `docs/DOCKER.md`).
+`bin/chip-relay` loads config, requires `OPENROUTER_CC_API_KEY`, and calls `GET /api/v1/key`. With `--listen`, boot creds come from `.env` (or the environment), runtime Discord/OpenRouter values are loaded from Infisical, then the live gateway starts. An internal HTTP server answers `GET /health` on port **48082** (env `CHIP_RELAY_HEALTH_PORT`): **503** until Discord `on_ready`, then **200**. Docker deploy: `docs/DOCKER.md`. Hyper-V compose mounts external `razzor-nas-torrents` at `/downloads:ro` when `CHIP_FEED_DOWNLOADS` is set (homelab `downloads-df` probe — `docs/CHIP_MONITOR_P2.md`). If Hyper-V leaves the relay container stuck in **Created**, run `./scripts/chip_relay_up.sh` (see **Hyper-V: chip-relay stuck in `Created`** in `docs/DOCKER.md`).
 
 ## Harness
 

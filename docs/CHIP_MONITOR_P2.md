@@ -30,7 +30,7 @@ Unreachable docker/wg/qB API → **`status: blocked`** on the receipt (no crash 
 | `CHIP_FEED_ENABLED` | off in bare metal; `1` in compose | Run feed loop |
 | `CHIP_FEED_HOMELAB` | off | Run read-only homelab probes each tick |
 | `CHIP_FEED_HOMELAB_WAKE` | **off** | Ally GO — allow homelab faults to post to `#chip-dev` |
-| `CHIP_FEED_DOWNLOADS` | `/downloads` | Path for free-space check; absent → blocked `downloads-df` (no NAS bind required in compose) |
+| `CHIP_FEED_DOWNLOADS` | `/downloads` | Path for `statvfs` free-space check; Hyper-V compose mounts external `razzor-nas-torrents` at `/downloads:ro` (see `docker-compose.yml`). Without that mount, `downloads-df` is **blocked** (`FileNotFoundError`). |
 | `CHIP_FEED_QB_URL` | unset | qBittorrent API URL for `connection_status`; unset skips firewalled check |
 | `CHIP_WEBHOOK_DEV` | Infisical | Target webhook for tell-tier posts |
 
