@@ -10,6 +10,26 @@ From the repo root:
 docker build -t chip-relay .
 ```
 
+The image ships a **static Docker CLI client** (no daemon). Compose mounts the host engine socket at `/var/run/docker.sock` read-only so homelab monitor probes (`docker inspect`, `docker logs`, and read-only `docker exec wireguard wg show …`) can run inside the relay without installing the full engine. Verify after build:
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro chip-relay:latest docker version
+```
+
+On a machine without a local engine, `docker version` may still report a client error for the server half; the check is that the `docker` binary exists and can talk to the mounted sock when the daemon is reachable.
+
+### Hyper-V: rebuild on WSL, recreate without rebuild
+
+Build and tag on the WSL tools tree, load or push the image to the Hyper-V host, then from the deploy directory (e.g. `C:\Users\17783\chip-chat`):
+
+```bash
+docker compose up -d --no-build --force-recreate chip-relay
+```
+
+Use `--no-build` when the host already has the `chip-relay:latest` tag you built elsewhere. Optional operator stamp: write `BUILD_SHA.txt` at the repo root on the host with the git commit you deployed (not baked into the image today).
+
+Homelab feed env (`CHIP_FEED_HOMELAB`, `CHIP_FEED_DOWNLOADS`) is documented under compose; `/downloads` is **not** a required volume mount — when absent, `downloads-df` stays a **blocked** receipt instead of preventing recreate (see PR #145).
+
 ## Data directory
 
 Chip Chat ledger and room threads use `CHIP_CHAT_DATA_DIR` when set; otherwise `$HOME/appdata/chip-chat`. The image sets:

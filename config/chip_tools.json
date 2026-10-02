@@ -67,10 +67,18 @@
     },
     {
       "id": "wg-show",
-      "argv": ["wg", "show", "wg0", "latest-handshakes"],
+      "argv": [
+        "docker",
+        "exec",
+        "wireguard",
+        "wg",
+        "show",
+        "wg0",
+        "latest-handshakes"
+      ],
       "risk": "low",
       "allow_extra_args": false,
-      "description": "Read-only wg show wg0 latest-handshakes. Stale handshake threshold is 180s in the feed. No mutations."
+      "description": "Read-only wg show via docker exec wireguard (wg0 is not in relay netns). Stale handshake threshold is 180s in the feed. No mutations."
     },
     {
       "id": "task-show",

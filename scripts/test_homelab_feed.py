@@ -18,17 +18,28 @@ def _runner(mapping):
     return run
 
 
+def test_dockerfile_installs_docker_cli() -> None:
+    text = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    assert "download.docker.com/linux/static" in text
+    assert "/usr/local/bin" in text
+
+
 def test_read_tools_are_narrow() -> None:
     spec = json.loads((REPO / "config" / "chip_tools.json").read_text(encoding="utf-8"))
     by_id = {t["id"]: t for t in spec["tools"]}
     assert by_id["docker-inspect"]["argv"] == homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]
     assert by_id["docker-logs"]["argv"] == homelab_probes.DOCKER_LOGS_ARGV
     assert by_id["wg-show"]["argv"] == homelab_probes.WG_SHOW_ARGV
-    for tid in ("docker-inspect", "docker-logs", "wg-show"):
+    for tid in ("docker-inspect", "docker-logs"):
         assert by_id[tid]["allow_extra_args"] is False
         blob = " ".join(by_id[tid]["argv"])
         for banned in (" run", " rm", "compose", "restart", " exec"):
             assert banned not in f" {blob}"
+    assert by_id["wg-show"]["allow_extra_args"] is False
+    wg_blob = " ".join(by_id["wg-show"]["argv"])
+    for banned in (" run", " rm", "compose", "restart"):
+        assert banned not in f" {wg_blob}"
+    assert by_id["wg-show"]["argv"][:5] == ["docker", "exec", "wireguard", "wg", "show"]
 
 
 def test_runbook_classes_unchanged() -> None:
@@ -172,7 +183,7 @@ def test_wrong_mount_and_firewalled(monkeypatch) -> None:
     })
 
     def run(argv):
-        if argv[:2] == ["wg", "show"]:
+        if tuple(argv) == tuple(homelab_probes.WG_SHOW_ARGV):
             return 0, "peer 9999999999\n", ""
         if argv[:2] == ["docker", "logs"]:
             return 0, "", ""

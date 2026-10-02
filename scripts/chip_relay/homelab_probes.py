@@ -2,11 +2,13 @@
 
 The feed may receipt. It does not mutate. Allowed commands are the baked
 argv of ``docker-inspect``, ``docker-logs``, and ``wg-show`` in
-``config/chip_tools.json`` — no docker run, rm, compose, restart, or exec.
+``config/chip_tools.json`` — no docker run, rm, compose, or restart.
+``wg-show`` uses one read-only ``docker exec wireguard wg show …`` because
+``wg0`` lives in the host wireguard container, not the relay netns.
 
 WireGuard handshake threshold: 180 seconds. A missing latest-handshake, or
-one older than that, is a fault. ``wg`` or docker missing inside the relay
-container is status ``blocked`` with the miss named in evidence, not a crash.
+one older than that, is a fault. Missing docker CLI or failed exec is status
+``blocked`` with the miss named in evidence, not a crash.
 
 ``/downloads`` must be the ``razzor-nas-torrents`` mount (inspect Mounts),
 and that filesystem must have at least 2 GiB free when the path is visible
@@ -39,9 +41,17 @@ DOCKER_INSPECT_ARGV = [
     "{{json .}}",
 ]
 DOCKER_LOGS_ARGV = ["docker", "logs", "--tail", "80", "monitoring-api"]
-WG_SHOW_ARGV = ["wg", "show", "wg0", "latest-handshakes"]
+WG_SHOW_ARGV = [
+    "docker",
+    "exec",
+    "wireguard",
+    "wg",
+    "show",
+    "wg0",
+    "latest-handshakes",
+]
 
-_FORBIDDEN = (" run", " rm", " compose", " restart", " exec")
+_FORBIDDEN = (" run", " rm", " compose", " restart")
 
 
 def four_line(claim: str, status: str, evidence: str, nxt: str) -> str:
@@ -68,6 +78,8 @@ def assert_read_argv(argv: list[str]) -> None:
     for token in _FORBIDDEN:
         if token in f" {blob}":
             raise ValueError(f"refusing non-read argv: {argv}")
+    if " exec" in f" {blob}" and tuple(argv) != tuple(WG_SHOW_ARGV):
+        raise ValueError(f"refusing non-read argv: {argv}")
 
 
 def default_runner(argv: list[str]) -> tuple[int, str, str]:
