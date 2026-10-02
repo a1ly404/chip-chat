@@ -53,7 +53,7 @@ Health probes (`monitoring-api`, `discord-bot`) use the same tell-tier path but 
 
 4. `docker compose up -d --no-build --force-recreate chip-relay` (or `./scripts/chip_relay_up.sh` if stuck in `Created`).
 5. **Rehearse:** induce or wait for a real fault; expect one four-line receipt on `#chip-dev` after two feed ticks (~10 min at 300s interval). Evidence line must cite a `tool:*` slug from the table above.
-6. **Writes:** `next:` lines point at **propose** runbooks only (`compose-recreate`, `disk-cleanup`, `al-9501-dead-image`). Scoped GO still needs `fp=` `lane=` `exp=` via `chip.go_scope.propose_go_marker`.
+6. **Writes:** `next:` lines point at **propose** runbooks only (`compose-recreate`, `disk-cleanup`, `al-9501-dead-image`). Scoped GO still needs `fp=` `lane=` `exp=` via `chip.go_scope.propose_go_marker`. **Implementation is deferred** until P2 live deploy is done — design spec: [GO_TOKEN_WRITE_PATH.md](plans/GO_TOKEN_WRITE_PATH.md) (draft; `go_write` not wired).
 
 ## Tests
 
