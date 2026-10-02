@@ -49,6 +49,7 @@ HOMELAB_ALERT_KEYS = frozenset(
         "downloads-free",
         "qb-connection",
         "homelab-probes",
+        "wg-killswitch",
     }
 )
 
@@ -70,6 +71,48 @@ WG_SHOW_ARGV = [
     "wg0",
     "latest-handshakes",
 ]
+WG_ROUTE_ARGV = [
+    "docker",
+    "exec",
+    "wireguard",
+    "ip",
+    "-4",
+    "route",
+    "show",
+    "default",
+]
+WG_IPTABLES_ARGV = [
+    "docker",
+    "exec",
+    "wireguard",
+    "iptables",
+    "-C",
+    "WGKS_OUT",
+    "-o",
+    "eth0",
+    "-j",
+    "DROP",
+]
+WG_IP6TABLES_ARGV = [
+    "docker",
+    "exec",
+    "wireguard",
+    "ip6tables",
+    "-C",
+    "WGKS6_OUT",
+    "-o",
+    "eth0",
+    "-j",
+    "DROP",
+]
+_READ_EXEC = frozenset(
+    {
+        tuple(WG_SHOW_ARGV),
+        tuple(WG_ROUTE_ARGV),
+        tuple(WG_IPTABLES_ARGV),
+        tuple(WG_IP6TABLES_ARGV),
+    }
+)
 
 _FORBIDDEN = (" run", " rm", " compose", " restart")
 
@@ -108,7 +151,7 @@ def assert_read_argv(argv: list[str]) -> None:
     for token in _FORBIDDEN:
         if token in f" {blob}":
             raise ValueError(f"refusing non-read argv: {argv}")
-    if " exec" in f" {blob}" and tuple(argv) != tuple(WG_SHOW_ARGV):
+    if " exec" in f" {blob}" and tuple(argv) not in _READ_EXEC:
         raise ValueError(f"refusing non-read argv: {argv}")
 
 
@@ -181,6 +224,46 @@ def wg_alert(runner: Runner, *, now: float | None = None) -> dict[str, object] |
             "propose compose-recreate only after scoped GO",
         )
     return parse_handshakes(out, now=now)
+
+
+def _unreachable(code: int, out: str, err: str) -> bool:
+    blob = f"{out}\n{err}".lower()
+    return code == 127 or "not on path" in blob or "unreachable" in blob
+
+
+def killswitch_alert(runner: Runner) -> dict[str, object] | None:
+    """Fault when the default route is not wg0 or the eth0 DROP rule is missing."""
+    code, out, err = runner(list(WG_ROUTE_ARGV))
+    if _unreachable(code, out, err):
+        return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
+    if code != 0 or "dev wg0" not in out:
+        return _fault(
+            "wg-killswitch",
+            "default route is not wg0",
+            "tool:wg-route.not-wg0",
+            "propose compose-recreate only after scoped GO",
+        )
+    code, out, err = runner(list(WG_IPTABLES_ARGV))
+    if _unreachable(code, out, err):
+        return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
+    if code != 0:
+        return _fault(
+            "wg-killswitch",
+            "eth0 IPv4 drop rule missing",
+            "tool:wg-iptables.missing-drop",
+            "propose compose-recreate only after scoped GO",
+        )
+    code, out, err = runner(list(WG_IP6TABLES_ARGV))
+    if _unreachable(code, out, err):
+        return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
+    if code != 0:
+        return _fault(
+            "wg-killswitch",
+            "eth0 IPv6 drop rule missing",
+            "tool:wg-ip6tables.missing-drop",
+            "propose compose-recreate only after scoped GO",
+        )
+    return None
 
 
 def downloads_free_alert(path: str = DOWNLOADS_PATH) -> dict[str, object] | None:
@@ -363,6 +446,12 @@ def collect_alerts(
         wg = _blocked("wg0-handshake", "wg show unreachable from relay", f"tool:wg-show.unreachable-{exc.__class__.__name__}")
     if wg:
         alerts.append(wg)
+    try:
+        ks = killswitch_alert(run)
+    except Exception as exc:  # noqa: BLE001
+        ks = _blocked("wg-killswitch", "kill switch probe unreachable", f"tool:wg-killswitch.unreachable-{exc.__class__.__name__}")
+    if ks:
+        alerts.append(ks)
 
     code, out, err = run(DOCKER_LOGS_ARGV)
     if code == 127 or "unreachable" in f"{err}".lower():
