@@ -22,6 +22,7 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -50,6 +51,8 @@ HOMELAB_ALERT_KEYS = frozenset(
         "qb-connection",
         "homelab-probes",
         "wg-killswitch",
+        "sonarr-health",
+        "radarr-health",
     }
 )
 
@@ -62,6 +65,8 @@ DOCKER_INSPECT_ARGV = [
     "{{json .}}",
 ]
 DOCKER_LOGS_ARGV = ["docker", "logs", "--tail", "80", "monitoring-api"]
+DOCKER_LOGS_QBIT_ARGV = ["docker", "logs", "--tail", "80", "qbittorrent-monitor"]
+_ARR_HEALTH_LINE = re.compile(r"\b(Sonarr|Radarr) health: (?!no issues\b)(.+)$")
 WG_SHOW_ARGV = [
     "docker",
     "exec",
@@ -352,6 +357,36 @@ def log_image_alert(text: str) -> dict[str, object] | None:
     )
 
 
+def arr_health_alerts(text: str) -> list[dict[str, object]]:
+    """Sonarr/Radarr health lines from monitor logs. One line per distinct message.
+
+    HTTP status lines (``health check returned status 401``) are not health
+    messages and do not become alerts. A Radarr failure must not drop a Sonarr line.
+    """
+    alerts: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in (text or "").splitlines():
+        match = _ARR_HEALTH_LINE.search(raw)
+        if not match:
+            continue
+        app, msg = match.group(1), match.group(2).strip()
+        if not msg:
+            continue
+        key = "sonarr-health" if app == "Sonarr" else "radarr-health"
+        if (key, msg) in seen:
+            continue
+        seen.add((key, msg))
+        alerts.append(
+            _fault(
+                key,
+                f"{app} health: {msg[:120]}",
+                f"tool:docker-logs.{key}",
+                "read-only receipt; no grab or indexer add from the feed",
+            )
+        )
+    return alerts
+
+
 def _api_base_from_transfer_url(url: str) -> str:
     parts = urllib.parse.urlsplit(url)
     path = parts.path or ""
@@ -454,12 +489,19 @@ def collect_alerts(
         alerts.append(ks)
 
     code, out, err = run(DOCKER_LOGS_ARGV)
+    log_text = ""
     if code == 127 or "unreachable" in f"{err}".lower():
         alerts.append(_blocked("no-such-image", "docker logs unreachable from relay", "tool:docker-logs.unreachable"))
     else:
-        hit = log_image_alert(out + "\n" + err)
+        log_text = out + "\n" + err
+        hit = log_image_alert(log_text)
         if hit:
             alerts.append(hit)
+
+    qcode, qout, qerr = run(DOCKER_LOGS_QBIT_ARGV)
+    if qcode == 0:
+        log_text = f"{log_text}\n{qout}\n{qerr}"
+    alerts.extend(arr_health_alerts(log_text))
 
     code, out, err = run(DOCKER_INSPECT_ARGV + ["qbittorrent"])
     inspect_body = out
