@@ -1,6 +1,6 @@
 # Chip monitor feed — P2 homelab wake (#chip-dev rehearsal)
 
-**Status:** code on `main`; **production Discord wake for homelab faults requires Ally GO** (`CHIP_FEED_HOMELAB_WAKE=1`). `#monitoring-logs` stays unwired.
+**Status:** code on `main`; **production Discord wake for homelab faults requires Ally GO** (`CHIP_FEED_HOMELAB_WAKE=1`). **`#monitoring-logs` bot ingest** is separate: room is in `rooms.json`; live handling needs `CHIP_RELAY_MONITORING_LOGS=1` — see `docs/CHIP_MONITORING_LOGS.md`.
 
 P1 (stamp `6b81e67`, PR #147) added read-only tool argv in `config/chip_tools.json`: `docker-inspect`, `docker-logs`, `wg-show`. P2 runs those checks inside the relay feed and posts a **four-line receipt** to `#chip-dev` when a fault persists (verify-twice + 4h cooldown). The feed does **not** run write tools or arbitrary shell.
 

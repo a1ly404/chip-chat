@@ -44,6 +44,7 @@ class RoomBinding:
     speakers_declared: bool = False
     speakers_by_id: dict[str, str] = field(default_factory=dict)
     speakers_by_handle: dict[str, str] = field(default_factory=dict)
+    monitoring_listen: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ def load_config(path: Path | None = None, environ: dict[str, str] | None = None)
                 speakers_declared="speakers" in entry,
                 speakers_by_id=by_id,
                 speakers_by_handle=by_handle,
+                monitoring_listen=bool(entry.get("monitoring_listen")),
             )
         )
     return RelayConfig(

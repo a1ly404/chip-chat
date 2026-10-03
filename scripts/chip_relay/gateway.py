@@ -22,6 +22,7 @@ from chip_relay.dispatch import (
     handle_inbound_delegate,
     handle_message,
 )
+from chip_relay.monitoring_listen import handle_monitoring_alert
 from chip_relay.routing import RouteKind, classify_gateway_message
 from chip_relay.personas import resolve_persona
 from chip_relay.health_server import clear_gateway_ready, set_gateway_ready, start_health_server
@@ -203,6 +204,14 @@ def run_gateway() -> int:
                     webhook=post_webhook,
                     environ=os.environ,
                 )
+            if decision.kind == RouteKind.MONITORING_ALERT:
+                return handle_monitoring_alert(
+                    room,
+                    content=decision.content,
+                    channel_id=str(message.channel.id),
+                    webhook=post_webhook,
+                    environ=os.environ,
+                )
             assert decision.incoming is not None
             return handle_message(
                 decision.incoming,
@@ -222,6 +231,8 @@ def run_gateway() -> int:
                     f"processed channel={room.id} route=webhook_delegate from={decision.from_persona}",
                     flush=True,
                 )
+            elif decision.kind == RouteKind.MONITORING_ALERT:
+                print(f"processed channel={room.id} route=monitoring_alert persona=pm", flush=True)
             else:
                 incoming = decision.incoming
                 assert incoming is not None

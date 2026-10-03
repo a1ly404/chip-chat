@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from chip_relay.config import RelayConfig, RoomBinding
+from chip_relay.monitoring_listen import monitoring_listen_enabled, room_is_monitoring
 from chip_relay.delegate import known_persona_ids
 from chip_relay.wake import parse_inbound_handoff
 from chip_relay.dispatch import Incoming
@@ -111,6 +112,7 @@ class RouteKind(str, Enum):
     HUMAN = "human"
     INJECT_BOT = "inject_bot"
     WEBHOOK_DELEGATE = "webhook_delegate"
+    MONITORING_ALERT = "monitoring_alert"
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,14 @@ def classify_gateway_message(
 
     if not content:
         return None
+
+    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
+        webhook_id = getattr(message, "webhook_id", None)
+        if webhook_id:
+            return None
+        if content.startswith("[chip-alert-ingest]"):
+            return None
+        return RouteDecision(kind=RouteKind.MONITORING_ALERT, content=content)
 
     webhook_id = getattr(message, "webhook_id", None)
     if webhook_id:

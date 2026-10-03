@@ -43,6 +43,14 @@
         },
         "handles": {}
       }
+    },
+    {
+      "id": "monitoring-logs",
+      "as": "pm",
+      "discord_channel": "monitoring-logs",
+      "channel_id": "1480439800350769252",
+      "webhook_env": "CHIP_WEBHOOK_MONITORING",
+      "monitoring_listen": true
     }
   ]
 }

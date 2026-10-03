@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "id": "stale-gluetun-health-target",
+      "title": "Retire gluetun probe targets (live VPN is WireGuard)",
+      "match_any": [
+        "gluetun",
+        "no such container: gluetun",
+        "404.*gluetun"
+      ],
+      "body_path": "config/chip_chat/monitoring_skills/stale-gluetun-health-target.md"
+    },
+    {
+      "id": "qb-firewalled-not-success",
+      "title": "qBittorrent firewalled is a fault, not a green probe",
+      "match_any": [
+        "qb-connection",
+        "firewalled",
+        "connection_status=firewalled"
+      ],
+      "body_path": "config/chip_chat/monitoring_skills/qb-firewalled-not-success.md"
+    }
+  ]
+}

@@ -20,6 +20,8 @@ Do not commit those values. The app is not minted in this PR.
 
 `config/chip_relay/rooms.json` is the only room list. The loader has no create-room API. `turn_limit` is 1.
 
+**`#monitoring-logs`:** room id `monitoring-logs` (channel `1480439800350769252`) is declared for deploy visibility. Bot-alert ingest and pm skill receipts are **off** until `CHIP_RELAY_MONITORING_LOGS=1` and `CHIP_WEBHOOK_MONITORING` are set on the relay host. Full law: `docs/CHIP_MONITORING_LOGS.md`.
+
 ### Personas (stable speakers)
 
 Relay does not post under raw Discord usernames. **Inbound:** optional `speakers` maps Discord snowflakes (and handles) to persona ids (`pm`, specialist lanes `buffrdev` / `homelabdev` / `opsdev` / `chipchatdev`, legacy `dev`, `tester`, … — the same keys as `config/chip_chat_personas.json`). **Outbound:** AI personas reply via webhook `username` set to that persona id (no human snowflake required). In `#chip-dev`, Ally (human) maps to `pm`; specialists appear as distinct webhook usernames in the same channel. Example human map:
