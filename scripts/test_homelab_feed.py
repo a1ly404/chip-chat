@@ -36,8 +36,9 @@ def test_read_tools_are_narrow() -> None:
     by_id = {t["id"]: t for t in spec["tools"]}
     assert by_id["docker-inspect"]["argv"] == homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]
     assert by_id["docker-logs"]["argv"] == homelab_probes.DOCKER_LOGS_ARGV
+    assert by_id["docker-logs-qbittorrent-monitor"]["argv"] == homelab_probes.DOCKER_LOGS_QBIT_ARGV
     assert by_id["wg-show"]["argv"] == homelab_probes.WG_SHOW_ARGV
-    for tid in ("docker-inspect", "docker-logs"):
+    for tid in ("docker-inspect", "docker-logs", "docker-logs-qbittorrent-monitor"):
         assert by_id[tid]["allow_extra_args"] is False
         blob = " ".join(by_id[tid]["argv"])
         for banned in (" run", " rm", "compose", "restart", " exec"):
@@ -61,6 +62,42 @@ def test_runbook_classes_unchanged() -> None:
     assert runbooks.runbook_class("remux") == "blocked"
     assert runbooks.may_autorun("docker-inspect") is False
     assert runbooks.may_autorun("restart-named-service") is True
+
+
+def test_arr_health_lines_are_homelab_faults_and_401_does_not_drop_sonarr() -> None:
+    text = "\n".join(
+        [
+            "2026-10-03 [WARNING] qbittorrent_monitor: Radarr health check returned status 401",
+            "2026-10-03 [WARNING] qbittorrent_monitor: Sonarr health: All search-capable indexers are temporarily unavailable due to recent indexer errors",
+            "2026-10-03 [WARNING] qbittorrent_monitor: Radarr health: All indexers are unavailable due to failures for more than 6 hours",
+            "2026-10-03 [INFO] qbittorrent_monitor: Sonarr health: no issues",
+        ]
+    )
+    alerts = homelab_probes.arr_health_alerts(text)
+    keys = [a["key"] for a in alerts]
+    assert keys == ["sonarr-health", "radarr-health"]
+    assert all(homelab_probes.is_homelab_feed_alert(a) for a in alerts)
+    assert "401" not in str(alerts)
+    collected = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 9999999999\n", ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_LOGS_QBIT_ARGV): (0, text, ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({
+                    "State": {"Status": "running"},
+                    "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}],
+                }),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+        now=10_000,
+    )
+    assert any(a["key"] == "sonarr-health" for a in collected)
+    assert any(a["key"] == "radarr-health" for a in collected)
 
 
 def test_missing_wg0_and_low_disk_and_image_line() -> None:

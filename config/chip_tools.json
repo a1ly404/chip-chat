@@ -66,6 +66,13 @@
       "description": "Read-only docker logs --tail 80 monitoring-api. No run, rm, compose, restart, or exec."
     },
     {
+      "id": "docker-logs-qbittorrent-monitor",
+      "argv": ["docker", "logs", "--tail", "80", "qbittorrent-monitor"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only docker logs --tail 80 qbittorrent-monitor for Arr health lines. No run, rm, compose, restart, or exec."
+    },
+    {
       "id": "wg-show",
       "argv": [
         "docker",

@@ -14,6 +14,8 @@ P1 (stamp `6b81e67`, PR #147) added read-only tool argv in `config/chip_tools.js
 
 `docker-logs` on `monitoring-api` still surfaces `No such image` as `tool:docker-logs.no-such-image`. **`al-9501-dead-image` stays `propose`** — receipts name the fault; compose-recreate is not auto-run.
 
+`docker logs --tail 80` on `monitoring-api` and `qbittorrent-monitor` also surfaces `Sonarr health:` / `Radarr health:` lines (`sonarr-health`, `radarr-health`). Those are homelab faults: they update the receipt snapshot when `CHIP_FEED_HOMELAB=1` and post to `#chip-dev` only when `CHIP_FEED_HOMELAB_WAKE=1`. A health-check HTTP status (including Radarr 401) is not a health-message fault.
+
 Unreachable docker/wg/qB API → **`status: blocked`** on the receipt (no crash loop).
 
 ## Wake law (Discord)
