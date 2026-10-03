@@ -28,10 +28,15 @@
     "monitoring api started",
     "auto-restart and port sync enabled",
     "media-workflow ticker",
+    "mw ticker",
     "nancy reclaim",
     "raz-.* status",
     "jellyfin retired",
-    "chip-relay self-test heartbeat"
+    "chip-relay self-test heartbeat",
+    "lazylibrarian",
+    "ebook fallback",
+    "no new artifact",
+    "gha website ingest: no new artifact"
   ],
   "skills": [
     {
@@ -99,9 +104,9 @@
       "id": "gha-website-ingest-failed",
       "title": "GHA website ingest pull failed / no artifact",
       "match_any": [
-        "website ingest",
         "ingest pull failed",
-        "no new artifact"
+        "website ingest: pull failed",
+        "website ingest pull failed"
       ],
       "body_path": "",
       "fix_action": {

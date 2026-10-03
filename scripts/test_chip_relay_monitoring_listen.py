@@ -369,6 +369,39 @@ def test_catalog_excluded_noise_does_not_match() -> None:
         assert run.created is False
 
 
+def test_mw_ticker_ignored_no_overlay(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = "MW ticker 03:00 PT | disk cleanup scheduled; no action"
+    alert = parse_monitoring_message(line)
+    assert should_ignore_alert(alert) is True
+    run = run_skill_for_alert(alert)
+    assert run.ignored is True
+    assert not overlay_registry_path().is_file()
+
+
+def test_lazylibrarian_ignored_no_overlay(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = "LazyLibrarian Ebook Fallback failed — do not fix from chip-chat"
+    alert = parse_monitoring_message(line)
+    assert should_ignore_alert(alert) is True
+    run = run_skill_for_alert(alert)
+    assert run.ignored is True
+    assert not overlay_registry_path().is_file()
+
+
+def test_real_outage_still_soak_after_ignore_fix(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 10_000_000.0
+    alert = parse_monitoring_message("Plex container exited — sustained down")
+    assert should_ignore_alert(alert) is False
+    skill = match_skill(alert)
+    assert skill is not None
+    assert skill.id == "plex-container-down"
+    blip = run_skill_for_alert(alert, now=t0)
+    assert blip.ignored is False
+    assert "tool:monitoring-outage.watch" in blip.receipt
+
+
 def test_handle_monitoring_alert_ignores_status_noise_without_webhook(
     tmp_path, monkeypatch
 ) -> None:
