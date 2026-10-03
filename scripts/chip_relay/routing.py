@@ -61,6 +61,69 @@ def fetch_attachment_text_from_url(url: str, *, timeout: float = ATTACHMENT_FETC
     return _decode_attachment_bytes(data)
 
 
+def _embed_text_parts(embed: Any) -> list[str]:
+    parts: list[str] = []
+    for attr in ("title", "description"):
+        value = getattr(embed, attr, None)
+        if value is not None and str(value).strip():
+            parts.append(str(value).strip())
+    author = getattr(embed, "author", None)
+    if author is not None:
+        name = getattr(author, "name", None)
+        if name is not None and str(name).strip():
+            parts.append(str(name).strip())
+    footer = getattr(embed, "footer", None)
+    if footer is not None:
+        text = getattr(footer, "text", None)
+        if text is not None and str(text).strip():
+            parts.append(str(text).strip())
+    for field in getattr(embed, "fields", None) or []:
+        name = (getattr(field, "name", None) or "").strip()
+        value = (getattr(field, "value", None) or "").strip()
+        if name or value:
+            parts.append(f"{name}: {value}".strip(": "))
+    return parts
+
+
+def effective_monitoring_content(
+    message: Any,
+    *,
+    fetch_url: Callable[[str], str | None] | None = None,
+) -> str:
+    """Inline text, attachments, embeds, and author label for #monitoring-logs ingest."""
+    inline = effective_gateway_content(message, fetch_url=fetch_url).strip()
+    chunks: list[str] = []
+    if inline:
+        chunks.append(inline)
+    for embed in getattr(message, "embeds", None) or []:
+        chunks.extend(_embed_text_parts(embed))
+    author = getattr(message, "author", None)
+    author_name = getattr(author, "name", None) if author is not None else None
+    if author_name and str(author_name).strip():
+        chunks.append(f"source={str(author_name).strip()}")
+    return "\n".join(chunks).strip()
+
+
+def is_pm_monitoring_receipt_echo(message: Any, content: str) -> bool:
+    """Ignore chip-relay pm webhook receipts so ingest does not loop."""
+    from chip_relay.receipt_gate import receipt_error
+
+    text = (content or "").strip()
+    if not text:
+        return False
+    if text.startswith("[chip-relay] ERROR:"):
+        return True
+    webhook_id = getattr(message, "webhook_id", None)
+    author = getattr(message, "author", None)
+    author_name = (getattr(author, "name", None) or "").strip().lower()
+    if webhook_id and author_name == "pm":
+        return True
+    if receipt_error(text) is None and text.lower().startswith("claim:"):
+        if "tool:monitoring-skill." in text:
+            return True
+    return False
+
+
 def effective_gateway_content(
     message: Any,
     *,
@@ -178,6 +241,9 @@ def classify_gateway_message(
     author = message.author
     author_id = getattr(author, "id", None)
     content = effective_gateway_content(message, fetch_url=fetch_attachment).strip()
+    monitoring_content = ""
+    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
+        monitoring_content = effective_monitoring_content(message, fetch_url=fetch_attachment).strip()
     if author_id == relay_bot_user_id:
         if is_relay_self_inject_content(content):
             override = inject_author_id(environ)
@@ -188,16 +254,17 @@ def classify_gateway_message(
                 )
         return None
 
+    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
+        alert_text = monitoring_content or content
+        if is_pm_monitoring_receipt_echo(message, alert_text):
+            return None
+        if alert_text.startswith("[chip-alert-ingest]"):
+            return None
+        if alert_text:
+            return RouteDecision(kind=RouteKind.MONITORING_ALERT, content=alert_text)
+
     if not content:
         return None
-
-    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
-        webhook_id = getattr(message, "webhook_id", None)
-        if webhook_id:
-            return None
-        if content.startswith("[chip-alert-ingest]"):
-            return None
-        return RouteDecision(kind=RouteKind.MONITORING_ALERT, content=content)
 
     webhook_id = getattr(message, "webhook_id", None)
     if webhook_id:

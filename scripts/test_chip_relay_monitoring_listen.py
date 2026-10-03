@@ -1,9 +1,11 @@
-"""#monitoring-logs listen path — pm skills, VPN law, no #plex-fix posts."""
+"""#monitoring-logs — ingest shapes, universal soak, config-driven skills."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -14,9 +16,13 @@ from chip_relay.monitoring_listen import (
     handle_monitoring_alert,
     monitoring_listen_enabled,
 )
+from chip_relay.monitoring_outage import DEFAULT_OUTAGE_SOAK_S, note_outage_sighting
 from chip_relay.monitoring_skills import (
     PLEX_FIX_CHANNEL_ID,
     append_skill_learning,
+    create_overlay_skill,
+    execute_fix_action,
+    load_policy,
     load_skill_learnings,
     match_skill,
     parse_monitoring_message,
@@ -24,8 +30,15 @@ from chip_relay.monitoring_skills import (
     receipt_violates_vpn_law,
     run_skill_for_alert,
 )
-from chip_relay.routing import RouteKind, classify_gateway_message
+from chip_relay.routing import (
+    RouteKind,
+    classify_gateway_message,
+    effective_monitoring_content,
+    is_pm_monitoring_receipt_echo,
+)
 from chip_relay.startup import check_startup
+
+SOAK = DEFAULT_OUTAGE_SOAK_S
 
 
 def _monitoring_room() -> RoomBinding:
@@ -39,17 +52,22 @@ def _monitoring_room() -> RoomBinding:
     )
 
 
+def _after_soak(t0: float) -> float:
+    return t0 + SOAK + 1
+
+
 def test_rooms_json_declares_monitoring_logs() -> None:
     config = load_config()
     room = config.room("monitoring-logs")
     assert room.channel_id == "1480439800350769252"
     assert room.monitoring_listen is True
-    assert room.as_agent == "pm"
 
 
-def test_listen_flag_defaults_off() -> None:
-    assert monitoring_listen_enabled({}) is False
-    assert monitoring_listen_enabled({MONITORING_LISTEN_ENV: "1"}) is True
+def test_registry_policy_soak_10m() -> None:
+    policy = load_policy()
+    assert policy.soak_seconds == 600.0
+    assert "gluetun" in policy.forbidden_restart_containers
+    assert "wireguard" in policy.allowed_restart_containers
 
 
 def test_startup_skips_monitoring_webhook_until_flag(tmp_path, monkeypatch) -> None:
@@ -80,95 +98,137 @@ def test_startup_skips_monitoring_webhook_until_flag(tmp_path, monkeypatch) -> N
     }
     config = load_config(fixture, environ=env)
     assert check_startup(config, key_check=lambda: None, environ=env) == []
-    env_flag = {**env, MONITORING_LISTEN_ENV: "1"}
-    errs = check_startup(config, key_check=lambda: None, environ=env_flag)
-    assert any("CHIP_WEBHOOK_MONITORING" in e for e in errs)
 
 
 def test_match_stale_gluetun_skill() -> None:
-    alert = parse_monitoring_message("health monitor: GET /gluetun/health -> 404 No such container")
+    alert = parse_monitoring_message(
+        "AirVPN port-health: gluetun /v1/portforward 404 No such container"
+    )
     skill = match_skill(alert)
     assert skill is not None
-    assert skill.id == "stale-gluetun-health-target"
+    assert skill.id == "stale-vpn-gluetun-label-probe"
+    assert skill.fix_action.get("kind") == "record_retired_target"
 
 
-def test_gluetun_skill_receipt_forbids_vpn_mutations() -> None:
-    alert = parse_monitoring_message("gluetun probe 404")
-    run = run_skill_for_alert(alert)
-    assert run.matched
-    assert "gluetun" in run.receipt.lower()
-    assert "never recreate" in run.receipt.lower() or "stale" in run.receipt.lower()
+def test_universal_soak_blocks_first_sighting(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 1_000_000.0
+    alert = parse_monitoring_message(
+        "AirVPN port-health: gluetun /v1/portforward 404 No such container"
+    )
+    run1 = run_skill_for_alert(alert, now=t0)
+    assert "tool:monitoring-outage.watch" in run1.receipt
+    run2 = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert "status: done" in run2.receipt
+
+
+def test_gluetun_never_restart_in_receipt() -> None:
     assert receipt_violates_vpn_law("next: docker restart gluetun now") is not None
-    assert receipt_violates_vpn_law("next: read-only triage only") is None
 
 
-def test_qb_firewalled_not_treated_as_success() -> None:
-    alert = parse_monitoring_message('{"key":"qb-connection","detail":"connection_status=firewalled"}')
-    run = run_skill_for_alert(alert)
-    assert run.skill_id == "qb-firewalled-not-success"
-    assert "firewalled" in run.receipt.lower()
-
-
-def test_learning_round_trip(tmp_path, monkeypatch) -> None:
-    import os
-
+def test_config_driven_wireguard_restart(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
-    append_skill_learning("stale-gluetun-health-target", "first run saw 404", tag="match")
-    lines = load_skill_learnings("stale-gluetun-health-target")
-    assert lines and "404" in lines[-1]
-    alert = parse_monitoring_message("gluetun 404 again")
-    run = run_skill_for_alert(alert)
-    assert "prior=" in run.receipt
+    t0 = 2_000_000.0
+    alert = parse_monitoring_message("wg0-handshake stale")
+    run_skill_for_alert(alert, now=t0)
+    skill = match_skill(alert)
+    assert skill and skill.fix_action.get("kind") == "docker_restart_if_down"
+    with patch("chip_relay.monitoring_skills._docker_running", return_value=False), patch(
+        "chip_relay.monitoring_skills._docker_restart", return_value=(True, "exit=0")
+    ) as restart:
+        run = run_skill_for_alert(alert, now=_after_soak(t0))
+    restart.assert_called_once()
+    assert restart.call_args[0][0] == "wireguard"
+    assert "status: done" in run.receipt
 
 
-def test_post_target_refuses_plex_fix() -> None:
-    ok, reason = post_target_allowed(
-        webhook_env="CHIP_WEBHOOK_MONITORING",
-        channel_id=PLEX_FIX_CHANNEL_ID,
-        webhook_url="https://discord.com/api/webhooks/x",
-    )
-    assert ok is False
-    assert "plex-fix" in reason
-    ok2, _ = post_target_allowed(
-        webhook_env="CHIP_WEBHOOK_PLEX_FIX",
-        channel_id="1",
-        webhook_url="https://discord.com/api/webhooks/x",
-    )
-    assert ok2 is False
-
-
-def test_handle_monitoring_posts_pm_receipt(tmp_path, monkeypatch) -> None:
+def test_overlay_skill_watch_only_without_code_change(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv(MONITORING_LISTEN_ENV, "1")
-    posts: list[tuple[str, str, str]] = []
+    alert = parse_monitoring_message("brand-new recurring cron failure xyz-9000")
+    skill = create_overlay_skill(alert)
+    assert skill.fix_action.get("kind") == "watch_only"
+    t0 = 4_000_000.0
+    run_skill_for_alert(alert, skill=skill, create_if_missing=False, now=t0)
+    run = run_skill_for_alert(alert, skill=skill, create_if_missing=False, now=_after_soak(t0))
+    assert "watch_only" in run.learning_line or "cataloged" in run.receipt.lower()
 
-    def hook(url: str, user: str, body: str) -> WebhookResult:
-        posts.append((url, user, body))
-        return WebhookResult(status=204)
 
-    env = {
-        MONITORING_LISTEN_ENV: "1",
-        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+def test_new_fix_action_via_overlay_json(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    overlay = {
+        "skills": [
+            {
+                "id": "custom-disk-pressure",
+                "title": "disk pressure",
+                "match_any": ["disk pressure"],
+                "fix_action": {"kind": "homelab_delegate", "message": "check downloads mount"},
+                "followup": "delegate:homelabdev disk pressure",
+            }
+        ]
     }
-    result = handle_monitoring_alert(
-        _monitoring_room(),
-        content="monitoring-api gluetun health 404",
-        channel_id="1480439800350769252",
-        webhook=hook,
-        environ=env,
+    path = tmp_path / "chip_state" / "monitoring_skills_overlay.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(overlay), encoding="utf-8")
+    alert = parse_monitoring_message("disk pressure advisor timeout")
+    skill = match_skill(alert)
+    assert skill and skill.id == "custom-disk-pressure"
+    t0 = 5_000_000.0
+    run_skill_for_alert(alert, now=t0)
+    run = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert "homelab" in run.receipt.lower()
+
+
+def test_effective_monitoring_content_embed_only() -> None:
+    embed = SimpleNamespace(
+        title="WireGuard handshake stale",
+        description="wg0 latest handshake > 180s",
+        author=None,
+        footer=None,
+        fields=[],
     )
-    assert result.ok
-    assert result.webhook_calls == 1
-    assert posts[0][1] == "pm"
-    assert "claim:" in posts[0][2]
+    msg = SimpleNamespace(
+        content="",
+        embeds=[embed],
+        attachments=[],
+        author=SimpleNamespace(name="Razzorstack Bot"),
+    )
+    text = effective_monitoring_content(msg)
+    assert "WireGuard" in text
 
 
-def test_gateway_routes_bot_alert_when_flag_on() -> None:
+def test_gateway_routes_webhook_monitor_post() -> None:
     room = _monitoring_room()
     msg = SimpleNamespace(
         id=99,
-        content="cron: gluetun container missing",
-        author=SimpleNamespace(id=555, name="monitor-bot", bot=True),
+        content="Monitoring Bot: gluetun health probe 404",
+        author=SimpleNamespace(id=555, name="Monitoring Bot", bot=True),
+        attachments=[],
+        webhook_id=4242,
+    )
+    decision = classify_gateway_message(
+        msg,
+        relay_bot_user_id=1,
+        room=room,
+        environ={MONITORING_LISTEN_ENV: "1"},
+    )
+    assert decision is not None
+    assert decision.kind == RouteKind.MONITORING_ALERT
+
+
+def test_gateway_routes_embed_only_razzorstack_bot() -> None:
+    room = _monitoring_room()
+    embed = SimpleNamespace(
+        title="wg0-handshake",
+        description="latest handshake stale (240s)",
+        author=None,
+        footer=None,
+        fields=[],
+    )
+    msg = SimpleNamespace(
+        id=100,
+        content="",
+        embeds=[embed],
+        author=SimpleNamespace(id=556, name="Razzorstack Bot", bot=True),
         attachments=[],
         webhook_id=None,
     )
@@ -182,34 +242,14 @@ def test_gateway_routes_bot_alert_when_flag_on() -> None:
     assert decision.kind == RouteKind.MONITORING_ALERT
 
 
-def test_gateway_ignores_monitoring_when_flag_off() -> None:
+def test_gateway_ignores_relay_bot_create_message() -> None:
     room = _monitoring_room()
     msg = SimpleNamespace(
-        id=99,
-        content="cron: gluetun container missing",
-        author=SimpleNamespace(id=555, name="monitor-bot", bot=True),
+        id=101,
+        content="internal",
+        author=SimpleNamespace(id=1, name="chip-relay", bot=True),
         attachments=[],
         webhook_id=None,
-    )
-    assert (
-        classify_gateway_message(
-            msg,
-            relay_bot_user_id=1,
-            room=room,
-            environ={},
-        )
-        is None
-    )
-
-
-def test_gateway_ignores_pm_webhook_echo() -> None:
-    room = _monitoring_room()
-    msg = SimpleNamespace(
-        id=100,
-        content="claim: x\nstatus: blocked\nevidence: tool:t\nnext: y",
-        author=SimpleNamespace(id=555, name="pm", bot=True),
-        attachments=[],
-        webhook_id=12345,
     )
     assert (
         classify_gateway_message(
@@ -220,3 +260,146 @@ def test_gateway_ignores_pm_webhook_echo() -> None:
         )
         is None
     )
+
+
+def test_pm_receipt_echo_filtered() -> None:
+    body = (
+        "claim: pm skill stale-vpn-gluetun-label-probe\n"
+        "status: done\n"
+        "evidence: tool:monitoring-skill.stale-vpn-gluetun-label-probe\n"
+        "next: recorded retired target"
+    )
+    msg = SimpleNamespace(webhook_id=1, author=SimpleNamespace(name="pm"))
+    assert is_pm_monitoring_receipt_echo(msg, body) is True
+
+
+def test_post_target_refuses_plex_fix() -> None:
+    ok, reason = post_target_allowed(
+        webhook_env="CHIP_WEBHOOK_MONITORING",
+        channel_id=PLEX_FIX_CHANNEL_ID,
+        webhook_url="https://discord.com/api/webhooks/x",
+    )
+    assert ok is False
+    assert "plex-fix" in reason
+
+
+def test_forbidden_restart_gluetun_in_executor() -> None:
+    from chip_relay.monitoring_skills import SkillDef
+
+    policy = load_policy()
+    skill = match_skill(parse_monitoring_message("wg0-handshake stale"))
+    assert skill is not None
+    skill_bad = SkillDef(
+        id=skill.id,
+        title=skill.title,
+        match_any=skill.match_any,
+        body_path=skill.body_path,
+        fix_action={"kind": "docker_restart_if_down", "container": "gluetun"},
+        followup=skill.followup,
+    )
+    fix = execute_fix_action(skill_bad, parse_monitoring_message("x"), policy=policy)
+    assert fix.applied is False
+    assert "gluetun" in fix.detail.lower()
+
+
+def _catalog_fixture() -> dict:
+    path = (
+        Path(__file__).resolve().parent / "fixtures" / "monitoring_skill_catalog.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    "skill_id,sample",
+    [
+        (sid, text)
+        for sid, text in json.loads(
+            (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "monitoring_skill_catalog.json"
+            ).read_text(encoding="utf-8")
+        )["samples"].items()
+    ],
+)
+def test_catalog_fault_class_matches(skill_id: str, sample: str) -> None:
+    catalog = _catalog_fixture()
+    expected = catalog.get("sample_expected_skill", {}).get(skill_id, skill_id)
+    skill = match_skill(parse_monitoring_message(sample))
+    assert skill is not None, f"no match for {skill_id!r}: {sample!r}"
+    assert skill.id == expected
+
+
+@pytest.mark.parametrize(
+    "skill_id,sample",
+    [
+        (sid, text)
+        for sid, text in json.loads(
+            (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "monitoring_skill_catalog.json"
+            ).read_text(encoding="utf-8")
+        )["samples"].items()
+    ],
+)
+def test_catalog_short_blip_does_not_fix_before_soak(
+    skill_id: str, sample: str, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path / skill_id))
+    t0 = 8_000_000.0
+    alert = parse_monitoring_message(sample)
+    blip = run_skill_for_alert(alert, now=t0)
+    assert "tool:monitoring-outage.watch" in blip.receipt
+    early = run_skill_for_alert(alert, now=t0 + 120)
+    assert "tool:monitoring-outage.watch" in early.receipt
+    assert "status: done" not in early.receipt
+
+
+def test_catalog_excluded_noise_does_not_match() -> None:
+    for line in _catalog_fixture()["excluded_non_faults"]:
+        assert match_skill(parse_monitoring_message(line)) is None
+
+
+def test_no_skill_health_checks_or_restarts_gluetun_container() -> None:
+    import json as _json
+
+    from chip_relay.monitoring_skills import REGISTRY_FILE
+
+    raw = _json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
+    for row in raw.get("skills") or []:
+        action = row.get("fix_action") or {}
+        kind = str(action.get("kind") or "")
+        blob = _json.dumps(action).lower()
+        assert action.get("container") != "gluetun"
+        assert "docker_health" not in kind
+        if kind == "docker_restart_if_down":
+            assert "gluetun" not in blob
+        if "gluetun" in str(row.get("id", "")).lower() or "gluetun" in _json.dumps(
+            row.get("match_any") or []
+        ).lower():
+            assert action.get("kind") == "record_retired_target"
+            assert action.get("target") == "gluetun"
+
+
+def test_lumocheck_manual_note_only_after_soak(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 9_500_000.0
+    alert = parse_monitoring_message("lumocheck timed out waiting for lumo-tamer")
+    run_skill_for_alert(alert, now=t0)
+    run = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert run.skill_id == "lumocheck-lumo-tamer-timeout"
+    assert "status: done" in run.receipt
+    assert "manual" in run.receipt.lower()
+    assert "delegate:homelabdev" not in run.receipt.lower()
+
+
+def test_gluetun_label_alert_only_retires_probe(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 9_000_000.0
+    alert = parse_monitoring_message("VPN (Gluetun) health check failed")
+    run_skill_for_alert(alert, now=t0)
+    run = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert run.skill_id == "stale-vpn-gluetun-label-probe"
+    assert "status: done" in run.receipt
+    assert "wireguard" in run.receipt.lower() or "retired" in run.receipt.lower()

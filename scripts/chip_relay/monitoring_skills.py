@@ -1,13 +1,10 @@
-"""Reusable monitoring skills for #monitoring-logs (pm lane, read-only).
-
-Skills are matched deterministically from alert text, executed without OpenRouter
-spend, and learnings append under ``CHIP_CHAT_DATA_DIR`` for the next run.
-"""
+"""Reusable monitoring skills for #monitoring-logs — config-driven, no per-id code paths."""
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,19 +15,23 @@ from chip_relay import alert_ingest
 
 REGISTRY_FILE = config.REPO_ROOT / "config" / "chip_chat" / "monitoring_skills.json"
 
-# Discord channel id for #plex-fix — receipts must never target this channel.
 PLEX_FIX_CHANNEL_ID = "1553148704494714891"
-
 FORBIDDEN_WEBHOOK_ENVS = frozenset({"CHIP_WEBHOOK_PLEX_FIX", "CHIP_WEBHOOK_PLEX"})
 FORBIDDEN_POST_SUBSTRINGS = ("plex-fix", "/plex-fix")
 
 VPN_MUTATION_PATTERNS = (
     "docker restart gluetun",
-    "docker restart wireguard",
-    "docker restart qbittorrent",
-    "compose up",
     "recreate gluetun",
+    "compose up",
 )
+
+
+@dataclass(frozen=True)
+class RegistryPolicy:
+    forbidden_restart_containers: frozenset[str]
+    allowed_restart_containers: frozenset[str]
+    soak_seconds: float
+    overlay_defaults: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class SkillDef:
     title: str
     match_any: tuple[str, ...]
     body_path: str
+    fix_action: dict[str, Any]
+    followup: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,29 +53,61 @@ class SkillRun:
     learning_line: str
 
 
+@dataclass(frozen=True)
+class FixResult:
+    applied: bool
+    detail: str
+    homelab_followup: str = ""
+
+
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def load_registry(path: Path | None = None) -> list[SkillDef]:
+def _load_registry_raw(path: Path | None = None) -> dict[str, Any]:
     file = path or REGISTRY_FILE
-    raw = json.loads(file.read_text(encoding="utf-8"))
+    return json.loads(file.read_text(encoding="utf-8"))
+
+
+def load_policy(path: Path | None = None) -> RegistryPolicy:
+    raw = _load_registry_raw(path)
+    policy = raw.get("policy") if isinstance(raw.get("policy"), dict) else {}
+    forbidden = frozenset(str(x).strip().lower() for x in (policy.get("forbidden_restart_containers") or []))
+    allowed = frozenset(str(x).strip().lower() for x in (policy.get("allowed_restart_containers") or []))
+    soak = float(raw.get("soak_seconds") or 600)
+    overlay_defaults = raw.get("overlay_defaults") if isinstance(raw.get("overlay_defaults"), dict) else {}
+    return RegistryPolicy(
+        forbidden_restart_containers=forbidden,
+        allowed_restart_containers=allowed,
+        soak_seconds=soak,
+        overlay_defaults=overlay_defaults,
+    )
+
+
+def _skill_from_row(row: dict[str, Any]) -> SkillDef | None:
+    sid = str(row.get("id") or "").strip()
+    if not sid:
+        return None
+    patterns = tuple(str(p) for p in (row.get("match_any") or []) if str(p).strip())
+    fix_action = row.get("fix_action") if isinstance(row.get("fix_action"), dict) else {"kind": "watch_only"}
+    return SkillDef(
+        id=sid,
+        title=str(row.get("title") or sid),
+        match_any=patterns,
+        body_path=str(row.get("body_path") or ""),
+        fix_action=fix_action,
+        followup=str(row.get("followup") or ""),
+    )
+
+
+def load_registry(path: Path | None = None) -> list[SkillDef]:
+    raw = _load_registry_raw(path)
     out: list[SkillDef] = []
     for row in raw.get("skills") or []:
-        if not isinstance(row, dict):
-            continue
-        sid = str(row.get("id") or "").strip()
-        if not sid:
-            continue
-        patterns = tuple(str(p) for p in (row.get("match_any") or []) if str(p).strip())
-        out.append(
-            SkillDef(
-                id=sid,
-                title=str(row.get("title") or sid),
-                match_any=patterns,
-                body_path=str(row.get("body_path") or ""),
-            )
-        )
+        if isinstance(row, dict):
+            skill = _skill_from_row(row)
+            if skill is not None:
+                out.append(skill)
     return out
 
 
@@ -90,32 +125,25 @@ def load_overlay_skills() -> list[SkillDef]:
         return []
     out: list[SkillDef] = []
     for row in raw.get("skills") or []:
-        if not isinstance(row, dict):
-            continue
-        sid = str(row.get("id") or "").strip()
-        if not sid:
-            continue
-        patterns = tuple(str(p) for p in (row.get("match_any") or []) if str(p).strip())
-        out.append(
-            SkillDef(
-                id=sid,
-                title=str(row.get("title") or sid),
-                match_any=patterns or (sid,),
-                body_path=str(row.get("body_path") or ""),
-            )
-        )
+        if isinstance(row, dict):
+            skill = _skill_from_row(row)
+            if skill is not None:
+                out.append(skill)
     return out
 
 
 def all_skills() -> list[SkillDef]:
-    merged: dict[str, SkillDef] = {s.id: s for s in load_registry()}
-    for s in load_overlay_skills():
-        merged.setdefault(s.id, s)
-    return list(merged.values())
+    """Registry file order is match priority (first hit wins); overlay appends new ids."""
+    ordered = list(load_registry())
+    known = {s.id for s in ordered}
+    for skill in load_overlay_skills():
+        if skill.id not in known:
+            ordered.append(skill)
+            known.add(skill.id)
+    return ordered
 
 
 def parse_monitoring_message(text: str) -> dict[str, str]:
-    """Best-effort structured alert from a Discord monitoring line."""
     raw = (text or "").strip()
     if not raw:
         return {"key": "", "detail": "", "raw": ""}
@@ -165,15 +193,35 @@ def match_skill(alert: Mapping[str, str], skills: list[SkillDef] | None = None) 
         if not verdict.startswith("unmatched"):
             sid = re.sub(r"[^a-z0-9-]+", "-", skill_name.lower()).strip("-")[:64]
             if sid:
-                return SkillDef(id=sid, title=skill_name, match_any=(ingest_key,), body_path="")
+                policy = load_policy()
+                defaults = policy.overlay_defaults
+                fix_action = defaults.get("fix_action") if isinstance(defaults.get("fix_action"), dict) else {"kind": "watch_only"}
+                return SkillDef(
+                    id=sid,
+                    title=skill_name,
+                    match_any=(ingest_key,),
+                    body_path="",
+                    fix_action=fix_action,
+                    followup=str(defaults.get("followup") or ""),
+                )
     return None
 
 
 def create_overlay_skill(alert: Mapping[str, str]) -> SkillDef:
+    policy = load_policy()
+    defaults = policy.overlay_defaults
+    fix_action = defaults.get("fix_action") if isinstance(defaults.get("fix_action"), dict) else {"kind": "watch_only"}
     base = str(alert.get("key") or alert.get("detail") or "monitoring-alert")[:48]
     sid = re.sub(r"[^a-z0-9-]+", "-", base.lower()).strip("-") or "monitoring-alert"
     pattern = str(alert.get("key") or alert.get("detail") or sid)[:120]
-    skill = SkillDef(id=sid, title=f"auto:{sid}", match_any=(pattern,), body_path="")
+    skill = SkillDef(
+        id=sid,
+        title=f"auto:{sid}",
+        match_any=(pattern,),
+        body_path="",
+        fix_action=fix_action,
+        followup=str(defaults.get("followup") or ""),
+    )
     path = overlay_registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = {"skills": []}
@@ -189,6 +237,8 @@ def create_overlay_skill(alert: Mapping[str, str]) -> SkillDef:
             "title": skill.title,
             "match_any": list(skill.match_any),
             "body_path": "",
+            "fix_action": skill.fix_action,
+            "followup": skill.followup,
             "created_from": alert.get("raw", "")[:160],
         }
     )
@@ -225,21 +275,184 @@ def append_skill_learning(skill_id: str, lesson: str, *, tag: str = "monitoring"
     return row
 
 
-def _read_body(skill: SkillDef) -> str:
-    if not skill.body_path:
-        return ""
-    p = config.REPO_ROOT / skill.body_path
-    if p.is_file():
-        return p.read_text(encoding="utf-8", errors="replace")
-    return ""
-
-
 def receipt_violates_vpn_law(text: str) -> str | None:
-    low = text.lower()
-    for pat in VPN_MUTATION_PATTERNS:
-        if pat in low:
-            return f"forbidden VPN/container mutation: {pat}"
+    """Scan only the ``next:`` line so policy prose in claim/evidence cannot false-refuse."""
+    for line in (text or "").splitlines():
+        if not line.lower().startswith("next:"):
+            continue
+        low = line.lower()
+        for pat in VPN_MUTATION_PATTERNS:
+            if pat in low:
+                return f"forbidden VPN/container mutation: {pat}"
+        if "docker restart gluetun" in low or "docker restart qbittorrent" in low:
+            return "forbidden container restart"
     return None
+
+
+def retired_probe_targets_path() -> Path:
+    return config.data_dir() / "chip_state" / "monitoring_fixes" / "retired_probe_targets.json"
+
+
+def _load_retired_probe_targets() -> list[str]:
+    path = retired_probe_targets_path()
+    if not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if isinstance(raw, dict):
+        rows = raw.get("targets")
+        if isinstance(rows, list):
+            return [str(x).strip().lower() for x in rows if str(x).strip()]
+    return []
+
+
+def _save_retired_probe_targets(targets: list[str]) -> None:
+    path = retired_probe_targets_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = sorted({t.strip().lower() for t in targets if t.strip()})
+    path.write_text(json.dumps({"targets": normalized}, indent=1, sort_keys=True), encoding="utf-8")
+
+
+def _docker_running(name: str) -> bool | None:
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return False
+    return proc.stdout.strip().lower() == "true"
+
+
+def _docker_restart(name: str, policy: RegistryPolicy) -> tuple[bool, str]:
+    wanted = name.strip().lower()
+    if wanted in policy.forbidden_restart_containers:
+        return False, f"refused: {wanted} restart forbidden by policy"
+    if wanted not in policy.allowed_restart_containers:
+        return False, f"refused: {wanted} not in allowed_restart_containers"
+    try:
+        proc = subprocess.run(
+            ["docker", "restart", name],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"{exc.__class__.__name__}"
+    ok = proc.returncode == 0
+    tail = (proc.stderr or proc.stdout or "").strip()[:80]
+    return ok, f"exit={proc.returncode} {tail}".strip()
+
+
+def _gluetun_container_action_forbidden(action: dict[str, Any]) -> str | None:
+    """Gluetun is not a live container — only retire stale probe labels."""
+    kind = str(action.get("kind") or "").strip().lower()
+    if kind == "record_retired_target":
+        return None
+    container = str(action.get("container") or "").strip().lower()
+    if container == "gluetun":
+        return "gluetun is a stale probe label only (live VPN is wireguard)"
+    if kind in {"docker_restart_if_down", "docker_health_check", "docker_inspect"}:
+        if "gluetun" in json.dumps(action).lower():
+            return "forbidden gluetun container operation"
+    return None
+
+
+def execute_fix_action(
+    skill: SkillDef,
+    alert: Mapping[str, str],
+    *,
+    policy: RegistryPolicy | None = None,
+) -> FixResult:
+    policy = policy or load_policy()
+    action = skill.fix_action or {"kind": "watch_only"}
+    kind = str(action.get("kind") or "watch_only").strip().lower()
+    followup = skill.followup
+
+    gluetun_block = _gluetun_container_action_forbidden(action)
+    if gluetun_block:
+        return FixResult(applied=False, detail=gluetun_block, homelab_followup=followup)
+
+    if kind == "watch_only":
+        return FixResult(
+            applied=True,
+            detail=f"cataloged alert class {skill.id}; awaiting fix_action in registry",
+            homelab_followup=followup or "pm: add fix_action for this class in monitoring_skills.json",
+        )
+
+    if kind == "record_retired_target":
+        target = str(action.get("target") or "").strip().lower()
+        if not target:
+            return FixResult(applied=False, detail="record_retired_target missing target", homelab_followup=followup)
+        targets = _load_retired_probe_targets()
+        changed = target not in targets
+        if changed:
+            targets.append(target)
+            _save_retired_probe_targets(targets)
+        detail = f"retired_probe_targets updated ({target})" if changed else f"{target} already retired in chip_state"
+        if target == "gluetun":
+            detail += "; live VPN is wireguard — gluetun stays retired"
+        return FixResult(applied=True, detail=detail, homelab_followup=followup)
+
+    if kind == "verify_source_contains":
+        rel = str(action.get("path") or "").strip()
+        needles = [str(n) for n in (action.get("needles") or []) if str(n).strip()]
+        file = config.REPO_ROOT / rel
+        if not file.is_file():
+            return FixResult(applied=False, detail=f"missing source {rel}", homelab_followup=followup)
+        text = file.read_text(encoding="utf-8", errors="replace")
+        missing = [n for n in needles if n not in text]
+        ok = not missing
+        detail = f"verified {rel}" if ok else f"{rel} missing needles {missing}"
+        return FixResult(applied=ok, detail=detail, homelab_followup=followup)
+
+    if kind == "docker_restart_if_down":
+        container = str(action.get("container") or "").strip().lower()
+        running = _docker_running(container)
+        if running is True:
+            return FixResult(
+                applied=True,
+                detail=f"{container} already running after soak",
+                homelab_followup=followup,
+            )
+        ok, note = _docker_restart(container, policy)
+        return FixResult(
+            applied=ok,
+            detail=f"{container} restart after soak ({note})",
+            homelab_followup=followup,
+        )
+
+    if kind == "homelab_delegate":
+        message = str(action.get("message") or "sustained outage after soak").strip()
+        if "plex-fix" in message.lower():
+            message = message.replace("plex-fix", "incidents channel")
+        return FixResult(
+            applied=True,
+            detail=f"homelab delegate queued: {message[:100]}",
+            homelab_followup=followup or f"delegate:homelabdev {message}",
+        )
+
+    if kind == "manual_note":
+        message = str(action.get("message") or "manual operator action required").strip()
+        return FixResult(
+            applied=True,
+            detail=f"note only: {message[:160]}",
+            homelab_followup=followup or "no automated fix — operator manual step only",
+        )
+
+    return FixResult(
+        applied=False,
+        detail=f"unknown fix_action kind {kind!r}",
+        homelab_followup=followup,
+    )
 
 
 def post_target_allowed(*, webhook_env: str, channel_id: str, webhook_url: str) -> tuple[bool, str]:
@@ -259,7 +472,11 @@ def run_skill_for_alert(
     *,
     skill: SkillDef | None = None,
     create_if_missing: bool = True,
+    now: float | None = None,
 ) -> SkillRun:
+    from chip_relay.monitoring_outage import note_outage_sighting
+
+    policy = load_policy()
     chosen = skill or match_skill(alert)
     created = False
     if chosen is None and create_if_missing:
@@ -281,39 +498,64 @@ def run_skill_for_alert(
         )
 
     prior = load_skill_learnings(chosen.id)
-    body = _read_body(chosen)
-    law_note = ""
-    if "gluetun" in chosen.id or "gluetun" in body.lower():
-        law_note = (
-            "gluetun 404/no-container = stale probe target on wireguard stack; "
-            "never recreate gluetun"
+    sighting = note_outage_sighting(chosen.id, alert, now=now, soak_seconds=policy.soak_seconds)
+
+    if not sighting.fix_ready:
+        mins = int(sighting.remaining_s // 60)
+        secs = int(sighting.remaining_s % 60)
+        learning = append_skill_learning(
+            chosen.id,
+            f"soak watch class={sighting.class_key} elapsed={int(sighting.elapsed_s)}s",
+            tag="soak",
         )
-    if chosen.id == "qb-firewalled-not-success" or "firewalled" in f"{alert}".lower():
-        law_note = (law_note + "; " if law_note else "") + "qBittorrent firewalled is not a successful probe"
+        receipt = (
+            f"claim: pm skill {chosen.id} — soak watch\n"
+            "status: blocked\n"
+            "evidence: tool:monitoring-outage.watch\n"
+            f"next: first sighting recorded; fix gate in {mins}m{secs:02d}s if still down"
+        )
+        return SkillRun(
+            skill_id=chosen.id,
+            created=created,
+            matched=True,
+            receipt=receipt,
+            learning_line=learning,
+        )
+
+    fix = execute_fix_action(chosen, alert, policy=policy)
 
     evidence = f"tool:monitoring-skill.{chosen.id}"
     if prior:
-        evidence += f" prior={prior[-1][:80]}"
+        evidence += f" prior={prior[-1][:60]}"
+    evidence += f" soak={int(sighting.elapsed_s)}s"
+
+    next_line = fix.homelab_followup or fix.detail
+    if fix.applied:
+        status = "done"
+        next_line = f"{fix.detail}; {next_line}"[:190]
+    else:
+        status = "blocked"
+        next_line = f"chip-chat fix incomplete: {fix.detail}"[:190]
 
     receipt = (
         f"claim: pm skill {chosen.id} — {chosen.title}\n"
-        "status: blocked\n"
+        f"status: {status}\n"
         f"evidence: {evidence}\n"
-        f"next: read-only triage; no VPN container restarts; detail={str(alert.get('detail', ''))[:100]}"
+        f"next: {next_line}"
     )
     violation = receipt_violates_vpn_law(receipt)
     if violation:
         receipt = (
             f"claim: pm skill {chosen.id} refused\n"
             "status: refused\n"
-            f"evidence: tool:monitoring-skill.policy\n"
+            "evidence: tool:monitoring-skill.policy\n"
             f"next: {violation}"
         )
 
     learning = append_skill_learning(
         chosen.id,
-        f"matched alert key={alert.get('key', '')!r} class={chosen.id}",
-        tag="match",
+        f"fix kind={chosen.fix_action.get('kind')} applied={fix.applied} detail={fix.detail[:100]}",
+        tag="run",
     )
     return SkillRun(
         skill_id=chosen.id,

@@ -1,10 +1,10 @@
-# stale-gluetun-health-target
+# Stale VPN probe labels (Gluetun / AirVPN / “VPN (Gluetun)”)
 
-Live homelab VPN is **wireguard** + **qbittorrent**. Health monitors that still probe **gluetun** are stale.
+**There is no Gluetun container.** Live VPN is **WireGuard** (`wireguard` container, `wg0`).
+
+Any alert that still names **gluetun**, **AirVPN port-health**, or **VPN (Gluetun)** is a **stale probe label** — not a service-down event.
 
 Law:
-- HTTP 404 / "No such container" for **gluetun** means **update or drop the probe target** — never recreate or restart gluetun from Chip Chat.
-- Do not restart **wireguard**, **qbittorrent**, or any VPN container from this skill path (read-only triage only).
-- qBittorrent `firewalled` / `connection_status=firewalled` is **not** a successful probe; treat as a separate fault class (`qb-firewalled-not-success`).
-
-Receipt shape: four-line blocked triage with evidence `tool:monitoring-skill.stale-gluetun-health-target`.
+- `fix_action`: `record_retired_target` for `gluetun` in chip_state only.
+- Never recreate, restart, or health-check a container named gluetun from Chip Chat.
+- Point operators at **WireGuard** probes (`wg-show`, handshake stale) and homelab monitor config updates.

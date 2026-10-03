@@ -1,0 +1,33 @@
+{
+  "catalog_window": "2026-09-19..2026-10-02 PT",
+  "samples": {
+    "stale-vpn-gluetun-label-probe": "AirVPN port-health: gluetun /v1/portforward 404 No such container",
+    "qb-wireguard-egress-firewalled": "qBittorrent connection_status=firewalled",
+    "standup-homelab-gymlog-all-unknown": "Homelab standup: all lanes unknown; GymLog standup all-unknown",
+    "gha-website-ingest-failed": "GHA website ingest: pull failed — no new artifact",
+    "ally-pc-wsl-watchdog-red": "ALLY-PC WSL watchdog status: red",
+    "lumocheck-lumo-tamer-timeout": "lumocheck timed out waiting for lumo-tamer",
+    "ombi-down": "Ombi down — no recovery line",
+    "prowlarr-down": "Prowlarr container is down",
+    "radarr-down": "Radarr down since 2026-09-30",
+    "sonarr-down": "Sonarr is not responding",
+    "arr-restart-fail": "Monitor auto-restart failed: Sonarr restart failed",
+    "plex-external-oracle-http": "Oracle Plex check HTTP 530 via Cloudflare edge",
+    "plex-ally-pc-down": "Plex on ally-pc is down",
+    "plex-container-down": "Plex container exited",
+    "wireguard-peer-oracle-stall": "Oracle observer: wireguard peer drop — handshake stall 45m",
+    "wireguard-container-down": "WireGuard container is not running",
+    "qbittorrent-down": "qBittorrent is down",
+    "stale-vpn-gluetun-label-probe-restart-loop": "Monitor: gluetun + qbittorrent restart loop detected"
+  },
+  "sample_expected_skill": {
+    "stale-vpn-gluetun-label-probe-restart-loop": "stale-vpn-gluetun-label-probe"
+  },
+  "excluded_non_faults": [
+    "media-workflow ticker: next remux window",
+    "Nancy reclaim execute frozen by policy",
+    "RAZ-337 status update for Ally",
+    "Jellyfin retired — do not alert",
+    "chip-relay self-test heartbeat ok"
+  ]
+}

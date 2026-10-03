@@ -1,8 +1,8 @@
-# qb-firewalled-not-success
+# qBittorrent firewalled — WireGuard egress fault
 
-When qBittorrent reports `firewalled` (or homelab feed key `qb-connection`), the listener is **not** healthy.
+`connection_status=firewalled` means the **WireGuard egress path** is wrong (port-forward / edge), not a successful probe.
 
 Law:
-- Never mark the probe green while `firewalled` is true.
-- Do not restart VPN containers (wireguard/gluetun) from Chip Chat; triage only.
-- Escalate with a propose receipt — homelab lane owns port-forward / edge fixes.
+- Firewalled is always a **fault** (homelab feed already flags it).
+- Do not restart gluetun (no such container) or qbittorrent from chip-chat.
+- After soak: homelab lane fixes edge forward / listener on the **wireguard** stack.

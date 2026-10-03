@@ -1,25 +1,306 @@
 {
-  "version": 1,
+  "version": 4,
+  "catalog_window": "2026-09-19..2026-10-02 PT (#monitoring-logs last 1000 msgs)",
+  "soak_seconds": 600,
+  "policy": {
+    "forbidden_restart_containers": [
+      "gluetun",
+      "qbittorrent",
+      "plex",
+      "sonarr",
+      "radarr",
+      "prowlarr",
+      "ombi"
+    ],
+    "allowed_restart_containers": [
+      "wireguard",
+      "discord-bot",
+      "monitoring-api"
+    ]
+  },
+  "overlay_defaults": {
+    "fix_action": {
+      "kind": "watch_only"
+    },
+    "followup": "pm: catalog this class in config/chip_chat/monitoring_skills.json with a fix_action"
+  },
   "skills": [
     {
-      "id": "stale-gluetun-health-target",
-      "title": "Retire gluetun probe targets (live VPN is WireGuard)",
+      "id": "stale-vpn-gluetun-label-probe",
+      "title": "Stale probe labels (Gluetun / AirVPN / VPN Gluetun) — live VPN is WireGuard",
       "match_any": [
-        "gluetun",
-        "no such container: gluetun",
-        "404.*gluetun"
+        "airvpn",
+        "port-health.*gluetun",
+        "gluetun.*/v1/portforward",
+        "404.*gluetun",
+        "no such container.*gluetun",
+        "vpn \\(gluetun\\)",
+        "vpn \\(gluetun",
+        "vpn-down page.*gluetun",
+        "gluetun.*vpn-down",
+        "gluetun.*qbittorrent",
+        "qbittorrent.*gluetun",
+        "restart loop.*gluetun",
+        "auto-restart.*gluetun",
+        "monitor.*gluetun",
+        "health.*gluetun",
+        "gluetun.*down",
+        "gluetun.*health"
       ],
-      "body_path": "config/chip_chat/monitoring_skills/stale-gluetun-health-target.md"
+      "body_path": "config/chip_chat/monitoring_skills/stale-gluetun-health-target.md",
+      "fix_action": {
+        "kind": "record_retired_target",
+        "target": "gluetun"
+      },
+      "followup": "homelabdev: retire gluetun/AirVPN probe targets; monitor wireguard/wg0 only — gluetun is not a service"
     },
     {
-      "id": "qb-firewalled-not-success",
-      "title": "qBittorrent firewalled is a fault, not a green probe",
+      "id": "qb-wireguard-egress-firewalled",
+      "title": "qBittorrent firewalled — WireGuard egress fault",
       "match_any": [
-        "qb-connection",
-        "firewalled",
-        "connection_status=firewalled"
+        "connection_status=firewalled",
+        "qbittorrent.*firewalled",
+        "firewalled.*qbittorrent",
+        "qb-connection"
       ],
-      "body_path": "config/chip_chat/monitoring_skills/qb-firewalled-not-success.md"
+      "body_path": "config/chip_chat/monitoring_skills/qb-firewalled-not-success.md",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "qBittorrent firewalled after soak — triage WireGuard egress and port-forward (not gluetun)"
+      },
+      "followup": "delegate:homelabdev WireGuard egress / port-forward; firewalled is never a green probe"
+    },
+    {
+      "id": "standup-homelab-gymlog-all-unknown",
+      "title": "Homelab + GymLog standup all-unknown",
+      "match_any": [
+        "standup.*all-unknown",
+        "all lanes unknown",
+        "gymlog standup.*unknown",
+        "homelab standup.*unknown"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "standup emitters silent — triage homelab and GymLog collectors after soak"
+      },
+      "followup": "delegate:chipchatdev fix standup emitters; delegate:homelabdev if homelab lane root"
+    },
+    {
+      "id": "gha-website-ingest-failed",
+      "title": "GHA website ingest pull failed / no artifact",
+      "match_any": [
+        "website ingest",
+        "ingest pull failed",
+        "no new artifact"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "GHA website ingest failed — check workflow artifact and deploy lane"
+      },
+      "followup": "delegate:homelabdev website ingest workflow"
+    },
+    {
+      "id": "ally-pc-wsl-watchdog-red",
+      "title": "ALLY-PC WSL watchdog red",
+      "match_any": [
+        "ally-pc wsl watchdog",
+        "wsl watchdog.*red",
+        "watchdog status: red"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "ALLY-PC WSL watchdog red after soak"
+      },
+      "followup": "delegate:homelabdev ALLY-PC WSL watchdog"
+    },
+    {
+      "id": "lumocheck-lumo-tamer-timeout",
+      "title": "lumocheck / lumo-tamer timeout (manual login only)",
+      "match_any": [
+        "lumocheck",
+        "lumo-tamer",
+        "lumo tamer timeout"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "manual_note",
+        "message": "lumocheck/lumo-tamer timeout — known class; Ally manual Lumo/Proton login required"
+      },
+      "followup": "pm: no restart or reauth from chip-chat; Ally logs in manually when this fires"
+    },
+    {
+      "id": "ombi-down",
+      "title": "Ombi down",
+      "match_any": [
+        "ombi down",
+        "ombi is down",
+        "ombi.*not responding"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Ombi sustained down after soak"
+      },
+      "followup": "delegate:homelabdev Ombi container"
+    },
+    {
+      "id": "prowlarr-down",
+      "title": "Prowlarr down",
+      "match_any": [
+        "prowlarr down",
+        "prowlarr is down",
+        "prowlarr container",
+        "prowlarr.*not running"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Prowlarr sustained down after soak"
+      },
+      "followup": "delegate:homelabdev Prowlarr container"
+    },
+    {
+      "id": "radarr-down",
+      "title": "Radarr down",
+      "match_any": [
+        "radarr down",
+        "radarr is down",
+        "radarr.*not responding"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Radarr sustained down after soak"
+      },
+      "followup": "delegate:homelabdev Radarr container"
+    },
+    {
+      "id": "sonarr-down",
+      "title": "Sonarr down",
+      "match_any": [
+        "sonarr down",
+        "sonarr is down",
+        "sonarr.*not responding"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Sonarr sustained down after soak"
+      },
+      "followup": "delegate:homelabdev Sonarr container"
+    },
+    {
+      "id": "arr-restart-fail",
+      "title": "Sonarr / Radarr monitor restart failure",
+      "match_any": [
+        "sonarr restart fail",
+        "radarr restart fail"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Sonarr/Radarr auto-restart failure after soak"
+      },
+      "followup": "delegate:homelabdev Arr restart policy (no gluetun targets)"
+    },
+    {
+      "id": "plex-external-oracle-http",
+      "title": "Plex external Oracle HTTP check (530/502/timeout)",
+      "match_any": [
+        "oracle plex",
+        "plex.*http 530",
+        "plex.*502",
+        "plex.*cloudflare",
+        "plex external.*timeout"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "confirm local Plex on ally-pc/container before edge action; HTTP 530 often Cloudflare"
+      },
+      "followup": "delegate:homelabdev Plex local probe then edge; receipts stay in monitoring-logs"
+    },
+    {
+      "id": "plex-ally-pc-down",
+      "title": "Plex on ally-pc down",
+      "match_any": [
+        "plex on ally-pc",
+        "ally-pc.*plex.*down",
+        "native pms.*down"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "ally-pc native Plex down after soak"
+      },
+      "followup": "delegate:homelabdev native PMS on ally-pc"
+    },
+    {
+      "id": "plex-container-down",
+      "title": "Plex container down",
+      "match_any": [
+        "plex container",
+        "plex container down",
+        "plex container exited"
+      ],
+      "body_path": "config/chip_chat/monitoring_skills/plex-down.md",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "docker Plex container down after soak"
+      },
+      "followup": "delegate:homelabdev Plex container; native-vs-docker map before restart"
+    },
+    {
+      "id": "wireguard-peer-oracle-stall",
+      "title": "WireGuard peer drop (Oracle observer)",
+      "match_any": [
+        "oracle observer.*wireguard",
+        "oracle.*peer drop",
+        "peer drop.*handshake stall",
+        "handshake stall.*oracle"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "Oracle observer WireGuard peer/handshake stall after soak"
+      },
+      "followup": "delegate:homelabdev wg peer path on Oracle observer"
+    },
+    {
+      "id": "wireguard-container-down",
+      "title": "WireGuard container down",
+      "match_any": [
+        "wireguard container",
+        "wireguard.*not running",
+        "wg0-handshake",
+        "wg0-missing",
+        "wg-show",
+        "latest handshake stale"
+      ],
+      "body_path": "config/chip_chat/monitoring_skills/wireguard-down.md",
+      "fix_action": {
+        "kind": "docker_restart_if_down",
+        "container": "wireguard"
+      },
+      "followup": "homelabdev: verify wg0 handshake if flaps were under 10m"
+    },
+    {
+      "id": "qbittorrent-down",
+      "title": "qBittorrent down",
+      "match_any": [
+        "qbittorrent down",
+        "qbittorrent is down",
+        "qbittorrent.*not running"
+      ],
+      "body_path": "",
+      "fix_action": {
+        "kind": "homelab_delegate",
+        "message": "qBittorrent sustained down after soak (often self-recovers ~4m)"
+      },
+      "followup": "delegate:homelabdev qBittorrent; chip-chat will not restart qbittorrent"
     }
   ]
 }
