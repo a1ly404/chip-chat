@@ -25,10 +25,12 @@ from chip_relay.monitoring_skills import (
     load_policy,
     load_skill_learnings,
     match_skill,
+    overlay_registry_path,
     parse_monitoring_message,
     post_target_allowed,
     receipt_violates_vpn_law,
     run_skill_for_alert,
+    should_ignore_alert,
 )
 from chip_relay.routing import (
     RouteKind,
@@ -358,7 +360,71 @@ def test_catalog_short_blip_does_not_fix_before_soak(
 
 def test_catalog_excluded_noise_does_not_match() -> None:
     for line in _catalog_fixture()["excluded_non_faults"]:
-        assert match_skill(parse_monitoring_message(line)) is None
+        alert = parse_monitoring_message(line)
+        assert match_skill(alert) is None
+        assert should_ignore_alert(alert) is True
+        run = run_skill_for_alert(alert)
+        assert run.ignored is True
+        assert run.receipt == ""
+        assert run.created is False
+
+
+def test_handle_monitoring_alert_ignores_status_noise_without_webhook(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = "🟢 Monitoring API started. Auto-restart and port sync enabled."
+    room = _monitoring_room()
+    environ = {
+        MONITORING_LISTEN_ENV: "1",
+        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+    }
+    calls: list[tuple[str, str, str]] = []
+
+    def webhook(url: str, username: str, body: str) -> WebhookResult:
+        calls.append((url, username, body))
+        return WebhookResult(status=204)
+
+    result = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+    )
+    assert result.ok is True
+    assert result.webhook_calls == 0
+    assert calls == []
+    assert not overlay_registry_path().is_file()
+
+
+def test_handle_monitoring_alert_posts_real_fault_on_soak_path(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = "AirVPN port-health: gluetun /v1/portforward 404 No such container"
+    room = _monitoring_room()
+    environ = {
+        MONITORING_LISTEN_ENV: "1",
+        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+    }
+    calls: list[str] = []
+
+    def webhook(url: str, username: str, body: str) -> WebhookResult:
+        calls.append(body)
+        return WebhookResult(status=204)
+
+    result = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+    )
+    assert result.ok is True
+    assert result.webhook_calls == 1
+    assert len(calls) == 1
+    assert "tool:monitoring-outage.watch" in calls[0]
 
 
 def test_no_skill_health_checks_or_restarts_gluetun_container() -> None:

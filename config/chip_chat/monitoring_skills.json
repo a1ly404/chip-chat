@@ -24,6 +24,15 @@
     },
     "followup": "pm: catalog this class in config/chip_chat/monitoring_skills.json with a fix_action"
   },
+  "ignore_any": [
+    "monitoring api started",
+    "auto-restart and port sync enabled",
+    "media-workflow ticker",
+    "nancy reclaim",
+    "raz-.* status",
+    "jellyfin retired",
+    "chip-relay self-test heartbeat"
+  ],
   "skills": [
     {
       "id": "stale-vpn-gluetun-label-probe",

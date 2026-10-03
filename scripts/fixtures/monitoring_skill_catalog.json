@@ -24,6 +24,7 @@
     "stale-vpn-gluetun-label-probe-restart-loop": "stale-vpn-gluetun-label-probe"
   },
   "excluded_non_faults": [
+    "🟢 Monitoring API started. Auto-restart and port sync enabled.",
     "media-workflow ticker: next remux window",
     "Nancy reclaim execute frozen by policy",
     "RAZ-337 status update for Ally",

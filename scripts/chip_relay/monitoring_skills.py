@@ -51,6 +51,7 @@ class SkillRun:
     matched: bool
     receipt: str
     learning_line: str
+    ignored: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,19 @@ def load_policy(path: Path | None = None) -> RegistryPolicy:
         soak_seconds=soak,
         overlay_defaults=overlay_defaults,
     )
+
+
+def load_ignore_patterns(path: Path | None = None) -> tuple[str, ...]:
+    raw = _load_registry_raw(path)
+    return tuple(str(p) for p in (raw.get("ignore_any") or []) if str(p).strip())
+
+
+def should_ignore_alert(alert: Mapping[str, str], patterns: tuple[str, ...] | None = None) -> bool:
+    patterns = patterns if patterns is not None else load_ignore_patterns()
+    blob = f"{alert.get('key', '')} {alert.get('detail', '')} {alert.get('raw', '')}".strip()
+    if not blob or not patterns:
+        return False
+    return any(_pattern_hits(p, blob) for p in patterns)
 
 
 def _skill_from_row(row: dict[str, Any]) -> SkillDef | None:
@@ -475,6 +489,16 @@ def run_skill_for_alert(
     now: float | None = None,
 ) -> SkillRun:
     from chip_relay.monitoring_outage import note_outage_sighting
+
+    if should_ignore_alert(alert):
+        return SkillRun(
+            skill_id="",
+            created=False,
+            matched=False,
+            receipt="",
+            learning_line="",
+            ignored=True,
+        )
 
     policy = load_policy()
     chosen = skill or match_skill(alert)

@@ -24,7 +24,7 @@ Infisical runtime fetch for `--listen` stays **Discord + OpenRouter only** (`scr
 5. **`fix_action` kinds** (declarative): `record_retired_target`, `verify_source_contains`, `docker_restart_if_down` (policy allowlist only — **never gluetun**), `homelab_delegate`, `manual_note` (operator step only — no restart/reauth), `watch_only`.
 6. Four-line receipt posts to `#monitoring-logs` via `CHIP_WEBHOOK_MONITORING` (`username=pm`). Learnings append under `chip_state/monitoring_skills/<id>/learnings.jsonl`.
 
-Unmatched alerts create an overlay skill stub (repeatable fingerprint) instead of silently dropping.
+Unmatched alerts create an overlay skill stub (repeatable fingerprint) instead of silently dropping — **except** lines matched by registry `ignore_any` (status posts, tickers, heartbeats). Those are dropped with **no** overlay, soak, or Discord receipt.
 
 ## Seeded skills (catalog 2026-09-19..2026-10-02 PT)
 
@@ -36,7 +36,7 @@ All rows live in `config/chip_chat/monitoring_skills.json` (history catalog). Re
 
 **lumocheck / lumo-tamer timeout:** `manual_note` only after soak (Ally manual login — no auto restart or reauth).
 
-Add or tune rows by editing `monitoring_skills.json` or the overlay file (`match_any` + `fix_action` + optional `followup`) — no Python change required.
+Add or tune rows by editing `monitoring_skills.json` or the overlay file (`match_any` + `fix_action` + optional `followup`) — no Python change required. Add benign noise classes under top-level `ignore_any` (same substring/regex rules as `match_any`).
 
 Bodies live under `config/chip_chat/monitoring_skills/*.md`.
 

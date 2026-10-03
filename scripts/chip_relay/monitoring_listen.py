@@ -54,6 +54,7 @@ class MonitoringTurn:
     created_skill: bool
     receipt: str
     learning_line: str
+    ignored: bool = False
 
 
 def build_turn(content: str) -> MonitoringTurn:
@@ -65,6 +66,7 @@ def build_turn(content: str) -> MonitoringTurn:
         created_skill=run.created,
         receipt=run.receipt,
         learning_line=run.learning_line,
+        ignored=run.ignored,
     )
 
 
@@ -100,6 +102,10 @@ def handle_monitoring_alert(
         logs.append(spend_note)
 
     turn = build_turn(content)
+    if turn.ignored:
+        logs.append("monitoring alert ignored (ignore_any)")
+        return DispatchResult(ok=True, logs=logs)
+
     url = (environ.get(room.webhook_env) or "").strip()
     if not url:
         return DispatchResult(ok=False, alert=f"{room.webhook_env} unset", logs=logs)
