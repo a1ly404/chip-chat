@@ -369,6 +369,15 @@ def test_catalog_excluded_noise_does_not_match() -> None:
         assert run.created is False
 
 
+def test_catalog_faults_must_not_be_ignored(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    for line in _catalog_fixture()["faults_must_not_be_ignored"]:
+        alert = parse_monitoring_message(line)
+        assert should_ignore_alert(alert) is False
+        run = run_skill_for_alert(alert)
+        assert run.ignored is False
+
+
 def test_mw_ticker_ignored_no_overlay(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     line = "MW ticker 03:00 PT | disk cleanup scheduled; no action"
@@ -392,6 +401,17 @@ def test_pgs_embed_morning_report_ignored_no_overlay(tmp_path, monkeypatch) -> N
     assert run.receipt == ""
     assert run.created is False
     assert not overlay_registry_path().is_file()
+
+
+def test_pgs_embed_failure_not_ignored(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = "🔴 PGS embed failed — nightly job exit 1: ffmpeg error on episode S01E02"
+    alert = parse_monitoring_message(line)
+    assert should_ignore_alert(alert) is False
+    run = run_skill_for_alert(alert)
+    assert run.ignored is False
+    assert run.created is True
+    assert "tool:monitoring-outage.watch" in run.receipt
 
 
 def test_lazylibrarian_ignored_no_overlay(tmp_path, monkeypatch) -> None:

@@ -30,7 +30,7 @@ Unmatched alerts create an overlay skill stub (repeatable fingerprint) instead o
 
 All rows live in `config/chip_chat/monitoring_skills.json` (history catalog). Regression samples: `scripts/fixtures/monitoring_skill_catalog.json`. Match priority follows **file order** (first `match_any` hit wins).
 
-**Not seeded:** LazyLibrarian (not in use); media-workflow ticker, Nancy reclaim, PGS embed morning reports, old port-sync notes, RAZ status posts, retired Jellyfin/Jellyseerr/Calibre-Web, Lidarr instant recovery, chip-relay self-test.
+**Not seeded:** LazyLibrarian (not in use); media-workflow ticker, Nancy reclaim, PGS embed **morning report** status posts only (PGS embed job failures are not `ignore_any`), old port-sync notes, RAZ status posts, retired Jellyfin/Jellyseerr/Calibre-Web, Lidarr instant recovery, chip-relay self-test.
 
 **Gluetun / AirVPN labels:** no gluetun container — stale probe retirement only (`record_retired_target`), never restart/health-check gluetun.
 

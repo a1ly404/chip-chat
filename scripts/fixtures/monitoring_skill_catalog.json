@@ -37,5 +37,8 @@
     "chip-relay self-test heartbeat ok",
     "📺 PGS embed morning report | Last night: ok=0 skipped=0 no_source=0 error=0 | job health: ran",
     "💾 Nancy reclaim morning — no execute"
+  ],
+  "faults_must_not_be_ignored": [
+    "🔴 PGS embed failed — nightly job exit 1: ffmpeg error embedding MediaTitle123"
   ]
 }
