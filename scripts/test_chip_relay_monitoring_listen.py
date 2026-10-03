@@ -379,6 +379,21 @@ def test_mw_ticker_ignored_no_overlay(tmp_path, monkeypatch) -> None:
     assert not overlay_registry_path().is_file()
 
 
+def test_pgs_embed_morning_report_ignored_no_overlay(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = (
+        "📺 PGS embed morning report | Last night: ok=0 skipped=0 no_source=0 error=0 "
+        "| needs_embed: foo=1 | job health: ran"
+    )
+    alert = parse_monitoring_message(line)
+    assert should_ignore_alert(alert) is True
+    run = run_skill_for_alert(alert)
+    assert run.ignored is True
+    assert run.receipt == ""
+    assert run.created is False
+    assert not overlay_registry_path().is_file()
+
+
 def test_lazylibrarian_ignored_no_overlay(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     line = "LazyLibrarian Ebook Fallback failed — do not fix from chip-chat"
