@@ -227,7 +227,12 @@ def test_feed_posts_four_line_once_per_cooldown(monkeypatch, tmp_path: Path) -> 
     assert n2 == 0
 
 
-def test_killswitch_faults_when_route_or_drop_missing() -> None:
+def test_killswitch_eth0_default_with_green_rules_is_healthy() -> None:
+    """Tonight's live state: eth0 default + green WGKS_OUT/WGKS6_OUT drop rules.
+
+    The old probe faulted this exact state (tool:wg-route.not-wg0 acted before
+    the rules were ever checked); the new law treats it as protected egress.
+    """
     alerts = homelab_probes.collect_alerts(
         runner=_runner({
             tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
@@ -242,13 +247,13 @@ def test_killswitch_faults_when_route_or_drop_missing() -> None:
         downloads_path=None,
         qb_url="",
     )
-    hit = [a for a in alerts if a["key"] == "wg-killswitch"]
-    assert hit
-    assert "not-wg0" in str(hit[0]["receipt"])
+    assert [a for a in alerts if a["key"] == "wg-killswitch"] == []
+
+
+def test_killswitch_wg0_route_with_green_rules_is_healthy() -> None:
     alerts = homelab_probes.collect_alerts(
         runner=_runner({
             tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
-            tuple(homelab_probes.WG_IPTABLES_ARGV): (1, "", "Bad rule"),
             tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
             tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
                 0,
@@ -259,9 +264,27 @@ def test_killswitch_faults_when_route_or_drop_missing() -> None:
         downloads_path=None,
         qb_url="",
     )
-    hit = [a for a in alerts if a["key"] == "wg-killswitch"]
-    assert hit and "missing-drop" in str(hit[0]["receipt"])
-    assert homelab_probes.is_homelab_feed_alert(hit[0])
+    assert [a for a in alerts if a["key"] == "wg-killswitch"] == []
+
+
+def test_killswitch_unexpected_egress_dev_faults() -> None:
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
+            tuple(homelab_probes.WG_ROUTE_ARGV): (0, "default via 192.168.1.1 dev br-rogue0\n", ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}]}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    route_alerts = [a for a in alerts if a["key"] == "wg-killswitch"]
+    assert route_alerts
+    assert "unexpected-egress-dev" in str(route_alerts[0]["receipt"])
 
 
 def test_is_homelab_feed_alert_classifies_keys() -> None:
@@ -269,6 +292,40 @@ def test_is_homelab_feed_alert_classifies_keys() -> None:
     assert homelab_probes.is_homelab_feed_alert({"key": "no-such-image", "detail": "tool:docker-logs.no-such-image"})
     assert not homelab_probes.is_homelab_feed_alert({"key": "monitoring-api", "detail": "status=degraded"})
     assert not homelab_probes.is_homelab_feed_alert({"key": "no-such-image", "detail": "pull failed"})
+
+
+def _qbt_inspect(state: str, mounts: list[dict]) -> str:
+    return json.dumps({"State": {"Status": state}, "Mounts": mounts})
+
+
+_DOWN = [{"Destination": "/downloads", "Name": "razzor-nas-torrents", "Type": "volume"}]
+
+
+def test_mount_alert_allows_downloads_nas_named_volume() -> None:
+    inspect = _qbt_inspect("running", [{"Destination": "/downloads", "Name": "razzorstack_downloads", "Type": "volume"}])
+    assert homelab_probes.mount_alert(inspect) is None
+
+
+def test_mount_alert_allows_nas_device_path_source() -> None:
+    inspect = _qbt_inspect(
+        "running",
+        [{"Destination": "/downloads", "Name": "", "Source": "//192.168.1.100/Media/Torrents", "Type": "bind"}],
+    )
+    assert homelab_probes.mount_alert(inspect) is None
+
+
+def test_mount_alert_faults_unrecognized_volume() -> None:
+    inspect = _qbt_inspect("running", [{"Destination": "/downloads", "Name": "random_other_volume", "Type": "volume"}])
+    hit = homelab_probes.mount_alert(inspect)
+    assert hit is not None
+    assert "downloads-unrecognized-mount" in str(hit["detail"])
+
+
+def test_mount_alert_blocks_on_stopped_container() -> None:
+    inspect = _qbt_inspect("created", [{"Destination": "/downloads", "Name": "random_other_volume", "Type": "volume"}])
+    hit = homelab_probes.mount_alert(inspect)
+    assert hit is not None
+    assert "qbt-not-running" in str(hit["detail"])
 
 
 def test_tick_homelab_faults_classify_when_enabled(monkeypatch, tmp_path: Path) -> None:

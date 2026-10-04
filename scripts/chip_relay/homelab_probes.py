@@ -36,9 +36,16 @@ FEED_QB_PASSWORD_ENV = "CHIP_FEED_QB_PASSWORD"
 _TRANSFER_INFO_SUFFIX = "/api/v2/transfer/info"
 
 HANDSHAKE_STALE_S = 180
+# Post-cutover (RAZ-237 / ff71d93) the torrent DATA lives on the Nancy NAS;
+# both live volume names bind to the same //192.168.1.100/Media/Torrents
+# CIFS device (receipts in docs/MONITOR_PROBE_CONTRACT_SPEC.md).
+TORRENT_VOLUME_ALLOWLIST = frozenset(
+    {"razzor-nas-torrents", "razzorstack_downloads"}
+)
+NAS_TORRENTS_DEVICE = "192.168.1.100"
+NAS_TORRENTS_SHARE = "/Media/Torrents"
 DOWNLOADS_MIN_BYTES = 2 * 1024 * 1024 * 1024
 DOWNLOADS_PATH = "/downloads"
-TORRENT_VOLUME = "razzor-nas-torrents"
 # owui-proxy /health (RAZ-343): relay probes the published host port, never the
 # body — HTTP 500 lands as a refused receipt, repair stays razzorstack lane.
 OWUI_HEALTH_URL_ENV = "CHIP_FEED_OWUI_URL"
@@ -243,35 +250,60 @@ def _unreachable(code: int, out: str, err: str) -> bool:
 
 
 def killswitch_alert(runner: Runner) -> dict[str, object] | None:
-    """Fault when the default route is not wg0 or the eth0 DROP rule is missing."""
+    """Kill-switch law: the eth0 egress DROP rules are authoritative (v4+v6).
+
+    Post-cutover (RAZ-335 / compose ff71d93) the wireguard container's default
+    route is eth0 by design with protection enforced by WGKS_OUT/WGKS6_OUT
+    `-o eth0 -j DROP`. The wg0 route is a secondary receipt only: a green
+    netns has green drop rules AND a route dev in {wg0, eth0}; missing rules
+    fault (both → no-drop-rules, each single → its own missing-drop label,
+    labels unchanged today). The old unconditional wg0-route fault
+    (tool:wg-route.not-wg0) is retired per docs/MONITOR_PROBE_CONTRACT_SPEC.md.
+    """
     code, out, err = runner(list(WG_ROUTE_ARGV))
     if _unreachable(code, out, err):
         return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
-    if code != 0 or "dev wg0" not in out:
-        return _fault(
-            "wg-killswitch",
-            "default route is not wg0",
-            "tool:wg-route.not-wg0",
-            "propose compose-recreate only after scoped GO",
-        )
+    route_out = out if code == 0 else ""
     code, out, err = runner(list(WG_IPTABLES_ARGV))
     if _unreachable(code, out, err):
         return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
-    if code != 0:
+    v4_ok = code == 0
+    code, out, err = runner(list(WG_IP6TABLES_ARGV))
+    if _unreachable(code, out, err):
+        return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
+    v6_ok = code == 0
+    if not v4_ok and not v6_ok:
+        return _fault(
+            "wg-killswitch",
+            "eth0 egress drop rules missing (v4+v6)",
+            "tool:wg-killswitch.no-drop-rules",
+            "propose compose-recreate only after scoped GO",
+        )
+    if not v4_ok:
         return _fault(
             "wg-killswitch",
             "eth0 IPv4 drop rule missing",
             "tool:wg-iptables.missing-drop",
             "propose compose-recreate only after scoped GO",
         )
-    code, out, err = runner(list(WG_IP6TABLES_ARGV))
-    if _unreachable(code, out, err):
-        return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
-    if code != 0:
+    if not v6_ok:
         return _fault(
             "wg-killswitch",
             "eth0 IPv6 drop rule missing",
             "tool:wg-ip6tables.missing-drop",
+            "propose compose-recreate only after scoped GO",
+        )
+    tokens = route_out.split()
+    route_dev = ""
+    if "dev" in tokens:
+        idx = tokens.index("dev")
+        if idx + 1 < len(tokens):
+            route_dev = tokens[idx + 1]
+    if route_dev not in ("wg0", "eth0", ""):
+        return _fault(
+            "wg-killswitch",
+            f"default route egress is unexpected iface dev={route_dev}",
+            "tool:wg-killswitch.unexpected-egress-dev",
             "propose compose-recreate only after scoped GO",
         )
     return None
@@ -306,6 +338,16 @@ def mount_alert(inspect_json: str) -> dict[str, object] | None:
         doc = doc[0] if doc else {}
     if not isinstance(doc, dict):
         return _blocked("downloads-mount", "qbittorrent inspect unreadable", "tool:docker-inspect.unreadable")
+    state = doc.get("State") if isinstance(doc.get("State"), dict) else {}
+    status = str(state.get("Status") or "").lower()
+    if status and status != "running":
+        # A stopped/created/exited client is a transport-class state, not a
+        # mount misconfiguration (docs/MONITOR_PROBE_CONTRACT_SPEC.md §2.3).
+        return _blocked(
+            "downloads-mount",
+            f"qbittorrent state={status} (not a mount fault)",
+            "tool:docker-inspect.qbt-not-running",
+        )
     mounts = doc.get("Mounts") if isinstance(doc.get("Mounts"), list) else []
     hit = None
     for mnt in mounts:
@@ -321,11 +363,14 @@ def mount_alert(inspect_json: str) -> dict[str, object] | None:
         )
     name = str(hit.get("Name") or "")
     source = str(hit.get("Source") or "")
-    if TORRENT_VOLUME not in name and TORRENT_VOLUME not in source:
+    device_blob = f"{name}\n{source}"
+    ok_name = any(vol in device_blob for vol in TORRENT_VOLUME_ALLOWLIST)
+    ok_nas = NAS_TORRENTS_DEVICE in device_blob and NAS_TORRENTS_SHARE in device_blob
+    if not (ok_name or ok_nas):
         return _fault(
             "downloads-mount",
-            "/downloads is not the razzor-nas-torrents mount",
-            "tool:docker-inspect.downloads-wrong-mount",
+            f"/downloads mount {name or source!r} is not a known torrents mount",
+            "tool:docker-inspect.downloads-unrecognized-mount",
             "compose-recreate stays propose",
         )
     return None
