@@ -78,20 +78,50 @@ def feed_enabled(environ: dict[str, str] | None = None) -> bool:
     return env.get(FEED_ENABLED_ENV, "").strip().lower() in _TRUE_VALUES
 
 
-def _targets(environ: dict[str, str] | None = None) -> dict[str, int]:
+def _targets(environ: dict[str, str] | None = None) -> dict[str, tuple[str | None, int]]:
+    """Feed probe targets.
+
+    ``CHIP_FEED_TARGETS`` value forms (one per target, comma-separated):
+
+    - ``name=PORT`` — probe ``CHIP_FEED_HOST`` (default ``host.docker.internal``);
+    - ``name=http://HOST:PORT`` — per-target full URL: probe by container DNS
+      (``HOST`` is the docker network alias/host part, taken verbatim; only
+      http(s) with an explicit host and port is accepted). Used after the
+      razzorstack monitoring-api host publish was retired (razzorstack PR #616)
+      so the feed reaches the monitor over the shared media network.
+
+    Unknown/missing forms keep the existing default entry (one bad value never
+    silences the other probes).
+    """
     env = environ if environ is not None else os.environ
-    out = dict(_DEFAULT_TARGETS)
+    out: dict[str, tuple[str | None, int]] = {
+        name: (None, port) for name, port in _DEFAULT_TARGETS.items()
+    }
     raw = (env.get(FEED_TARGETS_ENV) or "").strip()
     if raw:
         for part in raw.split(","):
             part = part.strip()
             if not part or "=" not in part:
                 continue
-            name, _, port = part.partition("=")
-            try:
-                out[name.strip().lower()] = int(port)
-            except ValueError:
+            name, _, rhs = part.partition("=")
+            name = name.strip().lower()
+            rhs = rhs.strip()
+            if not name:
                 continue
+            if "://" in rhs:
+                split = urllib.parse.urlsplit(rhs)
+                try:
+                    port = split.port if split.scheme in ("http", "https") else None
+                    host = split.hostname
+                except ValueError:
+                    port, host = None, None
+                if host is not None and port is not None:
+                    out[name] = (host, int(port))
+            else:
+                try:
+                    out[name] = (None, int(rhs))
+                except ValueError:
+                    continue
     return out
 
 
@@ -301,8 +331,8 @@ def collect_homelab_alerts(environ: dict[str, str] | None = None) -> list[dict[s
 def tick(*, persist: bool = False, environ: dict[str, str] | None = None) -> dict[str, object]:
     healths: dict[str, dict[str, object]] = {}
     host = _env(FEED_HOST_ENV, DEFAULT_HOST)
-    for name, port in _targets(environ).items():
-        healths[name] = _fetch_health(host, port, name)
+    for name, (t_host, t_port) in _targets(environ).items():
+        healths[name] = _fetch_health(t_host or host, t_port, name)
     text = ingest_text_sources(environ)
     homelab = collect_homelab_alerts(environ)
     receipt = classify_receipts(

@@ -47,17 +47,50 @@ def test_feed_disabled_falsy_variants() -> None:
 
 
 def test_default_targets() -> None:
-    assert monitor_feed._targets({}) == {"monitoring-api": 48082, "discord-bot": 48080}
+    assert monitor_feed._targets({}) == {
+        "monitoring-api": (None, 48082),
+        "discord-bot": (None, 48080),
+    }
 
 
 def test_targets_env_override() -> None:
     t = monitor_feed._targets({"CHIP_FEED_TARGETS": "foo=9999"})
-    assert t == {"monitoring-api": 48082, "discord-bot": 48080, "foo": 9999}
+    assert t == {
+        "monitoring-api": (None, 48082),
+        "discord-bot": (None, 48080),
+        "foo": (None, 9999),
+    }
 
 
 def test_targets_invalid_entries_ignored() -> None:
     t = monitor_feed._targets({"CHIP_FEED_TARGETS": "x=notanumber,,y=3"})
-    assert t == {"monitoring-api": 48082, "discord-bot": 48080, "y": 3}
+    assert t == {
+        "monitoring-api": (None, 48082),
+        "discord-bot": (None, 48080),
+        "y": (None, 3),
+    }
+
+
+def test_targets_full_url_entry_uses_container_dns() -> None:
+    """RAZ-16: monitoring-api host publish retired → probe by container DNS.
+
+    A ``name=http://HOST:PORT`` entry overrides the per-target host while the
+    other targets keep the shared ``CHIP_FEED_HOST`` default.
+    """
+    t = monitor_feed._targets(
+        {"CHIP_FEED_TARGETS": "monitoring-api=http://monitoring-api:48082"}
+    )
+    assert t == {
+        "monitoring-api": ("monitoring-api", 48082),
+        "discord-bot": (None, 48080),
+    }
+
+
+def test_targets_malformed_url_entries_keep_defaults() -> None:
+    t = monitor_feed._targets(
+        {"CHIP_FEED_TARGETS": "monitoring-api=ftp://x:1,monitoring-api=http://host-only"}
+    )
+    assert t["monitoring-api"] == (None, 48082)
 
 
 def test_poll_interval_default_and_clamp() -> None:

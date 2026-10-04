@@ -13,11 +13,18 @@ services:
       # CHIP_FEED_HOMELAB_WAKE=1 (see docs/CHIP_MONITOR_P2.md).
       CHIP_FEED_HOMELAB: "1"
       CHIP_FEED_DOWNLOADS: /downloads
+      # monitoring-api host publish was retired (razzorstack PR #616): the
+      # monitor is reached over the shared razzorstack media network by
+      # container DNS (full-URL target form; see CHIP_FEED_TARGETS law in
+      # scripts/chip_relay/monitor_feed.py).
+      CHIP_FEED_TARGETS: "monitoring-api=http://monitoring-api:48082"
     volumes:
       - chip-chat-data:/data/chip-chat
       - ./.env:/app/.env:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - razzor-nas-torrents:/downloads:ro
+    networks:
+      - razzor-media
     healthcheck:
       test:
         [
@@ -35,3 +42,8 @@ volumes:
   chip-chat-data:
   razzor-nas-torrents:
     external: true
+
+networks:
+  razzor-media:
+    external: true
+    name: razzorstack_media_network
