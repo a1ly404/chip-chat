@@ -99,29 +99,26 @@ WG_ROUTE_ARGV = [
     "show",
     "default",
 ]
+# iptables -S (full dump): parse BOTH live shapes — the named WGKS_OUT/WGKS6_OUT
+# kill-switch chains from the older compose era, and the current compose-era
+# OUTPUT policy/catchall shape (-P OUTPUT ACCEPT + allowlist ACCEPTs + trailing
+# `-A OUTPUT -j DROP`, `-o eth0` explicit rule variant, or `OUTPUT DROP`
+# policy). Live container receipts 2026-10-04: OUTPUT ends in -j DROP with
+# allowlist ACCEPTs; the named WGKS chains do not exist (probe contract fix,
+# live window).
 WG_IPTABLES_ARGV = [
     "docker",
     "exec",
     "wireguard",
     "iptables",
-    "-C",
-    "WGKS_OUT",
-    "-o",
-    "eth0",
-    "-j",
-    "DROP",
+    "-S",
 ]
 WG_IP6TABLES_ARGV = [
     "docker",
     "exec",
     "wireguard",
     "ip6tables",
-    "-C",
-    "WGKS6_OUT",
-    "-o",
-    "eth0",
-    "-j",
-    "DROP",
+    "-S",
 ]
 _READ_EXEC = frozenset(
     {
@@ -249,6 +246,35 @@ def _unreachable(code: int, out: str, err: str) -> bool:
     return code == 127 or "not on path" in blob or "unreachable" in blob
 
 
+def _egress_shape_ok(dump: str) -> bool:
+    """True when the iptables dump proves eth0 egress is denied.
+
+    Accepted shapes (live receipts, 2026-10-04 wireguard netns):
+    - named WGKS chains from the older compose era carrying `-o eth0 -j DROP`;
+    - the current compose-era OUTPUT shape: policy DROP on OUTPUT, OR an
+      OUTPUT chain whose trailing rule is a catch-all `-j DROP` (allowlist
+      ACCEPTs for lo/wg0/track/tunnel precede it), OR an explicit
+      `-A OUTPUT ... -o eth0 -j DROP` rule.
+    An EMPTY or rule-free dump is NOT a green state: absence of a ruleset
+    means no kill switch is enforced for that family (missing-drop law).
+    """
+    lines = [line.strip() for line in (dump or "").splitlines() if line.strip()]
+    if any(line == "-P OUTPUT DROP" for line in lines):
+        return True
+    output_rules = [line for line in lines if line.startswith("-A OUTPUT")]
+    if output_rules:
+        if output_rules[-1].endswith("-j DROP"):
+            return True
+        if any("-o eth0" in rule and rule.endswith("-j DROP") for rule in output_rules):
+            return True
+    if any(
+        line.startswith("-A WGKS") and "-o eth0" in line and line.endswith("-j DROP")
+        for line in lines
+    ):
+        return True
+    return False
+
+
 def killswitch_alert(runner: Runner) -> dict[str, object] | None:
     """Kill-switch law: the eth0 egress DROP rules are authoritative (v4+v6).
 
@@ -267,11 +293,11 @@ def killswitch_alert(runner: Runner) -> dict[str, object] | None:
     code, out, err = runner(list(WG_IPTABLES_ARGV))
     if _unreachable(code, out, err):
         return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
-    v4_ok = code == 0
+    v4_ok = code == 0 and _egress_shape_ok(out)
     code, out, err = runner(list(WG_IP6TABLES_ARGV))
     if _unreachable(code, out, err):
         return _blocked("wg-killswitch", "kill switch probe unreachable", "tool:wg-killswitch.unreachable")
-    v6_ok = code == 0
+    v6_ok = code == 0 and _egress_shape_ok(out)
     if not v4_ok and not v6_ok:
         return _fault(
             "wg-killswitch",

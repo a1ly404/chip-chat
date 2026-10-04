@@ -4,70 +4,119 @@
   "tools": [
     {
       "id": "pytest",
-      "argv": ["python3", "-m", "pytest"],
+      "argv": [
+        "python3",
+        "-m",
+        "pytest"
+      ],
       "risk": "medium",
       "allow_extra_args": true,
       "description": "Run pytest (append test paths and flags as extra args only)"
     },
     {
       "id": "git-status",
-      "argv": ["git", "status", "--short", "--branch"],
+      "argv": [
+        "git",
+        "status",
+        "--short",
+        "--branch"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only git status in the current working tree"
     },
     {
       "id": "git-diff",
-      "argv": ["git", "diff", "--no-ext-diff"],
+      "argv": [
+        "git",
+        "diff",
+        "--no-ext-diff"
+      ],
       "risk": "low",
       "allow_extra_args": true,
       "description": "Read-only git diff. Extra args are paths; global denies still refuse."
     },
     {
       "id": "git-log",
-      "argv": ["git", "log", "-n", "20", "--oneline"],
+      "argv": [
+        "git",
+        "log",
+        "-n",
+        "20",
+        "--oneline"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only recent commit subjects"
     },
     {
       "id": "lane-test",
-      "argv": ["python3", "-m", "pytest"],
+      "argv": [
+        "python3",
+        "-m",
+        "pytest"
+      ],
       "risk": "medium",
       "allow_extra_args": true,
       "description": "BUILD tier: lane test command. Distinct from write."
     },
     {
       "id": "docker-build",
-      "argv": ["docker", "build", "-t"],
+      "argv": [
+        "docker",
+        "build",
+        "-t"
+      ],
       "risk": "medium",
       "allow_extra_args": true,
       "description": "BUILD tier: docker build with a local-only tag. Registry push is not this tool."
     },
     {
       "id": "vite-build",
-      "argv": ["npm", "run", "build"],
+      "argv": [
+        "npm",
+        "run",
+        "build"
+      ],
       "risk": "medium",
       "allow_extra_args": false,
       "description": "BUILD tier: gym-app vite build (npm run build)."
     },
     {
       "id": "docker-inspect",
-      "argv": ["docker", "inspect", "--format", "{{json .}}", "qbittorrent"],
+      "argv": [
+        "docker",
+        "inspect",
+        "--format",
+        "{{json .}}",
+        "qbittorrent"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only docker inspect of qbittorrent. No run, rm, compose, restart, or exec."
     },
     {
       "id": "docker-logs",
-      "argv": ["docker", "logs", "--tail", "80", "monitoring-api"],
+      "argv": [
+        "docker",
+        "logs",
+        "--tail",
+        "80",
+        "monitoring-api"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only docker logs --tail 80 monitoring-api. No run, rm, compose, restart, or exec."
     },
     {
       "id": "docker-logs-qbittorrent-monitor",
-      "argv": ["docker", "logs", "--tail", "80", "qbittorrent-monitor"],
+      "argv": [
+        "docker",
+        "logs",
+        "--tail",
+        "80",
+        "qbittorrent-monitor"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only docker logs --tail 80 qbittorrent-monitor for Arr health lines. No run, rm, compose, restart, or exec."
@@ -89,28 +138,55 @@
     },
     {
       "id": "wg-route",
-      "argv": ["docker", "exec", "wireguard", "ip", "-4", "route", "show", "default"],
+      "argv": [
+        "docker",
+        "exec",
+        "wireguard",
+        "ip",
+        "-4",
+        "route",
+        "show",
+        "default"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only default route inside wireguard. Fault when it is not dev wg0. No mutations."
     },
     {
       "id": "wg-iptables-drop",
-      "argv": ["docker", "exec", "wireguard", "iptables", "-C", "WGKS_OUT", "-o", "eth0", "-j", "DROP"],
+      "argv": [
+        "docker",
+        "exec",
+        "wireguard",
+        "iptables",
+        "-S"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only iptables -C for the eth0 DROP rule. No mutations."
     },
     {
       "id": "wg-ip6tables-drop",
-      "argv": ["docker", "exec", "wireguard", "ip6tables", "-C", "WGKS6_OUT", "-o", "eth0", "-j", "DROP"],
+      "argv": [
+        "docker",
+        "exec",
+        "wireguard",
+        "ip6tables",
+        "-S"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "Read-only ip6tables -C for the eth0 DROP rule. No mutations."
     },
     {
       "id": "task-show",
-      "argv": ["python3", "-m", "chip", "task", "show"],
+      "argv": [
+        "python3",
+        "-m",
+        "chip",
+        "task",
+        "show"
+      ],
       "risk": "low",
       "allow_extra_args": true,
       "description": "Show a task envelope by id (requires task id as first extra arg)"
@@ -118,14 +194,22 @@
     {
       "id": "airvpn-portal-scrape",
       "audience": "read-only",
-      "argv": ["python3", "-m", "chip.airvpn_portal"],
+      "argv": [
+        "python3",
+        "-m",
+        "chip.airvpn_portal"
+      ],
       "risk": "low",
       "allow_extra_args": false,
       "description": "READ-ONLY: attach to local Chrome CDP (127.0.0.1 only) and scrape AirVPN client-area port/exit text into a JSON receipt. Not tier-1 destructive; no portal clicks/Save/rebind; no credentials."
     },
     {
       "id": "razzorstack-diagnose",
-      "argv": ["python3", "scripts/airvpn_port_health.py", "--diagnose-only"],
+      "argv": [
+        "python3",
+        "scripts/airvpn_port_health.py",
+        "--diagnose-only"
+      ],
       "risk": "medium",
       "allow_extra_args": false,
       "description": "Razzorstack diagnostic script, baked --diagnose-only (no fix actions); root = lanes extra_root CHIP_LANE_RAZZORSTACK_ROOT; global denies inherited"
@@ -133,7 +217,11 @@
     {
       "id": "gluetun-restart",
       "audience": "global-only",
-      "argv": ["docker", "restart", "gluetun"],
+      "argv": [
+        "docker",
+        "restart",
+        "gluetun"
+      ],
       "risk": "high",
       "allow_extra_args": false,
       "description": "TIER-1 (RAZ-335 only): Skill envelope REQUIRED (receipt-before-action + rollback line + verified-listen probe) + per-run named GO (sub-scope wake scope:RAZ-335-t1-gluetun-restart). Refuse-and-page class untouched."
@@ -141,7 +229,11 @@
     {
       "id": "qb-restart",
       "audience": "global-only",
-      "argv": ["docker", "restart", "qbittorrent"],
+      "argv": [
+        "docker",
+        "restart",
+        "qbittorrent"
+      ],
       "risk": "high",
       "allow_extra_args": false,
       "description": "TIER-1 (RAZ-335 only): Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-qb-restart). Refuse-and-page class untouched."
@@ -149,7 +241,10 @@
     {
       "id": "airvpn-port-regab",
       "audience": "global-only",
-      "argv": ["python3", "scripts/airvpn_port_grab.py"],
+      "argv": [
+        "python3",
+        "scripts/airvpn_port_grab.py"
+      ],
       "risk": "high",
       "allow_extra_args": false,
       "description": "TIER-1 (RAZ-335 only): re-run port forward grab script; Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-port-regab). Refuse-and-page class untouched."
@@ -157,7 +252,10 @@
     {
       "id": "fw-rule-reload",
       "audience": "global-only",
-      "argv": ["ufw", "reload"],
+      "argv": [
+        "ufw",
+        "reload"
+      ],
       "risk": "high",
       "allow_extra_args": false,
       "description": "TIER-1 (RAZ-335 only): firewall rule reload, baked (no rule edits via this row; edits = proposal-only). Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-fw-reload). Refuse-and-page class untouched."
@@ -165,7 +263,10 @@
     {
       "id": "qb-port-update",
       "audience": "global-only",
-      "argv": ["python3", "scripts/qb_port_set.py"],
+      "argv": [
+        "python3",
+        "scripts/qb_port_set.py"
+      ],
       "risk": "high",
       "allow_extra_args": false,
       "description": "TIER-1 (RAZ-335 only): update qBittorrent listen port from live lease, baked script (no arbitrary config edits; compose changes = proposal-only). Skill envelope REQUIRED + per-run named GO (scope:RAZ-335-t1-qb-port). Refuse-and-page class untouched."

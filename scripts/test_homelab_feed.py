@@ -22,10 +22,25 @@ def _runner(mapping):
             return mapping[key]
         if key == tuple(homelab_probes.WG_ROUTE_ARGV):
             return (0, "default dev wg0\n", "")
-        if key in (tuple(homelab_probes.WG_IPTABLES_ARGV), tuple(homelab_probes.WG_IP6TABLES_ARGV)):
-            return (0, "", "")
+        # default = the live compose-era OUTPUT shape (allowlist ACCEPTs then
+        # catch-all -j DROP) — see bug receipts under live window 2026-10-04
+        if key == tuple(homelab_probes.WG_IPTABLES_ARGV):
+            return (0, LIVE_V4_SHAPE, "")
+        if key == tuple(homelab_probes.WG_IP6TABLES_ARGV):
+            return (0, LIVE_V6_SHAPE, "")
         return (127, "", "unreachable: missing")
     return run
+
+
+LIVE_V4_SHAPE = (
+    "-P OUTPUT ACCEPT\n"
+    "-A OUTPUT -o wg0 -j ACCEPT\n"
+    "-A OUTPUT -d 104.193.135.245/32 -p udp -m udp --dport 1637 -j ACCEPT\n"
+    "-A OUTPUT -o lo -j ACCEPT\n"
+    "-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n"
+    "-A OUTPUT -j DROP\n"
+)
+LIVE_V6_SHAPE = "-P OUTPUT DROP\n"
 
 
 def test_dockerfile_installs_docker_cli() -> None:
@@ -285,6 +300,65 @@ def test_killswitch_unexpected_egress_dev_faults() -> None:
     route_alerts = [a for a in alerts if a["key"] == "wg-killswitch"]
     assert route_alerts
     assert "unexpected-egress-dev" in str(route_alerts[0]["receipt"])
+
+
+def test_egress_shape_named_chain_green() -> None:
+    dump = "-P OUTPUT ACCEPT\n-N WGKS_OUT\n-A WGKS_OUT -o eth0 -j DROP\n-A OUTPUT -j WGKS_OUT\n"
+    assert homelab_probes._egress_shape_ok(dump)
+
+
+def test_egress_shape_eth0_rule_green() -> None:
+    dump = "-P OUTPUT ACCEPT\n-A OUTPUT -o eth0 -j DROP\n"
+    assert homelab_probes._egress_shape_ok(dump)
+
+
+def test_egress_shape_empty_or_rulefree_dumps_are_not_green() -> None:
+    assert not homelab_probes._egress_shape_ok("")
+    assert not homelab_probes._egress_shape_ok("-P OUTPUT ACCEPT\n-A OUTPUT -o wg0 -j ACCEPT\n")
+
+
+def test_killswitch_both_families_without_shapes_fault_no_drop_rules() -> None:
+    """Empty/rule-free iptables dumps = no kill switch in either family."""
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
+            tuple(homelab_probes.WG_IPTABLES_ARGV): (0, "", ""),
+            tuple(homelab_probes.WG_IP6TABLES_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}]}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    kill = [a for a in alerts if a["key"] == "wg-killswitch"]
+    assert kill
+    assert "no-drop-rules" in str(kill[0]["receipt"])
+
+
+def test_killswitch_v4_only_missing_faults_v4_label() -> None:
+    alerts = homelab_probes.collect_alerts(
+        runner=_runner({
+            tuple(homelab_probes.WG_SHOW_ARGV): (0, "peer 1\n", ""),
+            tuple(homelab_probes.WG_IPTABLES_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_LOGS_ARGV): (0, "", ""),
+            tuple(homelab_probes.DOCKER_INSPECT_ARGV + ["qbittorrent"]): (
+                0,
+                json.dumps({"State": {"Status": "running"}, "Mounts": [{"Destination": "/downloads", "Name": "razzor-nas-torrents"}]}),
+                "",
+            ),
+        }),
+        downloads_path=None,
+        qb_url="",
+    )
+    kill = [a for a in alerts if a["key"] == "wg-killswitch"]
+    assert kill
+    body = str(kill[0]["receipt"])
+    assert "tool:wg-iptables.missing-drop" in body
+    assert "tool:wg-killswitch.no-drop-rules" not in body
 
 
 def test_is_homelab_feed_alert_classifies_keys() -> None:
