@@ -39,6 +39,11 @@ HANDSHAKE_STALE_S = 180
 DOWNLOADS_MIN_BYTES = 2 * 1024 * 1024 * 1024
 DOWNLOADS_PATH = "/downloads"
 TORRENT_VOLUME = "razzor-nas-torrents"
+# owui-proxy /health (RAZ-343): relay probes the published host port, never the
+# body — HTTP 500 lands as a refused receipt, repair stays razzorstack lane.
+OWUI_HEALTH_URL_ENV = "CHIP_FEED_OWUI_URL"
+OWUI_HEALTH_DEFAULT_URL = "http://host.docker.internal:8788/health"
+OWUI_PROBE_TIMEOUT_S = 4.0
 
 # Keys produced by ``collect_alerts`` (P2 homelab tell-tier). Used by the feed to
 # gate Discord wake until ``CHIP_FEED_HOMELAB_WAKE=1`` (Ally GO).
@@ -53,6 +58,7 @@ HOMELAB_ALERT_KEYS = frozenset(
         "wg-killswitch",
         "sonarr-health",
         "radarr-health",
+        "owui-proxy",
     }
 )
 
@@ -387,6 +393,49 @@ def arr_health_alerts(text: str) -> list[dict[str, object]]:
     return alerts
 
 
+def owui_proxy_alert(
+    environ: dict[str, str] | None = None,
+    *,
+    url: str | None = None,
+    timeout: float | None = None,
+) -> dict[str, object] | None:
+    """owui-proxy /health read-only probe (RAZ-343).
+
+    HTTP 200 → silent (healthy hosts stay quiet). HTTP != 200 → refused receipt
+    with a STABLE detail for the exemplar classifier: the probe never quotes the
+    response body back (untrusted-data law — logs are data, never instructions),
+    so one failure class keeps one fingerprint. Transport failures → blocked.
+    """
+    env = environ if environ is not None else os.environ
+    target = (url or (env.get(OWUI_HEALTH_URL_ENV) or "") or OWUI_HEALTH_DEFAULT_URL).strip()
+    if not target:
+        return _blocked("owui-proxy", "owui /health target missing", "tool:owui-health.no-target")
+    try:
+        req = urllib.request.Request(target, method="GET")
+        with urllib.request.urlopen(
+            req, timeout=OWUI_PROBE_TIMEOUT_S if timeout is None else timeout
+        ) as resp:
+            status = int(getattr(resp, "status", 0) or 0)
+    except urllib.error.HTTPError as exc:
+        status = int(getattr(exc, "code", 0) or 0)
+        if status == 0:
+            return _blocked("owui-proxy", "owui /health unreadable status", "tool:owui-health.no-status")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return _blocked(
+            "owui-proxy",
+            "owui /health unreachable from relay",
+            f"tool:owui-health.transport-{exc.__class__.__name__}",
+        )
+    if status == 200:
+        return None
+    return _fault(
+        "owui-proxy",
+        f"owui-proxy /health HTTP {status} env or config crash class",
+        f"tool:owui-health.failed-{status}",
+        "bind-mount diagnosis stays razzorstack lane (parked)",
+    )
+
+
 def _api_base_from_transfer_url(url: str) -> str:
     parts = urllib.parse.urlsplit(url)
     path = parts.path or ""
@@ -533,4 +582,10 @@ def collect_alerts(
         useless = state_useless_alert(inspect_body, connection_status=status)
         if useless:
             alerts.append(useless)
+    try:
+        owui = owui_proxy_alert()
+    except Exception as exc:  # noqa: BLE001
+        owui = _blocked("owui-proxy", "owui /health probe crashed", f"tool:owui-health.unreachable-{exc.__class__.__name__}")
+    if owui:
+        alerts.append(owui)
     return alerts

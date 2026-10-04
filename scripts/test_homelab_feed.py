@@ -1,8 +1,11 @@
 """Homelab feed receipts, read-only allowlist, scoped GO stub."""
 
+import io
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import urllib.error
+import urllib.request
 
 from chip.go_scope import propose_go_marker
 from chip_relay import homelab_probes, monitor_feed
@@ -426,3 +429,66 @@ def test_wrong_mount_and_firewalled(monkeypatch) -> None:
     keys = {a["key"] for a in alerts}
     assert "downloads-mount" in keys
     assert "qb-connection" in keys
+
+
+def test_owui_proxy_alert_500_is_fault(monkeypatch) -> None:
+    def _raise(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 500, "server error", {}, None)
+
+    monkeypatch.setattr(homelab_probes.urllib.request, "urlopen", _raise)
+    alert = homelab_probes.owui_proxy_alert()
+    assert alert is not None and alert["key"] == "owui-proxy"
+    assert alert["ok"] is False
+    assert alert["detail"].startswith("tool:owui-health.failed-")
+    assert "500" in alert["detail"]
+    for line in alert["receipt"].splitlines():
+        assert line.split(": ", 1)[0] in {"claim", "status", "evidence", "next"}
+
+
+def test_owui_proxy_alert_200_is_silent(monkeypatch) -> None:
+    class _Resp(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(homelab_probes.urllib.request, "urlopen", lambda req, timeout=None: _Resp())
+    assert homelab_probes.owui_proxy_alert() is None
+
+
+def test_owui_proxy_alert_transport_is_blocked(monkeypatch) -> None:
+    def _raise(req, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(homelab_probes.urllib.request, "urlopen", _raise)
+    alert = homelab_probes.owui_proxy_alert()
+    assert alert["key"] == "owui-proxy"
+    assert alert["detail"].startswith("tool:owui-health.transport-URLError")
+
+
+def test_owui_key_in_wake_registry_and_homelab_gate() -> None:
+    assert "owui-proxy" in homelab_probes.HOMELAB_ALERT_KEYS
+    assert homelab_probes.is_homelab_feed_alert({"key": "owui-proxy", "detail": "tool:owui-health.failed-500"})
+
+
+def test_collect_alerts_includes_owui_probe_row(monkeypatch) -> None:
+    monkeypatch.setattr(homelab_probes, "default_runner", lambda argv: (127, "", "unreachable"), raising=False)
+    monkeypatch.setattr(
+        homelab_probes,
+        "_fetch_connection",
+        lambda url, *, qb_user=None, qb_password=None, timeout=5.0: (None, "skipped"),
+        raising=False,
+    )
+    canned = homelab_probes._fault(
+        "owui-proxy",
+        "owui-proxy /health HTTP 500 env or config crash class",
+        "tool:owui-health.failed-500",
+        "bind-mount diagnosis stays razzorstack lane (parked)",
+    )
+    monkeypatch.setattr(homelab_probes, "owui_proxy_alert", lambda environ=None, **kw: canned)
+    out = homelab_probes.collect_alerts(downloads_path=None)
+    keys = [a["key"] for a in out]
+    assert keys.count("owui-proxy") == 1
