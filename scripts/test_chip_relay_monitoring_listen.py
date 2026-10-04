@@ -537,3 +537,83 @@ def test_gluetun_label_alert_only_retires_probe(tmp_path, monkeypatch) -> None:
     assert run.skill_id == "stale-vpn-gluetun-label-probe"
     assert "status: done" in run.receipt
     assert "wireguard" in run.receipt.lower() or "retired" in run.receipt.lower()
+
+
+def test_handle_monitoring_alert_gate_refusal_stays_log_only(
+    tmp_path, monkeypatch
+) -> None:
+    """Live-window 2026-10-04 law: a schema-gate refusal is silent to Discord."""
+    import chip_relay.monitoring_listen as listener
+    from chip_relay.monitoring_listen import MONITORING_LISTEN_ENV
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        listener,
+        "gate_channel_body",
+        lambda body: "[chip-relay] ERROR: receipt schema: done-without-evidence",
+    )
+    line = "Streaming report flows: 3 of 4 lanes done"
+    room = _monitoring_room()
+    environ = {
+        MONITORING_LISTEN_ENV: "1",
+        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+    }
+    calls: list[tuple[str, str, str]] = []
+
+    def webhook(url: str, username: str, body: str) -> WebhookResult:
+        calls.append((url, username, body))
+        return WebhookResult(status=204)
+
+    result = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+    )
+    assert result.ok is True
+    assert result.webhook_calls == 0
+    assert calls == []
+    joined = "\n".join(result.logs)
+    assert "receipt gate refused" in joined
+    rows = [
+        json.loads(l)
+        for l in (tmp_path / "chip_state" / "monitoring_dispatch.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if l.strip()
+    ]
+    assert rows
+    assert rows[-1]["gate"] == "refused"
+    assert rows[-1]["posted"] is False
+
+
+def test_done_skill_receipt_evidence_stays_bare_tool_token(
+    tmp_path, monkeypatch
+) -> None:
+    """Live-window 2026-10-04 root cause: done receipts broke the gate because
+    prior=/soak= suffixes rode the evidence line (tool: regex is anchored),
+    so EVERY applied-fix skill receipt posted as
+    pm: [chip-relay] ERROR: receipt schema: done-without-evidence.
+
+    The evidence line now stays a bare `tool:` token; suffix metadata rides
+    the learning row only, and the gate passes the machine-sourced receipt.
+    """
+    import re as _re
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 5_000_000.0
+    alert = parse_monitoring_message("wg0-handshake stale")
+    run_skill_for_alert(alert, now=t0)
+    with patch(
+        "chip_relay.monitoring_skills._docker_running", return_value=False
+    ), patch("chip_relay.monitoring_skills._docker_restart", return_value=(True, "exit=0")):
+        run = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert "status: done" in run.receipt
+    for line in run.receipt.splitlines():
+        if line.startswith("evidence: "):
+            token = line[len("evidence: "):].strip()
+            assert _re.fullmatch(r"tool:[A-Za-z0-9_.\-]+", token), token
+    assert " prior=" not in run.receipt
+
+

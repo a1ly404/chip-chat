@@ -548,10 +548,14 @@ def run_skill_for_alert(
 
     fix = execute_fix_action(chosen, alert, policy=policy)
 
+    # Receipt-law (RAZ-217 / #52): a done receipt's evidence must be a BARE
+    # tool: token — prior=/soak= suffixes broke the anchored regex and made
+    # every applied-fix skill post `[chip-relay] ERROR: receipt schema:
+    # done-without-evidence` (live receipts 2026-10-04, one per bot message).
+    # Suffix metadata rides the learning row only (the learning line below
+    # already records fix kind/applied/detail; soak history lives in the
+    # outage sightings log, not in the receipt).
     evidence = f"tool:monitoring-skill.{chosen.id}"
-    if prior:
-        evidence += f" prior={prior[-1][:60]}"
-    evidence += f" soak={int(sighting.elapsed_s)}s"
 
     next_line = fix.homelab_followup or fix.detail
     if fix.applied:

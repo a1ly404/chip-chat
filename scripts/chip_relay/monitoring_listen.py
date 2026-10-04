@@ -110,7 +110,36 @@ def handle_monitoring_alert(
     if not url:
         return DispatchResult(ok=False, alert=f"{room.webhook_env} unset", logs=logs)
 
-    body = gate_channel_body(turn.receipt)
+    gated = gate_channel_body(turn.receipt)
+    record_body = gated
+    if gated.startswith("[" ) and "ERROR: receipt schema:" in gated:
+        # Fail-closed receipt law (#52/#164): the machine-composed sitrep did
+        # not pass the schema gate. Posting the refusal to Discord made every
+        # monitoring bot message a user-visible chip-relay error line
+        # (live-window 2026-10-04 receipts: pm= [chip-relay] ERROR: receipt
+        # schema: done-without-evidence repeating per bot message). The
+        # refusal stays log-only: no webhook post, dispatch-log row records
+        # the gate reason for inspection.
+        logs.append(f"receipt gate refused, post suppressed: {gated}")
+        if record is not None:
+            record(room.id, gated, "pm")
+        log_row = {
+            "room": room.id,
+            "skill_id": turn.skill_id,
+            "created_skill": turn.created_skill,
+            "alert": turn.alert,
+            "learning": turn.learning_line,
+            "gate": "refused",
+            "gate_error": gated,
+            "posted": False,
+        }
+        log_path = _dispatch_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(log_row, ensure_ascii=False, sort_keys=True) + "\n")
+        return DispatchResult(ok=True, webhook_calls=0, logs=logs)
+
+    body = gated
     posted = webhook(url, "pm", body)
     if posted.status >= 400:
         return DispatchResult(ok=False, alert=f"webhook {posted.status}", logs=logs)
@@ -123,13 +152,15 @@ def handle_monitoring_alert(
         "created_skill": turn.created_skill,
         "alert": turn.alert,
         "learning": turn.learning_line,
+        "gate": "ok",
+        "posted": True,
     }
     log_path = _dispatch_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(log_row, ensure_ascii=False, sort_keys=True) + "\n")
 
-    logs.append(f"monitoring skill={turn.skill_id or 'none'} created={turn.created_skill}")
+    logs.append(f"monitoring skill={turn.skill_id or 'none'} created={turn.created_skill} posted={True}")
     return DispatchResult(ok=True, webhook_calls=1, logs=logs)
 
 
