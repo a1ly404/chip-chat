@@ -558,9 +558,18 @@ def run_skill_for_alert(
     evidence = f"tool:monitoring-skill.{chosen.id}"
 
     next_line = fix.homelab_followup or fix.detail
-    if fix.applied:
+    fix_kind = str((chosen.fix_action or {}).get("kind") or "")
+    # Receipt truth (live window 2026-10-04): watch_only cataloging is
+    # bookkeeping, not a repair — claiming status: done for it made every
+    # bot message produce a "done" receipt while the service stayed down.
+    if fix.applied and fix_kind != "watch_only":
         status = "done"
         next_line = f"{fix.detail}; {next_line}"[:190]
+    elif fix_kind == "watch_only":
+        status = "blocked"
+        next_line = (
+            f"{fix.detail}; no fix_action registered"
+        )[:190]
     else:
         status = "blocked"
         next_line = f"chip-chat fix incomplete: {fix.detail}"[:190]

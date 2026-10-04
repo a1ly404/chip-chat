@@ -37,7 +37,9 @@
     "lazylibrarian",
     "ebook fallback",
     "no new artifact",
-    "gha website ingest: no new artifact"
+    "gha website ingest: no new artifact",
+    "lidarr",
+    "bazarr"
   ],
   "skills": [
     {

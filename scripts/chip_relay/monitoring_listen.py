@@ -78,6 +78,7 @@ def handle_monitoring_alert(
     webhook: Callable[[str, str, str], WebhookResult],
     environ: dict[str, str],
     record=None,
+    now: float | None = None,
 ) -> DispatchResult:
     logs: list[str] = []
     if not monitoring_listen_enabled(environ):
@@ -110,6 +111,17 @@ def handle_monitoring_alert(
     if not url:
         return DispatchResult(ok=False, alert=f"{room.webhook_env} unset", logs=logs)
 
+    # Cooldown law (feed family, PR #49/#53): one post per skill identity per
+    # 4h — the Monitoring Bot retries its service-down cycle every ~2min and
+    # every message used to mint its own receipt post. Live-window law
+    # 2026-10-04: monitoring-logs ingest inherits the same pacing.
+    if _cooldown_active(turn.skill_id, now=now):
+        logs.append(f"cooldown active for {turn.skill_id}; post suppressed")
+        if record is not None:
+            record(room.id, "", "pm")
+        _append_dispatch_row(room.id, turn, "cooldown", False)
+        return DispatchResult(ok=True, webhook_calls=0, logs=logs)
+
     gated = gate_channel_body(turn.receipt)
     record_body = gated
     if gated.startswith("[" ) and "ERROR: receipt schema:" in gated:
@@ -133,10 +145,7 @@ def handle_monitoring_alert(
             "gate_error": gated,
             "posted": False,
         }
-        log_path = _dispatch_log_path()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(log_row, ensure_ascii=False, sort_keys=True) + "\n")
+        _write_dispatch_row(log_row)
         return DispatchResult(ok=True, webhook_calls=0, logs=logs)
 
     body = gated
@@ -145,6 +154,7 @@ def handle_monitoring_alert(
         return DispatchResult(ok=False, alert=f"webhook {posted.status}", logs=logs)
     if record is not None:
         record(room.id, body, "pm")
+    _mark_cooldown(turn.skill_id, now=now)
 
     log_row = {
         "room": room.id,
@@ -155,10 +165,7 @@ def handle_monitoring_alert(
         "gate": "ok",
         "posted": True,
     }
-    log_path = _dispatch_log_path()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(log_row, ensure_ascii=False, sort_keys=True) + "\n")
+    _write_dispatch_row(log_row)
 
     logs.append(f"monitoring skill={turn.skill_id or 'none'} created={turn.created_skill} posted={True}")
     return DispatchResult(ok=True, webhook_calls=1, logs=logs)
@@ -168,3 +175,66 @@ def _dispatch_log_path() -> Any:
     from chip import config
 
     return config.data_dir() / "chip_state" / "monitoring_dispatch.jsonl"
+
+
+_COOLDOWN_S = 4 * 3600
+_POSTS_STATE_PATH = "monitoring_posts.json"
+
+
+def _cooldown_active(skill_id: str, *, now: float | None = None) -> bool:
+    import time
+
+    from chip import config
+
+    if not skill_id:
+        return False
+    path = config.data_dir() / "chip_state" / _POSTS_STATE_PATH
+    state: dict[str, Any] = {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    last = state.get(skill_id)
+    if not isinstance(last, (int, float)):
+        return False
+    now_ts = time.time() if now is None else now
+    return (now_ts - float(last)) < _COOLDOWN_S
+
+
+def _mark_cooldown(skill_id: str, *, now: float | None = None) -> None:
+    import time
+
+    from chip import config
+
+    if not skill_id:
+        return
+    path = config.data_dir() / "chip_state" / _POSTS_STATE_PATH
+    state: dict[str, Any] = {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    state[skill_id] = float(time.time() if now is None else now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
+
+
+def _append_dispatch_row(room_id: str, turn: Any, gate: str, posted: bool) -> None:
+    _write_dispatch_row(
+        {
+            "room": room_id,
+            "skill_id": turn.skill_id,
+            "created_skill": turn.created_skill,
+            "alert": turn.alert,
+            "learning": turn.learning_line,
+            "gate": gate,
+            "posted": posted,
+        }
+    )
+
+
+def _write_dispatch_row(log_row: dict[str, Any]) -> None:
+    log_path = _dispatch_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(log_row, ensure_ascii=False, sort_keys=True) + "\n")

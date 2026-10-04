@@ -617,3 +617,94 @@ def test_done_skill_receipt_evidence_stays_bare_tool_token(
     assert " prior=" not in run.receipt
 
 
+
+
+def test_handle_monitoring_alert_cooldown_suppresses_repeat_post(
+    tmp_path, monkeypatch
+) -> None:
+    """Live-window 2026-10-04: the Monitoring Bot retries its cycle every
+    ~2min; every message minted its own post. Ingest inherits the feed's
+    one-post-per-identity-per-4h cooldown law."""
+    from chip_relay.monitoring_listen import MONITORING_LISTEN_ENV, _COOLDOWN_S
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    line = (
+        "🚨 Services Down\n"
+        "Detected 1 down service(s): wireguard\n"
+        "Attempting auto-restart..."
+    )
+    room = _monitoring_room()
+    environ = {
+        MONITORING_LISTEN_ENV: "1",
+        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+    }
+    calls: list[str] = []
+
+    def webhook(url: str, username: str, body: str) -> WebhookResult:
+        calls.append(body)
+        return WebhookResult(status=204)
+
+    t0 = 6_000_000.0
+    first = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+        now=t0,
+    )
+    assert first.webhook_calls == 1
+
+    second = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+        now=t0 + 600,
+    )
+    assert second.webhook_calls == 0
+    assert len(calls) == 1
+    joined = "\n".join(second.logs)
+    assert "cooldown active" in joined
+    later = handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+        now=t0 + _COOLDOWN_S + 10,
+    )
+    assert later.webhook_calls == 1
+    assert len(calls) == 2
+
+
+def test_watch_only_catalog_receipt_is_blocked_not_done(
+    tmp_path, monkeypatch
+) -> None:
+    """Receipt truth: cataloging a class is bookkeeping, not a repair.
+    Live 2026-10-04 receipts claimed status: done for watch-only classes
+    while the named service stayed down."""
+    from chip_relay.monitoring_listen import MONITORING_LISTEN_ENV
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    t0 = 7_000_000.0
+    line = "brand-new recurring cron failure widget-7777"
+    alert = parse_monitoring_message(line)
+    run_skill_for_alert(alert, now=t0)
+    run = run_skill_for_alert(alert, now=_after_soak(t0))
+    assert "status: blocked" in run.receipt
+    assert "awaiting fix_action" in run.receipt or "cataloged" in run.receipt
+
+
+def test_monitoring_cfg_ignores_lidarr_and_bazarr() -> None:
+    """Ally GO 2026-10-04: lidarr unused, bazarr native (not docker)."""
+    alert = parse_monitoring_message(
+        "🚨 Services Down\nDetected 1 down service(s): lidarr\n"
+        "Attempting auto-restart..."
+    )
+    assert should_ignore_alert(alert)
+    alert2 = parse_monitoring_message(
+        "🟡 bazarr container down\nsource=Razzorstack Bot"
+    )
+    assert should_ignore_alert(alert2)
