@@ -38,7 +38,14 @@ from chip_relay.homelab_probes import (
 
 DEFAULT_HOST = "host.docker.internal"
 DEFAULT_PORT_POLICY = {"monitoring-api": 48082}
-DEFAULT_PORT_BOT = {"discord-bot": 48080}
+# discord-bot: RETIRED from the default target set (live window 2026-10-04/05:
+# the runtime is parked by the rz-lane reconcile (razzorstack #622 family,
+# stale VM-port binds 48080/48100 pending the Docker reinstall). Probing a
+# knowingly-down runtime minted dead-letter posts twice (7:51 PM + 10:45 PM
+# PT, ~3h apart) — noise, not signal. When the rz lane restores the bot into
+# the managed set, re-add via the CHIP_FEED_TARGETS env or a default-revert
+# PR (probe-layer retirement law mirrors razzorstack #617 for lidarr).
+DEFAULT_PORT_BOT: dict[str, int] = {}
 DEFAULT_INTERVAL_S = 300.0
 
 FEED_ENABLED_ENV = "CHIP_FEED_ENABLED"
@@ -67,6 +74,9 @@ def _probe_timeout() -> float:
         return 5.0
 
 _DEFAULT_TARGETS: dict[str, int] = {**DEFAULT_PORT_POLICY, **DEFAULT_PORT_BOT}
+"""Default probe targets. See DEFAULT_PORT_BOT: discord-bot is not in the
+default set while the rz-lane runtime reconcile has it parked; restore via
+``CHIP_FEED_TARGETS`` env (per-target URL law, #163) when it returns."""
 
 
 def _env(name: str, default: str) -> str:

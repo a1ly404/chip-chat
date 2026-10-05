@@ -49,7 +49,6 @@ def test_feed_disabled_falsy_variants() -> None:
 def test_default_targets() -> None:
     assert monitor_feed._targets({}) == {
         "monitoring-api": (None, 48082),
-        "discord-bot": (None, 48080),
     }
 
 
@@ -57,7 +56,6 @@ def test_targets_env_override() -> None:
     t = monitor_feed._targets({"CHIP_FEED_TARGETS": "foo=9999"})
     assert t == {
         "monitoring-api": (None, 48082),
-        "discord-bot": (None, 48080),
         "foo": (None, 9999),
     }
 
@@ -66,7 +64,6 @@ def test_targets_invalid_entries_ignored() -> None:
     t = monitor_feed._targets({"CHIP_FEED_TARGETS": "x=notanumber,,y=3"})
     assert t == {
         "monitoring-api": (None, 48082),
-        "discord-bot": (None, 48080),
         "y": (None, 3),
     }
 
@@ -82,7 +79,6 @@ def test_targets_full_url_entry_uses_container_dns() -> None:
     )
     assert t == {
         "monitoring-api": ("monitoring-api", 48082),
-        "discord-bot": (None, 48080),
     }
 
 
@@ -195,8 +191,7 @@ def test_classify_receipts_stand_down_flagged(feed_env: Path) -> None:
 
 def test_tick_and_snapshot_written(feed_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     canned = {
-        "monitoring-api": _feeder_receipt("monitoring-api", "healthy"),
-        "discord-bot": _feeder_receipt("discord-bot", "ok", {"loops_ok": False}),
+        "monitoring-api": _feeder_receipt("monitoring-api", "diet-unhealthy"),
     }
     monkeypatch.setattr(monitor_feed, "_fetch_health", lambda host, port, name: canned[name])
     receipt = monitor_feed.tick(persist=True)
