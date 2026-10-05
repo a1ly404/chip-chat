@@ -374,6 +374,31 @@ def _default_executor_restart(
     return True, f"executor reports restart ok for {container} (verify uptime)"
 
 
+def _running_from_response(head: bytes, body: bytes) -> bool | None:
+    """Parse a docker.sock container-inspect reply -> State.Running.
+
+    Tolerates chunked transfer-encoding (HTTP/1.1 replies); returns None
+    when the reply is not a 200 with a parseable JSON body.
+    """
+    status_line = head.split(b"\r\n", 1)[0].decode("utf-8", "replace")
+    if " 200 " not in status_line:
+        return None
+    text = body.decode("utf-8", "replace")
+    if "chunked" in head.decode("utf-8", "replace").lower():
+        parts: list[str] = []
+        for piece in text.split("\r\n"):
+            # chunk-size lines are hex; skip them and their trailing blank
+            if piece.strip() and all(c in "0123456789abcdefABCDEF" for c in piece.strip()):
+                continue
+            parts.append(piece)
+        text = "".join(parts)
+    try:
+        payload = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return bool(payload.get("State", {}).get("Running"))
+
+
 def _default_container_running(container: str) -> bool | None:
     """Read-only verify-before-act gate (W-019 false-positive fix).
 
@@ -391,8 +416,12 @@ def _default_container_running(container: str) -> bool | None:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(5)
         client.connect(sock)
+        # HTTP/1.0: the daemon answers unchunked — W-019 gate-6 fix. The
+        # 1.1 reply is chunked and raw JSON parse fails on chunk framing,
+        # which made the checker return None (cannot verify) for every
+        # container and the stale-alert gate never fired.
         req = (
-            f"GET /containers/{container}/json HTTP/1.1\r\n"
+            f"GET /containers/{container}/json HTTP/1.0\r\n"
             f"Host: docker\r\nConnection: close\r\n\r\n"
         ).encode()
         client.sendall(req)
@@ -405,11 +434,7 @@ def _default_container_running(container: str) -> bool | None:
         client.close()
         raw = b"".join(chunks)
         head, _, body = raw.partition(b"\r\n\r\n")
-        status_line = head.split(b"\r\n", 1)[0].decode("utf-8", "replace")
-        if " 200 " not in status_line:
-            return None
-        payload = json.loads(body.decode("utf-8", "replace"))
-        return bool(payload.get("State", {}).get("Running"))
+        return _running_from_response(head, body)
     except Exception:  # noqa: BLE001 — cannot verify never blocks the lane
         return None
 

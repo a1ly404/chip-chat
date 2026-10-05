@@ -675,3 +675,31 @@ def test_qwen_unconfigured_fails_closed(data_dir, monkeypatch):
     )
     assert out["status"] == "qwen-fault-no-action"
     assert executor.calls == []
+
+
+def test_sock_inspect_parse_plain_200_w019():
+    """W-019 gate-6 fix: plain HTTP/1.0 200 reply parses State.Running."""
+    from chip_relay.service_recovery_skill import _running_from_response
+
+    body = json.dumps({"State": {"Running": True}}).encode()
+    assert _running_from_response(b"HTTP/1.0 200 OK\r\nContent-Type: json\r\n", body) is True
+
+
+def test_sock_inspect_parse_chunked_200_w019():
+    """W-019 gate-6 fix: a chunked HTTP/1.1 reply (docker daemon default)
+    must de-chunk before JSON parse — raw parse made the health gate return
+    None (cannot verify) for every container, so stale alerts never fired."""
+    from chip_relay.service_recovery_skill import _running_from_response
+
+    payload = json.dumps({"State": {"Running": True}, "Name": "/bazarr"}).encode()
+    body = (f"{len(payload):x}\r\n".encode() + payload + b"\r\n0\r\n\r\n")
+    head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n"
+    assert _running_from_response(head, body) is True
+
+
+def test_sock_inspect_parse_non_200_is_none_w019():
+    """W-019 gate-6 fix: non-200 (daemon 500 during compose recreation —
+    the exact W-019 false-positive trigger) must read as cannot-verify."""
+    from chip_relay.service_recovery_skill import _running_from_response
+
+    assert _running_from_response(b"HTTP/1.1 500 Internal Server Error\r\n", b"{}") is None
