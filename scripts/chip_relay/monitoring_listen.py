@@ -105,6 +105,10 @@ def handle_monitoring_alert(
     turn = build_turn(content)
     if turn.ignored:
         logs.append("monitoring alert ignored (ignore_any)")
+        # gate=ignored receipt row (Ally GO 2026-10-04): an ignore hit gets a
+        # dispatch-log row so the ignore law's still-firing state is provable
+        # from the logs, never inferred from absence.
+        _append_dispatch_row(room.id, turn, "ignored", False)
         return DispatchResult(ok=True, logs=logs)
 
     url = (environ.get(room.webhook_env) or "").strip()

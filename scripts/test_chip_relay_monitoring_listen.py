@@ -708,3 +708,51 @@ def test_monitoring_cfg_ignores_lidarr_and_bazarr() -> None:
         "🟡 bazarr container down\nsource=Razzorstack Bot"
     )
     assert should_ignore_alert(alert2)
+
+
+def test_gate_ignored_row_written_per_ignore_hit(
+    tmp_path, monkeypatch
+) -> None:
+    """Ally GO 2026-10-04: every ignore-any ingest hit writes a
+    gate=ignored dispatch row (posted=false) — the ignore law stays
+    auditable from the logs, never inferred from absence."""
+    from chip_relay.monitoring_listen import MONITORING_LISTEN_ENV
+
+    monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
+    import chip_relay.monitoring_skills as ms
+
+    monkeypatch.setattr(
+        ms, "load_ignore_patterns", lambda: (r"media-workflow ticker",)
+    )
+    line = "📊 media-workflow ticker 0 new items"
+    room = _monitoring_room()
+    environ = {
+        MONITORING_LISTEN_ENV: "1",
+        "CHIP_WEBHOOK_MONITORING": "https://example.invalid/monitoring",
+    }
+
+    def webhook(url: str, username: str, body: str) -> WebhookResult:  # pragma: no cover
+        raise AssertionError("ignored ingest must not post")
+
+    def record(room_id: str, body: str, speaker: str) -> None:  # pragma: no cover
+        raise AssertionError("ignored ingest must not record a channel post")
+
+    handle_monitoring_alert(
+        room,
+        content=line,
+        channel_id=room.channel_id,
+        webhook=webhook,
+        environ=environ,
+        record=record,
+    )
+    rows = [
+        json.loads(l)
+        for l in (tmp_path / "chip_state" / "monitoring_dispatch.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if l.strip()
+    ]
+    assert rows, "one ignored row per gate hit"
+    assert rows[-1]["gate"] == "ignored"
+    assert rows[-1]["posted"] is False
+    assert rows[-1]["room"] == room.id
