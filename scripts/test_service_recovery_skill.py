@@ -101,16 +101,21 @@ def test_dispatch_row_and_learning_appended(data_dir):
 
 
 def test_suppressed_container_never_restarted(data_dir):
+    """Suppression wall holds (wireguard). W-015 law drift canary: tautulli was
+    re-allowlisted in service_recovery.json — it must be RESTARTABLE again, and
+    this test fails loudly if the law and the tests drift apart."""
     executor = _FakeExecutor()
-    for detail in [
-        "container=tautulli error: 500 Server Error",
-        "container=wireguard error: 500 Server Error",
-    ]:
-        out = service_recovery_skill.maybe_run(
-            _alert(detail=detail), now=_now(), report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go
-        )
-        assert out["status"] == "suppressed"
-    assert executor.calls == []
+    out = service_recovery_skill.maybe_run(
+        _alert(detail="container=wireguard error: 500 Server Error"),
+        now=_now(), report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+    )
+    assert out["status"] == "suppressed"
+    out2 = service_recovery_skill.maybe_run(
+        _alert(detail="container=tautulli error: 500 Server Error", alert_id="a2"),
+        now=_now(), report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+    )
+    assert out2["status"] == "recovery-attempted"
+    assert [c[2] for c in executor.calls] == ["tautulli"]
 
 
 def test_allowlist_wall_only_restarts_configured_containers(data_dir):
