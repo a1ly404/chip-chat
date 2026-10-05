@@ -3,10 +3,12 @@
   "enabled": true,
   "expires_iso": "2027-01-01T00:00:00Z",
   "max_attempts_24h": 3,
-  "service_allowlist": ["sonarr", "radarr", "prowlarr", "plex", "caddy", "bazarr", "ombi", "calibre-web", "flaresolverr"],
+  "service_allowlist": ["caddy", "bazarr", "ombi", "calibre-web", "flaresolverr", "prowlarr"],
   "suppressed_services": ["tautulli", "wireguard"],
   "executor_base_url": "http://homelab-executor:48100",
   "executor_script": "docker_restart_container",
+  "executor_model": "qwen/qwen3-30b-a3b",
+  "pm_model": "",
   "restart_timeout_s": 120,
-  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h"
+  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h. W-013: allowlist narrowed to container-only targets (sonarr/radarr/plex are native services); PM-classifier go/no-go gates the executor lane; qwen executor-model runs the playbook narrative (redacted context only)."
 }

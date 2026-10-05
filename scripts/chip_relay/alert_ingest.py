@@ -60,6 +60,9 @@ ROUTE_TABLE: dict[str, tuple[str, str]] = {
     # auto-restart failures — one supervised executor restart per incident.
     # See chip_relay.service_recovery_skill.
     "auto-restart-failed": ("service-recovery (W-010 restart escalation)", "matched: razzorstack"),
+    # W-013: discord-bot feed-source alerts are watch-only (no skill); routed
+    # so they stop shadow-logging + banner-spamming the ingest path.
+    "discord-bot": ("discord-bot feed target (watch-only, no skill)", "matched: razzorstack"),
 }
 
 
@@ -99,6 +102,56 @@ def unmatched_banner(rec: Mapping[str, Any]) -> str | None:
     return f"[chip-alert-ingest] UNMATCHED-INGEST no route for {rec['key']!r} — shadow logged, no auto-response standing (3-day shadow window)"
 
 
+# W-013: the ingest ledger + banner cannot flood. Alerts that produce NO
+# skill receipt (shadow and watch-only routes) dedupe per key per window —
+# one row + one banner per source per 15 min; repeats are silent.
+SHADOW_DEDUPE_WINDOW_S = 900
+
+
+def _shadow_state_path() -> Any:
+    from chip import config
+
+    return config.data_dir() / "chip_state" / "shadow_dedupe.json"
+
+
+def _shadow_recent(key: str, *, now_ts: float | None = None) -> bool:
+    import time
+
+    if not key:
+        return False
+    path = _shadow_state_path()
+    state: dict[str, Any] = {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    now_ts = time.time() if now_ts is None else now_ts
+    # prune expired entries opportunistically
+    state = {
+        k: ts
+        for k, ts in state.items()
+        if isinstance(ts, (int, float)) and now_ts - float(ts) < SHADOW_DEDUPE_WINDOW_S
+    }
+    last = state.get(key)
+    return isinstance(last, (int, float)) and now_ts - float(last) < SHADOW_DEDUPE_WINDOW_S
+
+
+def _shadow_mark(key: str, *, now_ts: float | None = None) -> None:
+    import time
+
+    if not key:
+        return
+    path = _shadow_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state: dict[str, Any] = {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    state[key] = float(time.time() if now_ts is None else now_ts)
+    path.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
+
+
 def logged_path() -> Any:
     from chip import config
 
@@ -110,16 +163,12 @@ def handle_alert(alert: Any, *, environ: dict[str, str] | None = None, log_row: 
 
     Garbage body -> structured 400-style error dict (fail-closed, no crash,
     no silent drop). Returns the machine-checkable receipt for the caller.
+    Alerts that produce no skill receipt dedupe per key per window (W-013):
+    one ledger row + one banner per source, repeats silent.
     """
     if not isinstance(alert, Mapping) or not str(alert.get("alert_id") or "").strip():
         return {"ok": False, "status": 400, "error": "alert requires non-empty alert_id"}
     rec = log_row or dispatch_record(alert)
-    path = logged_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
-    banner = unmatched_banner(rec)
-    posted = banner is not None and bool(log_banner_row(banner, environ=environ))
     # W-006 law window: the ONLY executor wiring in the ingest path.
     # plex_fix_skill.maybe_run returns None for every non-plex-external alert,
     # checks its own expiry/caps before any action, and never raises past here.
@@ -141,11 +190,28 @@ def handle_alert(alert: Any, *, environ: dict[str, str] | None = None, log_row: 
         service_recovery_receipt = service_recovery_skill.maybe_run(dict(alert), environ=environ)
     except Exception as exc:  # noqa: BLE001 — never crash the ingest; fault stays visible
         service_recovery_receipt = {"status": "error", "error": f"{exc.__class__.__name__}: {exc}"[:160]}
+
+    skill_responded = plex_fix_receipt is not None or service_recovery_receipt is not None
+    deduped = False
+    if skill_responded or not _shadow_recent(str(rec.get("key", ""))):
+        path = logged_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
+        if not skill_responded:
+            _shadow_mark(str(rec.get("key", "")))
+        banner = unmatched_banner(rec)
+        posted = banner is not None and bool(log_banner_row(banner, environ=environ))
+    else:
+        deduped = True
+        banner = None
+        posted = False
     return {
         "ok": True,
         "status": 202,
         "record": dict(rec),
         "banner_posted": bool(posted),
+        "shadow_deduped": deduped,
         "plex_fix": plex_fix_receipt,
         "service_recovery": service_recovery_receipt,
     }
