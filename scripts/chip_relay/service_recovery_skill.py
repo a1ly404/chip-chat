@@ -333,7 +333,10 @@ def _openrouter_chat(model: str, messages: list[dict[str, str]], environ: dict[s
 
     key = environ.get("OPENROUTER_CC_API_KEY", "") or openrouter.require_api_key()
     payload = openrouter.chat_completion(key, model=model, messages=messages, max_tokens=max_tokens)
-    return openrouter.extract_assistant_text(payload)
+    text = openrouter.extract_assistant_text(payload)
+    if not text.strip():
+        raise RuntimeError("empty assistant text")
+    return text
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -425,11 +428,19 @@ def default_qwen_run_playbook(
         "Reply with a short run sheet (max 4 lines): what you will do, the single "
         "restart you authorize, what you will verify, and when you stop."
     )
-    try:
-        text = _openrouter_chat(qwen_model, [{"role": "user", "content": prompt}], environ, 300)
-        return " | ".join(line.strip() for line in text.splitlines() if line.strip())[:300]
-    except Exception as exc:  # noqa: BLE001 — recorded, never blocks the PM-authorized restart
-        return f"qwen-call-fault: {exc.__class__.__name__} (restart proceeds per PM decision)"
+    # Primary = the intended cheap dev-bot model; fallback = the configured
+    # stand-in used while the workspace guardrail blocks the primary provider
+    # (W-013: OpenRouter guardrails exclude the Qwen provider). Both faults
+    # are recorded and never block the PM-authorized restart.
+    for model in (qwen_model, str(law.get("executor_model_fallback", "") or "").strip()):
+        if not model:
+            continue
+        try:
+            text = _openrouter_chat(model, [{"role": "user", "content": prompt}], environ, 300)
+            return " | ".join(line.strip() for line in text.splitlines() if line.strip())[:300]
+        except Exception as exc:  # noqa: BLE001 — one receipt, never a loop
+            last_fault = f"model {model} fault: {exc.__class__.__name__}"
+    return f"qwen-call-fault: {last_fault} (restart proceeds per PM decision)"
 
 
 def _prune_window(state: dict[str, Any], now_dt: datetime) -> None:

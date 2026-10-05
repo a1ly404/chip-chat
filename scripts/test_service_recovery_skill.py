@@ -235,6 +235,34 @@ def test_qwen_call_fault_does_not_block_pm_authorized_restart(data_dir):
     assert len(executor.calls) == 1
 
 
+def test_qwen_fallback_serves_when_primary_faults(data_dir, monkeypatch):
+    """W-013: guardrail-blocked primary (qwen) falls back to the configured stand-in."""
+    calls = []
+
+    def _chat(model, messages, environ, max_tokens):
+        calls.append(model)
+        if model == "qwen/qwen3-30b-a3b":
+            raise RuntimeError("guardrail 404")
+        return "1. read 2. restart 3. verify 4. stop"
+
+    monkeypatch.setattr(service_recovery_skill, "_openrouter_chat", _chat)
+    law = {"executor_model": "qwen/qwen3-30b-a3b", "executor_model_fallback": "deepseek/deepseek-v4.1-flash"}
+    sheet = service_recovery_skill.default_qwen_run_playbook(law, {"container": "caddy", "failure_class": "daemon-error", "error_excerpt": "x"}, [], os.environ)
+    assert calls == ["qwen/qwen3-30b-a3b", "deepseek/deepseek-v4.1-flash"]
+    assert "restart" in sheet
+    assert "qwen-call-fault" not in sheet
+
+
+def test_pm_json_extraction_tolerates_fences(data_dir, monkeypatch):
+    """The PM reply may arrive fenced/prose-prefixed — the object still parses."""
+    monkeypatch.setattr(
+        service_recovery_skill, "_openrouter_chat",
+        lambda model, messages, environ, max_tokens: 'Sure!\n```json\n{"playbook": "service-recovery", "go": true, "reason": "ok"}\n```',
+    )
+    pm = service_recovery_skill.default_pm_decide({"pm_model": "m"}, {"container": "caddy"}, os.environ)
+    assert pm["go"] is True and pm["playbook"] == "service-recovery"
+
+
 def test_redaction_strips_secret_shaped_strings():
     text = "error: 500 Server Error token=abc123 bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 in log"
     red = service_recovery_skill._redact(text)
