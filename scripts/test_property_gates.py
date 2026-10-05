@@ -115,3 +115,35 @@ def test_property_malformed_alerts_never_execute(alerts):
         harness.check_malformed_alerts(alerts, root)
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+@given(generators.key_churn_scenarios())
+def test_regression_w019_key_churn_yields_one_attempt_per_incident(scenario):
+    """W-019 storm shape (2026-10-05 12:28-12:58): the producer re-keys the
+    SAME container+class alert every cycle, so the W-013 fingerprint
+    (which hashed the key) minted a fresh incident per cycle — eight posts,
+    all 'attempt 1/3', cap evadable. Property: with key-INDEPENDENT identity,
+    key churn yields exactly ONE attempt per incident per 24h window, silent
+    skips for every re-keyed duplicate, and the cap binds per container."""
+    from proptest import reference
+
+    root = _tmp_root()
+    try:
+        harness.check_key_churn(scenario, root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@given(generators.fault_scenarios())
+def test_regression_w019_executor_path_faults_fail_closed(scenario):
+    """W-019 fail-closed law (2026-10-05: qwen ChipConfigError/RuntimeError
+    faults announced 'restart proceeds per PM decision' and posted a fixture
+    'executor restarted caddy' receipt that never reached the executor).
+    Property: a PM, qwen, or executor fault NEVER proceeds to a verified
+    restart; failed incidents stay open, retry paced by the backoff window,
+    bounded by the per-container cap, and receipts name what did NOT happen."""
+    root = _tmp_root()
+    try:
+        harness.check_faults_fail_closed(scenario, root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

@@ -3,24 +3,32 @@
 A plain-Python, dependency-light simulation of what the REAL gates in
 ``chip_relay.service_recovery_skill.maybe_run`` are documented to do (the
 docstring's gate order is the law: target -> expiry -> enabled -> suppression
--> allowlist -> native -> one-per-incident -> 24h cap -> secret -> PM
-go/no-go -> action). The property tests in ``scripts/test_property_gates.py``
-run generated histories through BOTH this model and the real gate code and
-require the action traces to match exactly.
+-> allowlist -> native -> target-health -> one-per-incident -> strike
+backoff -> 24h cap per container -> secret -> PM go/no-go -> qwen run-sheet
+(fault = no action) -> action). The property tests in
+``scripts/test_property_gates.py`` run generated histories through BOTH this
+model and the real gate code and require the action traces to match exactly.
 
 The model is deliberately dumb: no locks, no files, no JSON round-trips —
-just a dict of attempted fingerprints and the gate rules. Where the real
+just dicts of attempt/strike/notice state and the gate rules. Where the real
 implementation has a quirk the law depends on, the model mirrors it and
 notes it inline:
 
-- dedup is checked against the PERSISTED fingerprint set BEFORE the rolling
-  window is pruned, so an incident fingerprint older than 24h still blocks a
-  repeat until some later successful attempt saves a pruned state;
+- success dedup is checked against the PERSISTED fingerprint set BEFORE the
+  rolling window is pruned, so an incident fingerprint older than 24h still
+  blocks a repeat until some later attempt saves a pruned state;
 - attempt stamps are persisted at seconds precision, so microseconds vanish;
 - unparsable/absent expiry means expired (fail-closed), and the expiry gate
   runs BEFORE the enabled gate, so a malformed law yields ``disarmed``, not
   ``disabled``;
-- the disarm notice is posted once per state-file lifetime, not per event.
+- the disarm notice is posted once per state-file lifetime, not per event;
+- incident identity is key-INDEPENDENT (W-019): ``container|failure_class``
+  only. Alert-borne fingerprint stubs are corroboration, never identity — a
+  producer that re-keys every cycle cannot mint new incidents;
+- the 24h cap counts ALL attempts (successes AND failures) PER CONTAINER;
+- a FAILED attempt stays open: no success stamp, a strike with a 10-minute
+  backoff before the next retry (bounded by the same cap);
+- a qwen run-sheet fault never reaches the executor (fail-closed, W-019).
 
 Scenario schema (plain dicts so Hypothesis shrinks and prints them, and so a
 failing example can be dumped as JSON — see proptest/README.md):
@@ -44,6 +52,10 @@ failing example can be dumped as JSON — see proptest/README.md):
                                                #     ["refuse_first", k] / ["fault"]
                 "executor_policy": ["always_ok"],  # or ["always_fail"] /
                                                    #    ["fail_first", k]
+                "qwen_policy": ["always_ok"],  # or ["fault"] (fail-closed, W-019)
+                "target_running": None,        # True = verifiably running
+                                               # (stale alert); False = down;
+                                               # None = cannot verify
                 "events": [
                     {"ts": "2026-10-05T00:00:00+00:00",
                      "alert_id": "a1",
@@ -69,6 +81,7 @@ from datetime import datetime, timezone
 TARGET_KEY_RE = re.compile(r"^auto-restart-failed$", re.IGNORECASE)
 CONTAINER_RE = re.compile(r"container=([A-Za-z0-9_.-]+)")
 WINDOW_S = 86400
+STRIKE_BACKOFF_S = 600  # mirrors the skill default (no env override in harness)
 
 # Receipt statuses the real skill can return (None = alert not ours).
 KNOWN_STATUSES = frozenset(
@@ -77,11 +90,14 @@ KNOWN_STATUSES = frozenset(
         "disabled",
         "suppressed",
         "not-a-container",
+        "target-healthy",
         "not-allowlisted",
         "incident-repeat-skipped",
+        "backoff-skipped",
         "cap-reached",
         "no-credentials",
         "pm-refused",
+        "qwen-fault-no-action",
         "recovery-attempted",
         "recovery-failed",
     }
@@ -91,8 +107,6 @@ KNOWN_STATUSES = frozenset(
 def parse_dt(iso: str) -> datetime | None:
     """Mirror the skill's parse_expires: Z-suffix ok, naive -> UTC, junk -> None."""
     raw = (iso or "").strip()
-    if not raw:
-        return None
     try:
         dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
@@ -120,9 +134,9 @@ def classify_failure(detail: str) -> str:
     return "unknown"
 
 
-def incident_fingerprint(key: str, container: str, failure_class: str) -> str:
-    """W-013 identity: container + class, never the raw (varying) error text."""
-    raw = f"{(key or '').lower()}|{container}|{failure_class}".encode("utf-8")
+def incident_fingerprint(container: str, failure_class: str) -> str:
+    """W-019 identity: container + class ONLY — key-independent."""
+    raw = f"{(container or '').lower()}|{failure_class}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -164,6 +178,15 @@ def _executor_ok(policy: list, executor_index: int) -> bool:
     raise ValueError(f"unknown executor_policy: {policy}")
 
 
+def _qwen_faults(policy: list) -> bool:
+    kind = policy[0]
+    if kind == "always_ok":
+        return False
+    if kind == "fault":
+        return True
+    raise ValueError(f"unknown qwen_policy: {policy}")
+
+
 def _effective_law(episode: dict) -> dict:
     """Mirror law_config's key defaults for a VALID law file (keys may be missing)."""
     law = dict(episode["law"]) if episode.get("law_valid_json", True) else {}
@@ -179,12 +202,17 @@ def simulate(scenario: dict) -> dict:
     trace: dict = {
         "statuses": [],
         "fingerprints": [],
-        "executor_calls": [],  # {container, failure_class, ts, fingerprint}
+        "executor_calls": [],  # {container, failure_class, ts, fingerprint, episode, ok}
         "report_posts": 0,
         "pm_calls": 0,
         "qwen_calls": 0,
     }
-    disk_fps: dict[str, str] = {}  # persisted state.json: fp -> iso stamp
+    # persisted state.json mirrors: successes, failure strikes, per-container
+    # attempt ledger, stale-alert notices, disarm flag
+    disk_fps: dict[str, str] = {}
+    disk_strikes: dict[str, str] = {}
+    disk_attempts: dict[str, list[str]] = {}
+    disk_stale: dict[str, str] = {}
     disarm_notice_posted = False
 
     for ep_idx, episode in enumerate(scenario["episodes"]):
@@ -209,7 +237,9 @@ def simulate(scenario: dict) -> dict:
                 law=law, expires_dt=expires_dt, allowlist=allowlist,
                 suppressed=suppressed, cap=cap, env_secret=env_secret,
                 episode=episode, event_index=event_index,
-                executor_index=episode_executor_calls, disk_fps=disk_fps,
+                executor_index=episode_executor_calls,
+                disk_fps=disk_fps, disk_strikes=disk_strikes,
+                disk_attempts=disk_attempts, disk_stale=disk_stale,
                 trace=trace, disarm_notice_posted=disarm_notice_posted,
                 episode_index=ep_idx, pm_index=episode_pm_calls,
             )
@@ -218,10 +248,49 @@ def simulate(scenario: dict) -> dict:
             elif acted == "executor":
                 episode_executor_calls += 1
             if trace["pm_calls"] > pm_calls_before:
-                episode_pm_calls += 1  # gate 9 was reached (go or refuse)
+                episode_pm_calls += 1  # gate 11 was reached (go or refuse)
             trace["statuses"].append(status)
             trace["fingerprints"].append(fp)
     return trace
+
+
+def _prune_working(
+    disk_fps: dict[str, str],
+    disk_strikes: dict[str, str],
+    disk_attempts: dict[str, list[str]],
+    disk_stale: dict[str, str],
+    now: datetime,
+) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]], dict[str, str]]:
+    """Working-copy prune: dropped entries persist only when a branch saves."""
+    cutoff = now.timestamp() - WINDOW_S
+    fps = {k: v for k, v in disk_fps.items() if _attempt_ts(v, now) >= cutoff}
+    strikes = {k: v for k, v in disk_strikes.items() if _attempt_ts(v, now) >= cutoff}
+    stale = {k: v for k, v in disk_stale.items() if _attempt_ts(v, now) >= cutoff}
+    attempts = {
+        c: [t for t in stamps if _attempt_ts(t, now) >= cutoff]
+        for c, stamps in disk_attempts.items()
+    }
+    attempts = {c: stamps for c, stamps in attempts.items() if stamps}
+    return fps, strikes, attempts, stale
+
+
+def _persist_pruned(
+    disk_fps: dict[str, str],
+    disk_strikes: dict[str, str],
+    disk_attempts: dict[str, list[str]],
+    disk_stale: dict[str, str],
+    pruned: tuple[dict[str, str], dict[str, str], dict[str, list[str]], dict[str, str]],
+) -> None:
+    """The impl saves the PRUNED working copy whenever it saves state."""
+    fps, strikes, attempts, stale = pruned
+    disk_fps.clear()
+    disk_fps.update(fps)
+    disk_strikes.clear()
+    disk_strikes.update(strikes)
+    disk_attempts.clear()
+    disk_attempts.update(attempts)
+    disk_stale.clear()
+    disk_stale.update(stale)
 
 
 def _simulate_event(
@@ -240,6 +309,9 @@ def _simulate_event(
     event_index: int,
     executor_index: int,
     disk_fps: dict,
+    disk_strikes: dict,
+    disk_attempts: dict,
+    disk_stale: dict,
     trace: dict,
     disarm_notice_posted: bool,
     episode_index: int,
@@ -252,8 +324,8 @@ def _simulate_event(
     container_m = CONTAINER_RE.search(detail)
     container = container_m.group(1) if container_m else ""
     failure_class = classify_failure(detail)
-    stub = event.get("fingerprint")
-    fp = str(stub) if stub else incident_fingerprint(key, container, failure_class)
+    # W-019: any alert-borne fingerprint stub is corroboration, never identity.
+    fp = incident_fingerprint(container, failure_class)
 
     # gate 1: expiry (before ANY action; unparsable/absent = expired, fail-closed)
     if expires_dt is None or now >= expires_dt:
@@ -278,30 +350,61 @@ def _simulate_event(
     if container not in allowlist:
         return "not-allowlisted", None, None
 
-    # gate 6: one attempt per incident fingerprint — checked against the
-    # PERSISTED set, BEFORE any window pruning (impl quirk the law depends on)
+    # gate 6: verify-before-act (W-019). True = verifiably running: stale
+    # alert — one notice per incident per window, zero executor calls.
+    running = episode.get("target_running")
+    if running is True:
+        pruned = _prune_working(disk_fps, disk_strikes, disk_attempts, disk_stale, now)
+        _fps, _strikes, _attempts, stale = pruned
+        if fp in stale:
+            return "target-healthy", fp, None
+        _persist_pruned(disk_fps, disk_strikes, disk_attempts, disk_stale, pruned)
+        disk_stale[fp] = _seconds_iso(now)
+        trace["report_posts"] += 1
+        return "target-healthy", fp, None
+
+    # gate 7: one attempt per incident fingerprint (success dedup) — checked
+    # against the PERSISTED set, BEFORE any window pruning (impl quirk)
     if fp in disk_fps:
         return "incident-repeat-skipped", None, None
 
-    # gate 7: rolling 24h cap — prune the working copy first; the pruned set
-    # is only persisted if an attempt actually happens below
-    cutoff = now.timestamp() - WINDOW_S
-    pruned = {k: v for k, v in disk_fps.items() if _attempt_ts(v, now) >= cutoff}
-    if len(pruned) >= cap:
+    # gate 8: strike backoff (W-019) — failed incidents stay open; retries
+    # pace at the backoff window. Checked against the PERSISTED strikes.
+    if fp in disk_strikes:
+        since = now.timestamp() - _attempt_ts(disk_strikes[fp], now)
+        if since < STRIKE_BACKOFF_S:
+            return "backoff-skipped", None, None
+
+    # gate 9: rolling 24h cap — PER CONTAINER, counting ALL attempts
+    # (successes and strikes). Prune the working copy first; the pruned
+    # state persists only if an attempt actually happens below.
+    _fps, _strikes, pruned_attempts, _stale = _prune_working(
+        disk_fps, disk_strikes, disk_attempts, disk_stale, now
+    )
+    if len(pruned_attempts.get(container, [])) >= cap:
         trace["report_posts"] += 1
         return "cap-reached", None, None
 
-    # gate 8: executor credential (fail closed)
+    # gate 10: executor credential (fail closed)
     if not env_secret:
         return "no-credentials", None, None
 
-    # gate 9: PM go/no-go (fail closed on no-go or decider fault)
+    # gate 11: PM go/no-go (fail closed on no-go or decider fault)
     trace["pm_calls"] += 1
     if not _pm_go(episode.get("pm_policy", ["always_go"]), pm_index):
         return "pm-refused", None, None
 
-    # action: qwen run-sheet + the single executor restart
+    # action: qwen run-sheet — a fault FAILS CLOSED (W-019): no executor
+    # call, the incident stays open (strike), bounded by the same cap.
     trace["qwen_calls"] += 1
+    if _qwen_faults(episode.get("qwen_policy", ["always_ok"])):
+        _persist_pruned(disk_fps, disk_strikes, disk_attempts, disk_stale,
+                        (_fps, _strikes, pruned_attempts, _stale))
+        disk_strikes[fp] = _seconds_iso(now)
+        disk_attempts.setdefault(container, []).append(_seconds_iso(now))
+        trace["report_posts"] += 1
+        return "qwen-fault-no-action", None, None
+
     ok = _executor_ok(episode.get("executor_policy", ["always_ok"]), executor_index)
     trace["executor_calls"].append(
         {
@@ -310,12 +413,17 @@ def _simulate_event(
             "ts": event["ts"],
             "fingerprint": fp,
             "episode": episode_index,
+            "ok": ok,
         }
     )
     trace["report_posts"] += 1
-    disk_fps.clear()
-    disk_fps.update(pruned)
-    disk_fps[fp] = _seconds_iso(now)
+    _persist_pruned(disk_fps, disk_strikes, disk_attempts, disk_stale,
+                    (_fps, _strikes, pruned_attempts, _stale))
+    if ok:
+        disk_fps[fp] = _seconds_iso(now)
+    else:
+        disk_strikes[fp] = _seconds_iso(now)
+    disk_attempts.setdefault(container, []).append(_seconds_iso(now))
     status = "recovery-attempted" if ok else "recovery-failed"
     return status, fp, "executor"
 

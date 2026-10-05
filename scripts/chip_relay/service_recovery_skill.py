@@ -14,11 +14,21 @@ Scope walls (all enforced in code, before any action):
   ``missing-container`` classification means the named target is NOT a
   container (native Windows service or stale entry) — docker restarts can
   never help, so the skill refuses with one report (W-013, the sonarr case).
-- incident identity (W-013 dedup fix): the incident fingerprint is
-  ``sha256(key|container|failure_class)`` — NOT the raw detail. Repeat
-  ingests of the same failing container+class (the monitor re-pushes every
-  cycle, and docker error strings embed varying IDs) dedupe to ONE attempt
-  and ONE message per rolling 24h window.
+- incident identity (W-019): the incident fingerprint is
+  ``sha256(container|failure_class)`` — key-INDEPENDENT. The alert ``key``
+  is transport corroboration only: a producer that re-keys every cycle must
+  not mint a new incident. Same container + same class within the rolling
+  24h window dedupes to ONE successful attempt; the 24h cap binds PER
+  CONTAINER across all its incidents, regardless of key.
+- verify-before-act (W-019 false-positive fix): before any executor call the
+  relay reads the target's docker state over its READ-ONLY socket (a read,
+  never a mutation). A container verifiably RUNNING means the alert is
+  stale: one notice, zero executor calls, no attempt consumed.
+- fail-closed executor path (W-019): a qwen run-sheet fault or an executor
+  submission failure means NO restart proceeds. The incident stays OPEN
+  (no success stamp) so the next monitor cycle can retry within caps;
+  failures are recorded as strikes with a 10-minute backoff between
+  retries, and receipts say exactly what did and did not happen.
 - actions: ``docker restart`` of ONE container at a time, ONLY if it is in
   ``service_allowlist`` AND NOT in ``suppressed_services``. Execution goes
   exclusively through homelab-executor (``POST /scripts/run`` with its
@@ -35,11 +45,11 @@ Scope walls (all enforced in code, before any action):
   strings) — never secrets, never env, never ledger data. The models decide
   and narrate only; the actual mutation stays this module's single
   code-enforced executor restart, so the blast radius is unchanged. PM
-  unparsable/refused = no action (fail closed); qwen failure is recorded
-  but does not block the PM-authorized restart.
+  unparsable/refused = no action (fail closed); a qwen failure is
+  fail-closed too (W-019): no restart, incident stays open.
 - fails closed: missing HMAC secret, unparsable law, empty allowlist,
-  suppressed/unknown/native container, PM no-go — every doubt is a refusal
-  with a receipt.
+  suppressed/unknown/native container, PM no-go, qwen fault, executor
+  fault — every doubt is a refusal with a receipt.
 - caps: one attempt per incident fingerprint; hard cap ``max_attempts_24h``
   per rolling 24h.
 - report: outcome goes to the monitoring Discord channel (the channel the
@@ -81,6 +91,10 @@ ENV_EXPIRES = "CHIP_SERVICE_RECOVERY_EXPIRES_ISO"
 ENV_MAX_ATTEMPTS = "CHIP_SERVICE_RECOVERY_MAX_ATTEMPTS"
 HMAC_SECRET_ENV = "HOMELAB_HMAC_SECRET"
 MOCK_ENV = "CHIP_CHAT_MOCK"
+
+# W-019: a FAILED attempt stays open — retry allowed after this backoff so
+# the next monitor cycle can retry within caps, never every 2 minutes.
+STRIKE_BACKOFF_S = int(os.environ.get("CHIP_SERVICE_RECOVERY_BACKOFF_S", "600"))
 
 # Secret-shaped strings never leave the relay (defense in depth for model calls).
 _REDACT_PATTERNS = (
@@ -135,6 +149,7 @@ def law_config(environ: dict[str, str] | None = None) -> dict[str, Any]:
             "executor_base_url": "",
             "executor_script": "docker_restart_container",
             "executor_model": "",
+            "live_report": False,
         }
     raw_expires = str(env.get(ENV_EXPIRES, "") or "").strip()
     if raw_expires:
@@ -203,16 +218,23 @@ def append_learning(entry: dict[str, Any]) -> None:
 
 
 def load_state() -> dict[str, Any]:
+    default = {
+        "attempted_fps": {},
+        "failed_fps": {},
+        "attempts_by_container": {},
+        "stale_notice_fps": {},
+        "disarmed": False,
+        "disarm_notice_posted": False,
+    }
     p = state_path()
     if not p.is_file():
-        return {"attempted_fps": {}, "disarmed": False, "disarm_notice_posted": False}
+        return dict(default)
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"attempted_fps": {}, "disarmed": False, "disarm_notice_posted": False}
-    raw.setdefault("attempted_fps", {})
-    raw.setdefault("disarmed", False)
-    raw.setdefault("disarm_notice_posted", False)
+        return dict(default)
+    for k, v in default.items():
+        raw.setdefault(k, v)
     return raw
 
 
@@ -261,24 +283,47 @@ def classify_failure(detail: str) -> str:
     return "unknown"
 
 
-def incident_fingerprint(key: str, container: str, failure_class: str) -> str:
-    """Stable incident identity: container + class, NOT the raw error text.
+def incident_fingerprint(container: str, failure_class: str) -> str:
+    """Stable incident identity: container + class ONLY (W-019).
 
-    W-013: docker error strings embed varying IDs, so every monitor re-push
-    used to mint a new fingerprint and re-fire. Same container + same class
-    within the rolling window = the SAME incident.
+    W-013 hashed ``key|container|class``; the key no longer participates.
+    The alert ``key`` is transport corroboration, never identity — a producer
+    that re-keys every cycle must not mint a new incident. Same container +
+    same class within the rolling window = the SAME incident.
     """
-    raw = f"{(key or '').lower()}|{container}|{failure_class}".encode("utf-8")
+    raw = f"{(container or '').lower()}|{failure_class}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
+
+
+ENV_LIVE_REPORT = "CHIP_SERVICE_RECOVERY_LIVE_REPORT"
+
+
+ENV_LIVE_REPORT = "CHIP_SERVICE_RECOVERY_LIVE_REPORT"
 
 
 def _report_to_monitoring(environ: dict[str, str], line: str) -> bool:
     """Post the outcome to the monitoring Discord channel (existing post law).
 
-    No-ops under CHIP_CHAT_MOCK — harness runs must never reach the live
-    channel (W-013: five live posts escaped from state-isolated test runs).
+    Triple-gated (W-019, the 2026-10-05 storm): a live post requires ALL of
+    - CHIP_CHAT_MOCK unset/false,
+    - no pytest context (``PYTEST_CURRENT_TEST`` absent — harness runs must
+      never reach the live channel even with a mis-configured environ),
+    - the law says ``live_report: true`` (config file SoT; env override).
+    Anything else is log-only: doubtful = silent.
     """
-    if (environ.get(MOCK_ENV, "") or "").strip().lower() in {"1", "true", "yes", "on"}:
+    env = environ or {}
+    if (env.get(MOCK_ENV, "") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    if env.get("PYTEST_CURRENT_TEST"):
+        return False
+    live_flag = str(env.get(ENV_LIVE_REPORT, "") or "").strip().lower()
+    if live_flag in {"1", "true", "yes", "on"}:
+        live = True
+    elif live_flag in {"0", "false", "no", "off"}:
+        live = False
+    else:
+        live = law_config(env).get("live_report") is True
+    if not live:
         return False
     from chip.monitor_watchdog import post_to_monitoring
 
@@ -324,7 +369,49 @@ def _default_executor_restart(
         return False, f"executor refused: {payload['error']}"
     if not ok:
         return False, f"executor script failed rc={payload.get('exit_code')}"
-    return True, f"executor restarted {container}"
+    # W-019 truthful receipt: the executor REPORTED success; the relay has
+    # not (and cannot, restart-only law) independently verified the restart.
+    return True, f"executor reports restart ok for {container} (verify uptime)"
+
+
+def _default_container_running(container: str) -> bool | None:
+    """Read-only verify-before-act gate (W-019 false-positive fix).
+
+    GET /containers/<name>/json over the relay's READ-ONLY docker.sock — a
+    read, never a mutation (the restart wall stays executor-only). Returns
+    True (running: alert is stale — do NOT restart), False (down: proceed),
+    or None (cannot verify: proceed on the alert's evidence, as before).
+    """
+    sock = os.environ.get("DOCKER_SOCK_PATH", "/var/run/docker.sock")
+    if not os.path.exists(sock):
+        return None
+    import socket
+
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(sock)
+        req = (
+            f"GET /containers/{container}/json HTTP/1.1\r\n"
+            f"Host: docker\r\nConnection: close\r\n\r\n"
+        ).encode()
+        client.sendall(req)
+        chunks = []
+        while True:
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        client.close()
+        raw = b"".join(chunks)
+        head, _, body = raw.partition(b"\r\n\r\n")
+        status_line = head.split(b"\r\n", 1)[0].decode("utf-8", "replace")
+        if " 200 " not in status_line:
+            return None
+        payload = json.loads(body.decode("utf-8", "replace"))
+        return bool(payload.get("State", {}).get("Running"))
+    except Exception:  # noqa: BLE001 — cannot verify never blocks the lane
+        return None
 
 
 def _openrouter_chat(model: str, messages: list[dict[str, str]], environ: dict[str, str], max_tokens: int) -> str:
@@ -415,7 +502,7 @@ def default_qwen_run_playbook(
     """
     qwen_model = str(law.get("executor_model", "") or "").strip()
     if not qwen_model:
-        return "qwen executor-model not configured; PM-authorized restart proceeds without run-sheet"
+        return "qwen-call-fault: executor-model not configured (no restart; incident stays open)"
     lessons = "\n".join(
         f"- {str(e.get('lesson', ''))[:140]}" for e in learnings[-5:]
     ) or "- journal empty (first run)"
@@ -443,16 +530,25 @@ def default_qwen_run_playbook(
             return " | ".join(line.strip() for line in text.splitlines() if line.strip())[:300]
         except Exception as exc:  # noqa: BLE001 — one receipt, never a loop
             last_fault = f"model {model} fault: {exc.__class__.__name__}"
-    return f"qwen-call-fault: {last_fault} (restart proceeds per PM decision)"
+    # W-019: the caller treats this marker as fail-closed — no executor call.
+    return f"qwen-call-fault: {last_fault} (no restart; incident stays open)"
 
 
 def _prune_window(state: dict[str, Any], now_dt: datetime) -> None:
-    """Rolling 24h window: drop fingerprints older than the cap horizon."""
+    """Rolling 24h window: drop attempt/strike/notice entries past the horizon."""
     cutoff = now_dt.timestamp() - 86400
-    state["attempted_fps"] = {
-        fp: iso
-        for fp, iso in state.get("attempted_fps", {}).items()
-        if _attempt_ts(iso, now_dt) >= cutoff
+    for key in ("attempted_fps", "failed_fps", "stale_notice_fps"):
+        state[key] = {
+            fp: iso
+            for fp, iso in state.get(key, {}).items()
+            if _attempt_ts(iso, now_dt) >= cutoff
+        }
+    state["attempts_by_container"] = {
+        container: [iso for iso in stamps if _attempt_ts(iso, now_dt) >= cutoff]
+        for container, stamps in state.get("attempts_by_container", {}).items()
+    }
+    state["attempts_by_container"] = {
+        container: stamps for container, stamps in state["attempts_by_container"].items() if stamps
     }
 
 
@@ -475,12 +571,16 @@ def maybe_run(
     executor_runner: Callable[[str, str, str, str, int], tuple[bool, str]] | None = None,
     pm_decider: Callable[[dict[str, Any], dict[str, Any], dict[str, str]], dict[str, Any]] | None = None,
     qwen_runner: Callable[[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, str]], str] | None = None,
+    container_running: Callable[[str], bool | None] | None = None,
 ) -> dict[str, Any] | None:
     """Entry point. Returns a machine-checkable receipt dict, or None if not ours.
 
     Order is law, not style: target -> expiry -> enabled -> suppression ->
-    allowlist -> native check -> one-per-incident -> 24h cap -> secret ->
-    PM go/no-go -> action. Nothing executes unless every gate passes.
+    allowlist -> native -> target-health (W-019) -> one-per-incident ->
+    strike backoff (W-019) -> 24h cap per container (W-019) -> secret ->
+    PM go/no-go -> qwen run-sheet (fault = no action, W-019) -> action.
+    Nothing executes unless every gate passes; executor-path faults never
+    proceed to a restart.
     """
     env = environ if environ is not None else os.environ
     now = now or datetime.now(timezone.utc)
@@ -495,7 +595,10 @@ def maybe_run(
     container = container_match.group(1) if container_match else ""
     failure_class = classify_failure(detail)
     fp_stub = alert.get("fingerprint")
-    fp = str(fp_stub or incident_fingerprint(key, container, failure_class))
+    # W-019: incident identity is container|class ONLY. Any alert-borne
+    # fingerprint stub (feed-derived from the per-cycle key) stays
+    # corroboration in rows — never identity.
+    fp = incident_fingerprint(container, failure_class)
 
     with _LOCK:
         state = load_state()
@@ -564,7 +667,53 @@ def maybe_run(
             )
             return {"status": "not-allowlisted", "container": container}
 
-        # --- gate 6: one attempt per incident fingerprint (stable identity) ---
+        # --- gate 6: verify-before-act (W-019 false-positive fix) ---
+        # If the relay can PROVE the target is running, the alert is stale —
+        # never restart a healthy container. One notice per incident per
+        # window; repeats are silent.
+        health = None
+        try:
+            health = (container_running or _default_container_running)(container)
+        except Exception:  # noqa: BLE001 — a faulting checker cannot block the lane
+            health = None
+        if health is True:
+            _prune_window(state, now)
+            if fp in state.get("stale_notice_fps", {}):
+                _append_learning_and_row(
+                    alert, fp, container, failure_class, "target-healthy", "none",
+                    "container reports running — stale alert; repeat notice suppressed", now,
+                    lesson="verify-before-act held; stale alert never reaches the executor",
+                    last_lesson=last_lesson, posted_notice=False,
+                )
+                return {
+                "status": "target-healthy",
+                "fingerprint": fp,
+                "container": container,
+                "failure_class": failure_class,
+                "notice_suppressed": True,
+            }
+            posted = report(
+                env,
+                f"[service-recovery] target check: **{container}** reports RUNNING — "
+                f"alert appears stale (false positive); no restart sent",
+            )
+            state.setdefault("stale_notice_fps", {})[fp] = now.isoformat(timespec="seconds")
+            save_state(state)
+            _append_learning_and_row(
+                alert, fp, container, failure_class, "target-healthy", "none",
+                "container reports running — stale alert; no restart", now,
+                lesson="verify-before-act held; stale alert never reaches the executor",
+                last_lesson=last_lesson, posted_notice=posted,
+            )
+            return {
+                "status": "target-healthy",
+                "fingerprint": fp,
+                "container": container,
+                "failure_class": failure_class,
+                "report_posted": posted,
+            }
+
+        # --- gate 7: one attempt per incident fingerprint (success dedup) ---
         if fp in state.get("attempted_fps", {}):
             _append_learning_and_row(
                 alert, fp, container, failure_class, "incident-repeat-skipped", "none",
@@ -574,23 +723,42 @@ def maybe_run(
             )
             return {"status": "incident-repeat-skipped", "attempted_at": state["attempted_fps"][fp]}
 
-        # --- gate 7: rolling 24h attempt cap ---
+        # --- gate 8: strike backoff (W-019) ---
+        # A FAILED attempt stays open (incident not consumed): retry is
+        # allowed after the backoff window so the next monitor cycle can
+        # retry within caps, but not every 2 minutes.
+        strikes = state.get("failed_fps", {})
+        if fp in strikes:
+            since = now.timestamp() - _attempt_ts(strikes[fp], now)
+            if since < STRIKE_BACKOFF_S:
+                _append_learning_and_row(
+                    alert, fp, container, failure_class, "backoff-skipped", "none",
+                    f"failed attempt {int(since)}s ago; backoff {STRIKE_BACKOFF_S}s", now,
+                    lesson="failed incidents stay open; retries pace at the backoff window",
+                    last_lesson=last_lesson, posted_notice=False,
+                )
+                return {"status": "backoff-skipped", "retry_after_s": int(STRIKE_BACKOFF_S - since)}
+
+        # --- gate 9: rolling 24h attempt cap, PER CONTAINER (W-019) ---
+        # Successes AND strikes both count; the cap binds per container
+        # regardless of how the producer keys each cycle's alert.
         _prune_window(state, now)
-        if len(state.get("attempted_fps", {})) >= int(law.get("max_attempts_24h", 3)):
+        used = len(state.get("attempts_by_container", {}).get(container, []))
+        if used >= int(law.get("max_attempts_24h", 3)):
             posted = report(
                 env,
-                f"[service-recovery] cap reached ({law.get('max_attempts_24h')}/24h) — "
+                f"[service-recovery] cap reached ({used}/{law.get('max_attempts_24h')} per container/24h) — "
                 f"no recovery for {container} ({failure_class}); classify+tell only",
             )
             _append_learning_and_row(
                 alert, fp, container, failure_class, "cap-reached", "none",
-                f"cap {law.get('max_attempts_24h')}/24h reached", now,
+                f"cap {used}/{law.get('max_attempts_24h')} per container reached", now,
                 lesson="hard cap held; no attempt beyond the human-authorized budget",
                 last_lesson=last_lesson, posted_notice=posted,
             )
-            return {"status": "cap-reached", "attempts_used": len(state.get("attempted_fps", {}))}
+            return {"status": "cap-reached", "attempts_used": used}
 
-        # --- gate 8: executor credential (fail closed without it) ---
+        # --- gate 10: executor credential (fail closed without it) ---
         secret = (env.get(HMAC_SECRET_ENV, "") or "").strip()
         if not secret:
             _append_learning_and_row(
@@ -601,7 +769,7 @@ def maybe_run(
             )
             return {"status": "no-credentials"}
 
-        # --- gate 9: PM go/no-go (cheap classifier call, fail-closed) ---
+        # --- gate 11: PM go/no-go (cheap classifier call, fail-closed) ---
         incident = {
             "container": container,
             "failure_class": failure_class,
@@ -625,12 +793,49 @@ def maybe_run(
             )
             return {"status": "pm-refused", "container": container, "pm_reason": reason}
 
-        # --- action: qwen run-sheet + the ONLY mutation this skill can make ---
+        # --- action: qwen run-sheet, then the ONLY mutation this skill can make ---
+        # W-019 fail-closed: a fault anywhere on the executor path (qwen
+        # run-sheet, executor submission) means NO restart proceeds. The
+        # incident stays OPEN — no success stamp — so the next monitor cycle
+        # can retry within caps; the failure is a recorded strike.
         run_qwen = qwen_runner or default_qwen_run_playbook
         try:
             run_sheet = run_qwen(law, incident, learnings, env)
-        except Exception as exc:  # noqa: BLE001 — recorded; never blocks the PM-authorized restart
-            run_sheet = f"qwen-call-fault: {exc.__class__.__name__} (restart proceeds per PM decision)"
+        except Exception as exc:  # noqa: BLE001 — recorded; never proceeds
+            run_sheet = f"qwen-call-fault: {exc.__class__.__name__}"
+        if "qwen-call-fault" in run_sheet or "not configured" in run_sheet:
+            state.setdefault("failed_fps", {})[fp] = now.isoformat(timespec="seconds")
+            state.setdefault("attempts_by_container", {}).setdefault(container, []).append(
+                now.isoformat(timespec="seconds")
+            )
+            save_state(state)
+            used = len(state["attempts_by_container"][container])
+            outcome = f"failure_class={failure_class}; executor=not attempted (qwen fault)"
+            line = (
+                f"[service-recovery] attempt {used}/{law.get('max_attempts_24h')}: "
+                f"monitoring bot could not restart **{container}** ({failure_class}); "
+                f"PM=go ({str(pm.get('reason', ''))[:60]}); qwen run-sheet: {run_sheet[:100]}; "
+                f"NO executor restart sent (qwen fault — fail-closed); incident stays open; "
+                f"last_learning={last_lesson}"
+            )
+            posted = report(env, line)
+            _append_learning_and_row(
+                alert, fp, container, failure_class, "qwen-fault-no-action",
+                "none (qwen fault; fail-closed)", outcome, now,
+                lesson="qwen fault = no mutation; incident stays open, retry after backoff",
+                last_lesson=last_lesson, posted_notice=posted,
+            )
+            return {
+                "status": "qwen-fault-no-action",
+                "fingerprint": fp,
+                "container": container,
+                "failure_class": failure_class,
+                "pm_reason": str(pm.get("reason", "")),
+                "run_sheet": run_sheet,
+                "executor_outcome": "not attempted (qwen fault)",
+                "report_posted": posted,
+                "attempt": f"{used}/{law.get('max_attempts_24h')}",
+            }
         base_url = str(law.get("executor_base_url", "")).strip()
         script = str(law.get("executor_script", "docker_restart_container"))
         ok, executor_outcome = executor_runner(
@@ -641,20 +846,31 @@ def maybe_run(
         outcome = f"failure_class={failure_class}; executor={executor_outcome}"
         verdict = "recovery-attempted" if ok else "recovery-failed"
 
-        state.setdefault("attempted_fps", {})[fp] = now.isoformat(timespec="seconds")
+        if ok:
+            state.setdefault("attempted_fps", {})[fp] = now.isoformat(timespec="seconds")
+        else:
+            state.setdefault("failed_fps", {})[fp] = now.isoformat(timespec="seconds")
+        state.setdefault("attempts_by_container", {}).setdefault(container, []).append(
+            now.isoformat(timespec="seconds")
+        )
         save_state(state)
 
-        attempt_no = len(state["attempted_fps"])
+        used = len(state["attempts_by_container"][container])
         lesson = (
-            "restart-only escalation executed; monitoring channel is the ground truth"
+            "restart-only escalation executed; verify container uptime before close"
             if ok
-            else f"executor restart failed ({executor_outcome[:80]}) — never retry same incident"
+            else f"executor restart NOT performed ({executor_outcome[:80]}); incident stays open"
+        )
+        executor_receipt = (
+            f"one executor restart sent — {executor_outcome}"
+            if ok
+            else f"NO executor restart performed — {executor_outcome}"
         )
         line = (
-            f"[service-recovery] attempt {attempt_no}/{law.get('max_attempts_24h')}: "
+            f"[service-recovery] attempt {used}/{law.get('max_attempts_24h')}: "
             f"monitoring bot could not restart **{container}** ({failure_class}); "
             f"PM=go ({str(pm.get('reason', ''))[:60]}); qwen run-sheet: {run_sheet[:100]}; "
-            f"one executor restart sent — {executor_outcome}; "
+            f"{executor_receipt}; "
             f"last_learning={last_lesson}"
         )
         posted = report(env, line)
@@ -671,10 +887,10 @@ def maybe_run(
             "failure_class": failure_class,
             "pm_reason": str(pm.get("reason", "")),
             "run_sheet": run_sheet,
-            "executor_outcome": executor_outcome,
-            "report_posted": posted,
-            "attempt": f"{attempt_no}/{law.get('max_attempts_24h')}",
-        }
+"executor_outcome": executor_outcome,
+                "report_posted": posted,
+                "attempt": f"{used}/{law.get('max_attempts_24h')}",
+            }
 
 
 def _append_learning_and_row(

@@ -33,6 +33,12 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("CHIP_SERVICE_RECOVERY_EXPIRES_ISO", NOT_EXPIRED)
     monkeypatch.setenv("CHIP_SERVICE_RECOVERY_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("HOMELAB_HMAC_SECRET", "test-secret")
+    # offline law: default qwen/PM model calls must NEVER reach the network
+    # (the 2026-10-05 storm leaked exactly this way); fake the chat transport
+    monkeypatch.setattr(
+        service_recovery_skill, "_openrouter_chat",
+        lambda model, messages, environ, max_tokens: "1. read incident 2. restart 3. verify 4. stop",
+    )
     return d
 
 
@@ -65,7 +71,9 @@ class _FakeExecutor:
 
     def __call__(self, base_url, script, container, secret, timeout_s):
         self.calls.append((base_url, script, container))
-        return (self.ok, f"executor restarted {container}" if self.ok else "executor script failed rc=1")
+        if self.ok:
+            return (True, f"executor reports restart ok for {container} (verify uptime)")
+        return (False, "executor script failed rc=1")
 
 
 def _env(monkeypatch, **overrides):
@@ -170,10 +178,12 @@ def test_new_failure_class_is_a_new_incident(data_dir):
     out1 = service_recovery_skill.maybe_run(
         _alert(detail="container=caddy error: 500 Server Error"), now=_now(),
         report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+        qwen_runner=lambda *a: "stub run sheet",
     )
     out2 = service_recovery_skill.maybe_run(
         _alert(detail="container=caddy error: restart timed out"), now=_now() + timedelta(minutes=5),
         report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+        qwen_runner=lambda *a: "stub run sheet",
     )
     assert out1["status"] == "recovery-attempted"
     assert out2["status"] == "recovery-attempted"
@@ -225,7 +235,10 @@ def test_qwen_run_sheet_recorded_in_receipt_and_learning(data_dir):
     assert "qwen run-sheet recorded" in journal
 
 
-def test_qwen_call_fault_does_not_block_pm_authorized_restart(data_dir):
+def test_qwen_call_fault_fails_closed_w019(data_dir):
+    """W-019: a qwen run-sheet fault NEVER proceeds to the executor. The
+    incident stays open (strike, not success), the receipt says the restart
+    was NOT sent, and a retry after the backoff window can try again."""
     executor = _FakeExecutor()
 
     def _qwen_boom(law, incident, learnings, environ):
@@ -235,9 +248,27 @@ def test_qwen_call_fault_does_not_block_pm_authorized_restart(data_dir):
         _alert(), now=_now(), report=_FakeReport(), executor_runner=executor,
         pm_decider=_pm_go, qwen_runner=_qwen_boom,
     )
-    assert out["status"] == "recovery-attempted"
-    assert "qwen-call-fault" in out["run_sheet"]
-    assert len(executor.calls) == 1
+    assert out["status"] == "qwen-fault-no-action"
+    assert len(executor.calls) == 0
+    state = service_recovery_skill.load_state()
+    fp = out["fingerprint"]
+    assert fp in state["failed_fps"]  # strike, not a consumed incident
+    assert fp not in state["attempted_fps"]
+    # immediate repeat is backoff-paced, not a fresh attempt
+    out2 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a2"), now=_now() + timedelta(seconds=60),
+        report=_FakeReport(), executor_runner=executor,
+        pm_decider=_pm_go, qwen_runner=_qwen_boom,
+    )
+    assert out2["status"] == "backoff-skipped"
+    # after the backoff window the open incident retries (still no executor)
+    out3 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a3"), now=_now() + timedelta(minutes=11),
+        report=_FakeReport(), executor_runner=executor,
+        pm_decider=_pm_go, qwen_runner=_qwen_boom,
+    )
+    assert out3["status"] == "qwen-fault-no-action"
+    assert len(executor.calls) == 0
 
 
 def test_qwen_fallback_serves_when_primary_faults(data_dir, monkeypatch):
@@ -276,22 +307,35 @@ def test_redaction_strips_secret_shaped_strings():
     assert "<redacted>" in red
 
 
-def test_hard_cap_24h(data_dir):
-    executor = _FakeExecutor()
+def test_hard_cap_24h_binds_per_container(data_dir):
+    """W-019: the 24h cap counts ALL attempts (successes and strikes) PER
+    CONTAINER — key churn cannot evade it, and other containers are
+    unaffected by one container's exhausted budget."""
+    executor = _FakeExecutor(ok=False)  # every attempt fails -> strikes
     now = _now()
     verdicts = []
-    containers = ["caddy", "bazarr", "ombi", "calibre-web"]  # distinct incidents
-    for i, name in enumerate(containers):
+    for i in range(4):
         out = service_recovery_skill.maybe_run(
-            _alert(detail=f"container={name} error: 500 Server Error", alert_id=f"inc{i}"),
-            now=now + timedelta(minutes=i),
+            _alert(detail="container=caddy error: 500 Server Error", alert_id=f"inc{i}"),
+            now=now + timedelta(minutes=11 * i),  # past the strike backoff
             report=_FakeReport(),
             executor_runner=executor,
             pm_decider=_pm_go,
         )
         verdicts.append(out["status"])
-    assert verdicts == ["recovery-attempted", "recovery-attempted", "recovery-attempted", "cap-reached"]
+    assert verdicts == [
+        "recovery-failed", "recovery-failed", "recovery-failed", "cap-reached",
+    ]
     assert len(executor.calls) == 3
+    # per container, not global: bazarr's budget is untouched by caddy's cap
+    out = service_recovery_skill.maybe_run(
+        _alert(detail="container=bazarr error: 500 Server Error", alert_id="other"),
+        now=now + timedelta(minutes=45),
+        report=_FakeReport(),
+        executor_runner=_FakeExecutor(),
+        pm_decider=_pm_go,
+    )
+    assert out["status"] == "recovery-attempted"
 
 
 def test_missing_hmac_secret_fails_closed(data_dir, monkeypatch):
@@ -342,16 +386,46 @@ def test_unparsable_expiry_fails_closed(data_dir, monkeypatch):
     assert out["status"] == "disarmed"
 
 
-def test_executor_failure_is_recorded_not_retried(data_dir):
+def test_executor_failure_stays_open_with_paced_retry(data_dir):
+    """W-019: a failed executor attempt does NOT consume the incident — the
+    receipt is truthful (restart NOT performed), a strike is recorded, and a
+    retry happens only after the backoff window."""
     executor = _FakeExecutor(ok=False)
+    report = _FakeReport()
     out = service_recovery_skill.maybe_run(
-        _alert(), now=_now(), report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go
+        _alert(), now=_now(), report=report, executor_runner=executor, pm_decider=_pm_go
     )
     assert out["status"] == "recovery-failed"
+    assert "NO executor restart performed" in report.lines[0]
     out2 = service_recovery_skill.maybe_run(
-        _alert(alert_id="a2"), now=_now(), report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go
+        _alert(alert_id="a2"), now=_now() + timedelta(seconds=30),
+        report=report, executor_runner=executor, pm_decider=_pm_go
+    )
+    assert out2["status"] == "backoff-skipped"
+    out3 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a3"), now=_now() + timedelta(minutes=11),
+        report=report, executor_runner=executor, pm_decider=_pm_go
+    )
+    assert out3["status"] == "recovery-failed"
+    assert len(executor.calls) == 2  # paced retry happened
+
+
+def test_success_dedupes_and_receipt_is_truthful(data_dir):
+    """A verified executor success consumes the incident; the receipt says the
+    executor REPORTED success (never claims the relay verified it)."""
+    executor = _FakeExecutor(ok=True)
+    report = _FakeReport()
+    out = service_recovery_skill.maybe_run(
+        _alert(), now=_now(), report=report, executor_runner=executor, pm_decider=_pm_go
+    )
+    assert out["status"] == "recovery-attempted"
+    assert "executor reports restart ok" in report.lines[0]
+    out2 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a2"), now=_now() + timedelta(seconds=30),
+        report=report, executor_runner=executor, pm_decider=_pm_go
     )
     assert out2["status"] == "incident-repeat-skipped"
+    assert len(executor.calls) == 1
 
 
 def test_learnings_tail_loaded_and_echoed(data_dir):
@@ -467,3 +541,137 @@ def test_mock_report_guard(data_dir, monkeypatch):
     """CHIP_CHAT_MOCK=1: the default report path never reaches the live channel."""
     monkeypatch.setenv("CHIP_CHAT_MOCK", "1")
     assert service_recovery_skill._report_to_monitoring(os.environ, "line") is False
+
+
+def test_key_churn_dedupes_to_one_attempt(data_dir):
+    """W-019: incident identity is key-INDEPENDENT. The same container+class
+    re-keyed every cycle (the 2026-10-05 storm shape) dedupes to ONE attempt
+    and ONE message; the alert key never mints a new incident."""
+    executor = _FakeExecutor()
+    report = _FakeReport()
+    keys = ["auto-restart-failed", "AUTO-RESTART-FAILED", " auto-restart-failed", "auto-restart-failed\n"]
+    for i, key in enumerate(keys):
+        out = service_recovery_skill.maybe_run(
+            {"alert_id": f"churn-{i}", "key": key,
+             "detail": f"container=caddy error: 500 Server Error (req id {i})"},
+            now=_now() + timedelta(seconds=i),
+            report=report, executor_runner=executor, pm_decider=_pm_go,
+        )
+        if i == 0:
+            assert out["status"] == "recovery-attempted"
+        else:
+            assert out["status"] == "incident-repeat-skipped"
+    assert len(executor.calls) == 1
+    assert len(report.lines) == 1
+    # a feed-borne fingerprint stub is corroboration only — never identity
+    out = service_recovery_skill.maybe_run(
+        {"alert_id": "stub", "key": "auto-restart-failed",
+         "detail": "container=caddy error: 500 Server Error",
+         "fingerprint": "totally-different-stub"},
+        now=_now() + timedelta(seconds=9),
+        report=report, executor_runner=executor, pm_decider=_pm_go,
+    )
+    assert out["status"] == "incident-repeat-skipped"
+
+
+def test_key_churn_across_distinct_classes_stays_separate(data_dir):
+    """Different failure classes of the same container remain distinct
+    incidents (key-independence must not collapse genuine distinctions)."""
+    executor = _FakeExecutor()
+    out1 = service_recovery_skill.maybe_run(
+        _alert(detail="container=caddy error: 500 Server Error"), now=_now(),
+        report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+    )
+    out2 = service_recovery_skill.maybe_run(
+        _alert(detail="container=caddy error: restart timed out"), now=_now() + timedelta(minutes=5),
+        report=_FakeReport(), executor_runner=executor, pm_decider=_pm_go,
+    )
+    assert out1["fingerprint"] != out2["fingerprint"]
+    assert len(executor.calls) == 2
+
+
+def test_target_health_gate_blocks_stale_alerts(data_dir):
+    """W-019 verify-before-act: a container the relay can PROVE is running
+    means the alert is stale — ONE notice, ZERO executor calls, and no
+    attempt consumed; repeats of the same stale incident are silent."""
+    executor = _FakeExecutor()
+    report = _FakeReport()
+    out = service_recovery_skill.maybe_run(
+        _alert(), now=_now(), report=report, executor_runner=executor,
+        pm_decider=_pm_go, container_running=lambda c: True,
+    )
+    assert out["status"] == "target-healthy"
+    assert executor.calls == []
+    assert "reports RUNNING" in report.lines[0]
+    state = service_recovery_skill.load_state()
+    assert out["fingerprint"] not in state["attempted_fps"]  # nothing consumed
+    out2 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a2"), now=_now() + timedelta(seconds=30),
+        report=report, executor_runner=executor,
+        pm_decider=_pm_go, container_running=lambda c: True,
+    )
+    assert out2["status"] == "target-healthy"
+    assert len(report.lines) == 1  # repeat notice suppressed
+    assert len(executor.calls) == 0
+    # cannot verify (None) -> proceed on the alert's evidence, as before
+    out3 = service_recovery_skill.maybe_run(
+        _alert(alert_id="a3"), now=_now() + timedelta(seconds=60),
+        report=report, executor_runner=executor,
+        pm_decider=_pm_go, container_running=lambda c: None,
+    )
+    assert out3["status"] == "recovery-attempted"
+    assert len(executor.calls) == 1
+
+
+def test_live_report_requires_law_flag(data_dir, monkeypatch):
+    """W-019 (the storm): the DEFAULT report path posts to the live channel
+    ONLY when the law says live_report AND no mock/pytest context is active.
+    Doubtful = silent."""
+    posted = []
+    monkeypatch.setattr(
+        "chip.monitor_watchdog.post_to_monitoring",
+        lambda text, *, environ=None: (posted.append(text), (True, "posted"))[1],
+    )
+    law_path = config.data_dir() / "law_live_report.json"
+    env = {"HOMELAB_HMAC_SECRET": "s"}
+    # 1. law without the flag: log-only
+    law_path.write_text(json.dumps({"enabled": True, "live_report": False}), encoding="utf-8")
+    monkeypatch.setattr(service_recovery_skill, "_law_file", lambda: law_path)
+    assert service_recovery_skill._report_to_monitoring(env, "line") is False
+    assert posted == []
+    # 2. law flag on: posts
+    law_path.write_text(json.dumps({"enabled": True, "live_report": True}), encoding="utf-8")
+    assert service_recovery_skill._report_to_monitoring(env, "line") is True
+    assert len(posted) == 1
+    # 3. mock still wins over the law flag
+    assert service_recovery_skill._report_to_monitoring({**env, "CHIP_CHAT_MOCK": "1"}, "line") is False
+    assert len(posted) == 1
+    # 4. pytest context always wins (the storm leaked from a harness run)
+    assert service_recovery_skill._report_to_monitoring(
+        {**env, "PYTEST_CURRENT_TEST": "test_x"}, "line"
+    ) is False
+    assert len(posted) == 1
+    # 5. env override
+    assert service_recovery_skill._report_to_monitoring(
+        {**env, "CHIP_SERVICE_RECOVERY_LIVE_REPORT": "0"}, "line"
+    ) is False
+    assert service_recovery_skill._report_to_monitoring(
+        {**env, "CHIP_SERVICE_RECOVERY_LIVE_REPORT": "1"}, "line"
+    ) is True
+
+
+def test_qwen_unconfigured_fails_closed(data_dir, monkeypatch):
+    """No executor model configured = an executor-path gap: fail-closed."""
+    law_path = config.data_dir() / "law_no_model.json"
+    law_path.write_text(
+        json.dumps({"enabled": True, "executor_model": "", "service_allowlist": ["caddy"]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service_recovery_skill, "_law_file", lambda: law_path)
+    executor = _FakeExecutor()
+    out = service_recovery_skill.maybe_run(
+        _alert(), now=_now(), report=_FakeReport(), executor_runner=executor,
+        pm_decider=_pm_go, qwen_runner=service_recovery_skill.default_qwen_run_playbook,
+    )
+    assert out["status"] == "qwen-fault-no-action"
+    assert executor.calls == []

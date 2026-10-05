@@ -308,6 +308,19 @@ _EXECUTOR_POLICIES = st.sampled_from(
     ]
 )
 
+_QWEN_POLICIES = st.sampled_from(
+    [
+        ["always_ok"],
+        ["always_ok"],
+        ["always_ok"],  # weight the working run-sheet lane
+        ["fault"],
+    ]
+)
+
+# W-019 verify-before-act: None = cannot verify (proceed on alert evidence),
+# True = verifiably RUNNING (stale alert — never restart), False = down.
+_TARGET_RUNNING = st.sampled_from([None, None, None, True, False])
+
 
 @st.composite
 def scenarios(draw):
@@ -327,10 +340,114 @@ def scenarios(draw):
                 "mock": draw(st.sampled_from([False, False, False, True])),
                 "pm_policy": draw(_PM_POLICIES),
                 "executor_policy": draw(_EXECUTOR_POLICIES),
+                "qwen_policy": draw(_QWEN_POLICIES),
+                "target_running": draw(_TARGET_RUNNING),
                 "events": events,
             }
         )
     return {"episodes": episodes}
+
+
+@st.composite
+def _key_churn_events(draw, n: int, container: str, failure_text: str):
+    """One incident, VARYING valid keys per cycle (per-cycle key churn, the
+    W-019 storm shape) plus per-cycle fingerprint stubs (corroboration only)."""
+    events = []
+    for i in range(n):
+        key = draw(
+            st.sampled_from(
+                [
+                    "auto-restart-failed",
+                    "AUTO-RESTART-FAILED",
+                    " auto-restart-failed",
+                    "auto-restart-failed\n",
+                ]
+            )
+        )
+        event = {
+            "ts": None,
+            "alert_id": f"churn-{i}",
+            "key": key,
+            "detail": f"container={container} error: {failure_text} (req id {i})",
+        }
+        stub = draw(st.sampled_from([None, None, "fp-collide-1", f"per-cycle-{i}"]))
+        if stub is not None:
+            event["fingerprint"] = stub
+        events.append(event)
+    return events
+
+
+@st.composite
+def key_churn_scenarios(draw):
+    """W-019 regression shape: one allowlisted container, one failure class,
+    key churn every cycle, inside and across the 24h window. Identity must be
+    key-independent: repeats dedupe, the cap binds per container."""
+    container = draw(st.sampled_from(ALLOWLIST_POOL))
+    failure_text = draw(st.sampled_from(["500 Server Error", "restart timed out after 30s"]))
+    n = draw(st.integers(min_value=2, max_value=10))
+    events = draw(_key_churn_events(n, container, failure_text))
+    stamps = draw(_clock_walk(len(events)))
+    for event, ts in zip(events, stamps):
+        event["ts"] = ts.isoformat()
+    return {
+        "episodes": [
+            {
+                "law": reference.default_law(
+                    enabled=True,
+                    service_allowlist=[container, "other-allowlisted"],
+                    suppressed_services=[],
+                ),
+                "law_valid_json": True,
+                "secret": True,
+                "mock": False,
+                "pm_policy": ["always_go"],
+                "executor_policy": ["always_ok"],
+                "qwen_policy": ["always_ok"],
+                "target_running": draw(st.sampled_from([None, False])),
+                "events": events,
+            }
+        ]
+    }
+
+
+@st.composite
+def fault_scenarios(draw):
+    """W-019 fail-closed shape: an executor-path fault (PM fault, qwen fault,
+    or executor failure) injected on one key-churned incident. No restart may
+    proceed on a fault; failures stay open and retry paced within caps."""
+    container = draw(st.sampled_from(ALLOWLIST_POOL))
+    n = draw(st.integers(min_value=1, max_value=6))
+    events = draw(
+        _key_churn_events(n, container, draw(st.sampled_from(["500 Server Error", "restart timed out after 30s"])))
+    )
+    stamps = draw(_clock_walk(len(events)))
+    # keep timestamps inside one 24h window and past the backoff on retries
+    base = BASE_TS + timedelta(minutes=5)
+    for i, event in enumerate(events):
+        event["ts"] = (base + timedelta(minutes=11 * i)).isoformat()
+    fault = draw(st.sampled_from(["pm", "qwen", "executor"]))
+    episode = {
+        "law": reference.default_law(
+            enabled=True,
+            service_allowlist=[container],
+            suppressed_services=[],
+        ),
+        "law_valid_json": True,
+        "secret": True,
+        "mock": False,
+        "pm_policy": ["always_go"],
+        "executor_policy": ["always_ok"],
+        "qwen_policy": ["always_ok"],
+        "target_running": None,
+        "events": events,
+    }
+    if fault == "pm":
+        episode["pm_policy"] = ["fault"]
+    elif fault == "qwen":
+        episode["qwen_policy"] = ["fault"]
+    else:
+        episode["executor_policy"] = ["always_fail"]
+    return {"episodes": [episode], "_fault_kind": fault}
 
 
 @st.composite

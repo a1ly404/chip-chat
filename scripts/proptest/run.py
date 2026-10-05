@@ -73,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
     all_properties = {
         "pipeline_matches_reference": (generators.scenarios, harness.check_scenario),
         "duplicate_storm_posts_once": (generators.storm_scenarios, harness.check_scenario),
+        "key_churn_single_attempt_per_incident": (
+            generators.key_churn_scenarios,
+            harness.check_key_churn,
+        ),
+        "executor_path_faults_fail_closed": (
+            generators.fault_scenarios,
+            harness.check_faults_fail_closed,
+        ),
         "mock_never_reaches_live_channel": (
             generators.scenarios,
             harness.check_mock_boundary,
