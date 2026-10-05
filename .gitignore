@@ -6,3 +6,4 @@ var/chip-chat/
 .venv/
 venv/
 *.egg-info/
+.hypothesis/
