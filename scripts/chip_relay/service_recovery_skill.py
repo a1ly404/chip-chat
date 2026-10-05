@@ -383,7 +383,8 @@ def default_pm_decide(
         "go=false for anything native, unknown, suppressed, or already attempted."
     )
     try:
-        text = _openrouter_chat(pm_model, [{"role": "user", "content": prompt}], environ, 200)
+        # 512-token budget — reasoning-style models can starve smaller caps
+        text = _openrouter_chat(pm_model, [{"role": "user", "content": prompt}], environ, 512)
     except Exception as exc:  # noqa: BLE001 — fail closed, record the fault
         return {"go": False, "playbook": "", "reason": f"pm-call-fault: {exc.__class__.__name__}"}
     obj = _extract_json_object(text)
@@ -436,7 +437,9 @@ def default_qwen_run_playbook(
         if not model:
             continue
         try:
-            text = _openrouter_chat(model, [{"role": "user", "content": prompt}], environ, 300)
+            # 1024-token budget: reasoning-style models can starve smaller
+            # caps into empty content (same law as openrouter retry helper).
+            text = _openrouter_chat(model, [{"role": "user", "content": prompt}], environ, 1024)
             return " | ".join(line.strip() for line in text.splitlines() if line.strip())[:300]
         except Exception as exc:  # noqa: BLE001 — one receipt, never a loop
             last_fault = f"model {model} fault: {exc.__class__.__name__}"
