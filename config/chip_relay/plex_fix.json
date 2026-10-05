@@ -1,0 +1,11 @@
+{
+  "skill_id": "plex-external-fix",
+  "enabled": true,
+  "expires_iso": "2026-10-06T04:45:00Z",
+  "max_attempts_24h": 3,
+  "service_allowlist": ["caddy", "cloudflared"],
+  "external_probe_url": "https://plex.razzormail.com/identity",
+  "restart_timeout_s": 120,
+  "probe_timeout_s": 15,
+  "authorization": "Ally GO 2026-10-04 21:39 PT (W-006): RAZ-63 mutability exception, Plex-external-only, time-boxed 24h, self-disarming"
+}
