@@ -40,6 +40,10 @@ services:
 
 volumes:
   chip-chat-data:
+    # Relay state (ledger/threads). External so compose never re-creates
+    # (and never clobbers) the existing chip-chat_chip-chat-data volume.
+    external: true
+    name: chip-chat_chip-chat-data
   razzor-nas-torrents:
     external: true
 
