@@ -52,6 +52,10 @@ ROUTE_TABLE: dict[str, tuple[str, str]] = {
     "status-drift": ("re-run-health-probe", "matched: razzorstack"),
     "suppression-saturation": ("clear-stale-suppress", "matched: chip"),
     "skill-runner-fault": ("skill-runner-restart", "matched: chip"),
+    # W-006 (Ally GO 2026-10-04 21:39 PT): the ONLY non-shadow route —
+    # plex-external fix skill, self-disarming after the 24h law window.
+    # See chip_relay.plex_fix_skill and docs/PLEX_FIX_SKILL.md.
+    "plex-external": ("plex-external-fix (W-006 24h window)", "matched: chip"),
 }
 
 
@@ -112,7 +116,23 @@ def handle_alert(alert: Any, *, environ: dict[str, str] | None = None, log_row: 
         fh.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
     banner = unmatched_banner(rec)
     posted = banner is not None and bool(log_banner_row(banner, environ=environ))
-    return {"ok": True, "status": 202, "record": dict(rec), "banner_posted": bool(posted)}
+    # W-006 law window: the ONLY executor wiring in the ingest path.
+    # plex_fix_skill.maybe_run returns None for every non-plex-external alert,
+    # checks its own expiry/caps before any action, and never raises past here.
+    plex_fix_receipt: dict[str, Any] | None = None
+    try:
+        from chip_relay import plex_fix_skill
+
+        plex_fix_receipt = plex_fix_skill.maybe_run(dict(alert), environ=environ)
+    except Exception as exc:  # noqa: BLE001 — never crash the ingest; fault stays visible
+        plex_fix_receipt = {"status": "error", "error": f"{exc.__class__.__name__}: {exc}"[:160]}
+    return {
+        "ok": True,
+        "status": 202,
+        "record": dict(rec),
+        "banner_posted": bool(posted),
+        "plex_fix": plex_fix_receipt,
+    }
 
 
 def log_banner_row(text: str, environ: dict[str, str] | None = None) -> bool:

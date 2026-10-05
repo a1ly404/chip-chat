@@ -474,6 +474,21 @@ def run_feed_loop(stop_event: threading.Event, *, environ: dict[str, str] | None
             post_count = post_alerts(receipt, environ=environ, only_fps=confirmed)
             if post_count:
                 _log("post", f"{post_count} alert line(s) -> #chip-dev")
+            # W-006 law window: plex-external fix skill (self-disarming 24h window).
+            # Only postable verdicts reach the skill (fixer-may-claim law); the skill
+            # re-checks expiry/caps/one-attempt-per-incident on every call and never
+            # raises past this point.
+            for v in verdicts:
+                if v.get("verdict") not in ("actionable", "dead-letter"):
+                    continue
+                try:
+                    from chip_relay import plex_fix_skill
+
+                    out = plex_fix_skill.maybe_run(dict(v), environ=environ)
+                    if out is not None:
+                        _log("plex-fix", f"{out.get('status')} fp={out.get('fingerprint', '')[:12]}")
+                except Exception as exc:  # noqa: BLE001 — feed tick must never crash
+                    _log("error", f"plex-fix skill fault: {exc.__class__.__name__}: {exc}"[:160])
         except Exception as exc:  # noqa: BLE001 — log-only; never crash the gateway
             _log("error", f"feed tick failed: {exc.__class__.__name__}: {exc}"[:200])
         elapsed = time.time() - started
