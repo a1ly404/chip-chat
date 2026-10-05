@@ -56,6 +56,10 @@ ROUTE_TABLE: dict[str, tuple[str, str]] = {
     # plex-external fix skill, self-disarming after the 24h law window.
     # See chip_relay.plex_fix_skill and docs/PLEX_FIX_SKILL.md.
     "plex-external": ("plex-external-fix (W-006 24h window)", "matched: chip"),
+    # W-010 (Ally GO 2026-10-05): restart escalation for monitoring-bot
+    # auto-restart failures — one supervised executor restart per incident.
+    # See chip_relay.service_recovery_skill.
+    "auto-restart-failed": ("service-recovery (W-010 restart escalation)", "matched: razzorstack"),
 }
 
 
@@ -126,12 +130,24 @@ def handle_alert(alert: Any, *, environ: dict[str, str] | None = None, log_row: 
         plex_fix_receipt = plex_fix_skill.maybe_run(dict(alert), environ=environ)
     except Exception as exc:  # noqa: BLE001 — never crash the ingest; fault stays visible
         plex_fix_receipt = {"status": "error", "error": f"{exc.__class__.__name__}: {exc}"[:160]}
+    # W-010: restart escalation for monitoring-bot auto-restart failures.
+    # service_recovery_skill.maybe_run returns None for every other key,
+    # checks its own expiry/suppression/allowlist/caps before any action,
+    # and never raises past here.
+    service_recovery_receipt: dict[str, Any] | None = None
+    try:
+        from chip_relay import service_recovery_skill
+
+        service_recovery_receipt = service_recovery_skill.maybe_run(dict(alert), environ=environ)
+    except Exception as exc:  # noqa: BLE001 — never crash the ingest; fault stays visible
+        service_recovery_receipt = {"status": "error", "error": f"{exc.__class__.__name__}: {exc}"[:160]}
     return {
         "ok": True,
         "status": 202,
         "record": dict(rec),
         "banner_posted": bool(posted),
         "plex_fix": plex_fix_receipt,
+        "service_recovery": service_recovery_receipt,
     }
 
 
