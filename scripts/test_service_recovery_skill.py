@@ -332,9 +332,11 @@ def test_hard_cap_24h_binds_per_container(data_dir):
         "recovery-failed", "recovery-failed", "recovery-failed", "cap-reached",
     ]
     assert len(executor.calls) == 3
-    # per container, not global: bazarr's budget is untouched by caddy's cap
+    # per container, not global: ombi's budget is untouched by caddy's cap
+    # (bazarr was retired from the allowlist 2026-10-05 — docker instance gone,
+    # canonical is the native Windows nssm service; see docs/parked/bazarr-native-consolidation.md)
     out = service_recovery_skill.maybe_run(
-        _alert(detail="container=bazarr error: 500 Server Error", alert_id="other"),
+        _alert(detail="container=ombi error: 500 Server Error", alert_id="other"),
         now=now + timedelta(minutes=45),
         report=_FakeReport(),
         executor_runner=_FakeExecutor(),

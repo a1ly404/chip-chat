@@ -3,7 +3,7 @@
   "enabled": true,
   "expires_iso": "2027-01-01T00:00:00Z",
   "max_attempts_24h": 3,
-  "service_allowlist": ["caddy", "bazarr", "ombi", "calibre-web", "flaresolverr", "prowlarr", "tautulli"],
+  "service_allowlist": ["caddy", "ombi", "calibre-web", "flaresolverr", "prowlarr", "tautulli"],
   "suppressed_services": ["wireguard"],
   "executor_base_url": "http://homelab-executor:48100",
   "executor_script": "docker_restart_container",
@@ -12,5 +12,5 @@
   "pm_model": "z-ai/glm-5.3-flash",
   "restart_timeout_s": 120,
   "live_report": true,
-  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h. W-013: allowlist narrowed to container-only targets (sonarr/radarr/plex are native services); PM-classifier go/no-go gates the executor lane; qwen executor-model runs the playbook narrative (redacted context only). RAZ-2026-10-05: Qwen provider UNBLOCKED on the chipchat key (verified live — qwen3-30b-a3b, qwen3.7-flash and glm-5.3-flash all returned completions); executor lane = cheapest qwen (qwen/qwen3.7-flash, $0.03/$0.13 per M), fallback qwen/qwen3-30b-a3b; deepseek V4.1 dropped from the lane (morning fault source: ChipConfigError/RuntimeError, 4x price). PM = z-ai/glm-5.3-flash low reasoning (effort:low auto-applied for z-ai/glm-* prefixes in chip.openrouter). W-015: tautulli rebuilt and un-suppressed (re-added to allowlist); wireguard un-suppressed in monitor after data-path verification (AirVPN exit via wg container + qB netns)."
+  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h. W-013: allowlist narrowed to container-only targets (sonarr/radarr/plex are native services); PM-classifier go/no-go gates the executor lane; qwen executor-model runs the playbook narrative (redacted context only). RAZ-2026-10-05: Qwen provider UNBLOCKED on the chipchat key (verified live — qwen3-30b-a3b, qwen3.7-flash and glm-5.3-flash all returned completions); executor lane = cheapest qwen (qwen/qwen3.7-flash, $0.03/$0.13 per M), fallback qwen/qwen3-30b-a3b; deepseek V4.1 dropped from the lane (morning fault source: ChipConfigError/RuntimeError, 4x price). PM = z-ai/glm-5.3-flash low reasoning (effort:low auto-applied for z-ai/glm-* prefixes in chip.openrouter). W-015: tautulli rebuilt and un-suppressed (re-added to allowlist); wireguard un-suppressed in monitor after data-path verification (AirVPN exit via wg container + qB netns). (from razzorstack #628/GATES): docker bazarr instance RETIRED — canonical Bazarr = native Windows nssm service :6767, now OFF the container allowlist; native bazarr alerts hit the missing-container/native wall = tell-only, never maskable (monitor reclass = razzorstack #628). wireguard un-suppressed in monitor after data-path verification (AirVPN exit via wg container + qB netns)."
 }
