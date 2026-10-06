@@ -251,7 +251,12 @@ def test_qwen_call_fault_fails_closed_w019(data_dir):
     assert out["status"] == "qwen-fault-no-action"
     assert len(executor.calls) == 0
     state = service_recovery_skill.load_state()
-    fp = out["fingerprint"]
+    # qwen-fault receipts disclose NO fingerprint (proptest reference law) —
+    # the strike is bound internally; derive the incident identity separately.
+    fp = service_recovery_skill.incident_fingerprint(
+        service_recovery_skill.CONTAINER_RE.search(_alert()["detail"]).group(1),
+        service_recovery_skill.classify_failure(_alert()["detail"]),
+    )
     assert fp in state["failed_fps"]  # strike, not a consumed incident
     assert fp not in state["attempted_fps"]
     # immediate repeat is backoff-paced, not a fresh attempt

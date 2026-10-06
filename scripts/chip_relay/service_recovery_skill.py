@@ -852,7 +852,6 @@ def maybe_run(
             )
             return {
                 "status": "qwen-fault-no-action",
-                "fingerprint": fp,
                 "container": container,
                 "failure_class": failure_class,
                 "pm_reason": str(pm.get("reason", "")),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 
@@ -1054,7 +1055,7 @@ def cmd_done_gate_sweep(args: argparse.Namespace) -> int:
     if not isinstance(issues, list):
         print("ERROR: issues file must be a JSON array", file=sys.stderr)
         return 1
-    findings = sweep(issues)
+    findings = sweep(issues, environ=os.environ)
     if args.json:
         print(json.dumps({"count": len(findings), "findings": findings}, ensure_ascii=False))
         return 0 if not findings else 2

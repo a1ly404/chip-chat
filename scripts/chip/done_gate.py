@@ -155,8 +155,76 @@ def sweep_one(issue: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def sweep(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Whole-export scan → findings ranked reopen-required > flipping-risk > vague-done."""
+def sweep(issues: list[dict[str, Any]], *, environ: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Whole-export scan → findings ranked reopen-required > flipping-risk > vague-done.
+
+    When ``environ`` carries a LIVE jev GO (CHIP_JEV_LIVE + OPENROUTER_CC_API_KEY,
+    non-mock), each finding gets a SHADOW consult annotation (``jev`` key) —
+    band is HYPOTHETICAL and never changes severity, per the shadow law.
+    Offline callers (watchdog sweeps, tests, cron without the env) see zero change.
+    """
     findings = [f for f in (sweep_one(i) for i in issues) if f is not None]
     findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f["severity"], 9), f["id"]))
+    if environ:
+        env = environ if isinstance(environ, dict) else {}
+        live = (env.get("CHIP_JEV_LIVE", "") or "").strip().lower() in ("1", "true", "yes", "on")
+        has_key = bool((env.get("OPENROUTER_CC_API_KEY", "") or "").strip())
+        if live and has_key and env.get("CHIP_CHAT_MOCK", "") == "":
+            from chip import jev_router
+
+            for finding in findings:
+                state = {
+                    "task_id": finding["id"],
+                    "task_type": "done-gate",
+                    "status": finding["status"],
+                    "statusType": str(
+                        "completed" if finding["severity"] in ("reopen-required", "vague-done") else "in_progress"
+                    ),
+                    "checked_boxes": finding["checked"],
+                    "receipts_bound": finding["stamps"],
+                    "severity_found": finding["severity"],
+                    "unbound_done": (finding["severity"] == "vague-done" and finding["checked"] == 0),
+                }
+                row = jev_router.ask(
+                    state,
+                    _JEV_QUESTIONS,
+                    call_site="done-gate-sweep",
+                    environ=env,
+                )
+                if row.get("answers"):  # only annotate ANSWERED rows — silence = not consulted
+                    ans = next(iter(row["answers"].values()), {})
+                    finding["jev"] = {
+                        "noul_hypothetical": ans.get("noul", ans.get("confidence")),
+                        "band_hypothetical": _jev_band(ans.get("noul", ans.get("confidence"))),
+                        "call_id": row.get("id", ""),
+                        "cost_usd": float((row.get("usage") or {}).get("cost") or 0.0),
+                        "action": "conservative (shadow consult — severity unchanged)",
+                    }
     return findings
+
+
+_JEV_QUESTIONS = {
+    "reopen_or_baseline": {
+        "type": "noul",
+        "instructions": (
+            "Given this done-gate finding state, reopen the ticket (receipts missing on checked boxes "
+            "of a live/claimed-recent Done) vs treat as a pre-discipline vague-done historical baseline. "
+            "1.0 = lean reopen-required, 0.0 = lean historical-vague-done baseline."
+        ),
+    }
+}
+
+
+def _jev_band(noul: Any) -> str:
+    """Mirror of the router's band thresholds for the annotation row (hypothetical)."""
+    try:
+        p = float(noul)
+    except (TypeError, ValueError):
+        return ""
+    from chip import jev_router
+
+    if p >= jev_router._BANDS["auto_min"]:  # noqa: SLF001 — thresholds are shared law
+        return "propose-auto"
+    if p >= jev_router._BANDS["room_min"]:  # noqa: SLF001
+        return "propose-in-room"
+    return "needs-repro"

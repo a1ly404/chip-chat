@@ -143,7 +143,7 @@ def ask(state: dict[str, Any], questions: dict[str, dict], *, call_site: str,
     env = environ if environ is not None else os.environ
     state = sanitize_state(state, environ=env)
     pre = precheck_state(state, call_site=call_site, environ=env)
-    result = precheck_state(state, call_site=call_site, environ=env)
+    result = pre
     qids = list(questions.keys())
 
     if result.hit:

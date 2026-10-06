@@ -18,6 +18,10 @@ services:
       # container DNS (full-URL target form; see CHIP_FEED_TARGETS law in
       # scripts/chip_relay/monitor_feed.py).
       CHIP_FEED_TARGETS: "monitoring-api=http://monitoring-api:48082"
+      # Jev (typesafe/jev-1.13) LIVE GO (Ally 2026-10-05 — verified live on the
+      # chipchat key first). Shadow law intact: bands are hypotheses, jev
+      # never flips a gate, conservative default always wins.
+      CHIP_JEV_LIVE: "1"
     volumes:
       - chip-chat-data:/data/chip-chat
       - ./.env:/app/.env:ro
