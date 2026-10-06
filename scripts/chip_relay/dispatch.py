@@ -379,15 +379,15 @@ def handle_message(
         return _fail(logs, "malformed message")
     if len(text) > MAX_MESSAGE_CHARS:
         return _fail(logs, "oversized message")
-    from chip_relay import case_intake as _case_intake
-
-    if _case_intake.enabled(environ) and text.startswith("case:"):
-        logs.append("case-intake: mock lane (no live solver)")
-        return DispatchResult(ok=True, alert="case-intake", logs=logs)
     try:
         room = config.room_for_channel(incoming.channel)
     except KeyError:
         return _fail(logs, f"unknown channel {incoming.channel}")
+
+    from chip_relay.case_intake_pipeline import channel_intake_active, handle_case_intake
+
+    if channel_intake_active(incoming.channel, environ):
+        return handle_case_intake(incoming, room, webhook=webhook, environ=environ)
 
     if incoming.author != "inject":
         reset_delegate_chain(room.id)

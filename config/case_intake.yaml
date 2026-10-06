@@ -13,3 +13,8 @@ primary_model: z-ai/glm-5.3-flash
 fallback_model: qwen/qwen3.7-flash
 # Linear HTTP dedupe is slice 2. Slice 1 matches config/case_open_cache.json only.
 linear_dedupe: local_cache
+# Comma-separated discord_channel names (rooms.json discord_channel field).
+intake_channels: monitoring-logs
+graduation_consecutive_clean: 200
+open_fail_kill_threshold: 3
+pager_webhook_env: DISCORD_MONITORING_WEBHOOK_URL

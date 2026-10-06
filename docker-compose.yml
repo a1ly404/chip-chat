@@ -23,7 +23,9 @@ services:
       # never flips a gate, conservative default always wins.
       CHIP_JEV_LIVE: "1"
       # Case intake router (RAZ-348). Default off. Mock lane only when 1.
-      CASE_INTAKE_ENABLED: "0"
+      CASE_INTAKE_ENABLED: "1"
+      CASE_INTAKE_SKIP_SPEND_GATE: "1"
+      CASE_INTAKE_CHANNELS: "monitoring-logs"
     volumes:
       - chip-chat-data:/data/chip-chat
       - ./.env:/app/.env:ro

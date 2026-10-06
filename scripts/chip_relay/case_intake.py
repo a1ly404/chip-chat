@@ -115,13 +115,14 @@ def parse_freeform(
     *,
     parser: Parser,
     limits: dict[str, Any],
-    monthly_usd: float,
+    monthly_usd: float = 0.0,
     model: str | None = None,
     now: float | None = None,
+    skip_spend_gate: bool = False,
 ) -> IntakeResult:
-    """Fail closed. Budget checked before parser runs."""
+    """Fail closed. Budget checked before parser runs unless skip_spend_gate (Ally-approved window)."""
     primary = model or str(limits["primary_model"])
-    decision = budget_decision(monthly_usd, limits)
+    decision = "ok" if skip_spend_gate else budget_decision(monthly_usd, limits)
     if decision == "block":
         rec = _receipt(primary, 0, blocked=True, reason="budget_hard", now=now)
         return IntakeResult(kind="blocked", receipt=rec, note="budget hard cap")

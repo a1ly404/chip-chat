@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from chip_relay.config import RelayConfig, RoomBinding
+from chip_relay.case_intake import enabled as case_intake_enabled
 from chip_relay.monitoring_listen import monitoring_listen_enabled, room_is_monitoring
 from chip_relay.delegate import known_persona_ids
 from chip_relay.wake import parse_inbound_handoff
@@ -121,6 +122,8 @@ def is_pm_monitoring_receipt_echo(message: Any, content: str) -> bool:
     if receipt_error(text) is None and text.lower().startswith("claim:"):
         if "tool:monitoring-skill." in text:
             return True
+    if text.startswith("case-intake"):
+        return True
     return False
 
 
@@ -242,7 +245,10 @@ def classify_gateway_message(
     author_id = getattr(author, "id", None)
     content = effective_gateway_content(message, fetch_url=fetch_attachment).strip()
     monitoring_content = ""
-    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
+    monitoring_route = room_is_monitoring(room) and (
+        case_intake_enabled(environ) or monitoring_listen_enabled(environ)
+    )
+    if monitoring_route:
         monitoring_content = effective_monitoring_content(message, fetch_url=fetch_attachment).strip()
     if author_id == relay_bot_user_id:
         if is_relay_self_inject_content(content):
@@ -254,7 +260,7 @@ def classify_gateway_message(
                 )
         return None
 
-    if room_is_monitoring(room) and monitoring_listen_enabled(environ):
+    if monitoring_route:
         alert_text = monitoring_content or content
         if is_pm_monitoring_receipt_echo(message, alert_text):
             return None
