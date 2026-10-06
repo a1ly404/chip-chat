@@ -50,6 +50,24 @@ Discord ping to @Lyla with a link to the case file and a one-line summary. At mo
 
 A router parse failure appends `docs/logs/router_failures.jsonl` and blocks further intake for that case class for `one_strike_block_s` (900).
 
+## Sustained live program (Ally standing order)
+
+Feed: **`#monitoring-logs`** (`CASE_INTAKE_CHANNELS=monitoring-logs`). Every alert is an intake candidate — no cherry-picking. Case intake **owns** the monitoring feed while coverage is incomplete (legacy `monitoring_listen` skills skipped when `CASE_INTAKE_ENABLED=1`).
+
+**Flywheel:** each parse miss → same-day fixture under `config/fixtures/case_intake_live/` + regression loader test.
+
+**Scoreboard:** `data_dir/case_intake/coverage.json` — sitrep via `python3 scripts/case_intake_sitrep.py`. Graduation: **200** consecutive alerts with zero **(b) failed-open** and zero misroutes. **(a) failed-closed** (park/dead-letter/one-strike) does not break the streak.
+
+**Failure taxonomy:** (a) failed closed = receipt logged, acceptable; (b) failed open = misroute/hallucination/no receipt — drive to zero.
+
+**Exit / halt feed:** monthly OpenRouter ≥ `$10` cutoff; relay process crash; same case class **3+** open failures → class killed until fixture lands.
+
+**Pager:** novel shapes only (unknown `fingerprint_class`); known taxonomy classes do not page. Once/hour per class unchanged.
+
 ## Flag
 
-`CASE_INTAKE_ENABLED=0` in compose. `1` runs intake before the normal chip shot and stops the shot (mock solver only).
+`CASE_INTAKE_ENABLED=1` on relay (RAZ-350). Scoped to `CASE_INTAKE_CHANNELS` (default `monitoring-logs`). Solver mock.
+
+Spend ledger / $5 / $10 gates: **deferred** (Ally-approved). Set `CASE_INTAKE_SKIP_SPEND_GATE=1`. Receipts still log model + tokens + ts.
+
+Program ticket: [RAZ-350](https://linear.app/razzormail/issue/RAZ-350) (slice 1.5 live window; RAZ-349 id occupied by unrelated mypy ticket).

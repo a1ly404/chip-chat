@@ -124,7 +124,9 @@ def test_fixture(name: str, tmp_path) -> None:
         store.put("k", now=now, cycles=3)
         assert store.tick("k", now=now + 1, limits=LIMITS) == "dead_letter"
     elif name == "budget-block":
-        res = ci.parse_freeform("x", parser=_ok_parser(VALID), limits=LIMITS, monthly_usd=10, now=now)
+        res = ci.parse_freeform(
+            "x", parser=_ok_parser(VALID), limits=LIMITS, monthly_usd=10, now=now, skip_spend_gate=False
+        )
         assert res.kind == "blocked" and res.receipt and res.receipt.blocked and res.receipt.tokens == 0
     elif name == "fallback-then-dead":
         res = ci.parse_freeform("x", parser=_boom, limits=LIMITS, monthly_usd=0, now=now)

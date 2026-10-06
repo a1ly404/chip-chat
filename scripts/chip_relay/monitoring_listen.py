@@ -81,6 +81,17 @@ def handle_monitoring_alert(
     now: float | None = None,
 ) -> DispatchResult:
     logs: list[str] = []
+    from chip_relay.case_intake_pipeline import monitoring_feed_active, handle_monitoring_intake
+
+    if monitoring_feed_active(room, environ):
+        return handle_monitoring_intake(
+            content,
+            room,
+            webhook=webhook,
+            environ=environ,
+            author_id="",
+            author="monitoring-feed",
+        )
     if not monitoring_listen_enabled(environ):
         return DispatchResult(ok=True, logs=["monitoring listen disabled"])
     if not room_is_monitoring(room):
