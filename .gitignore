@@ -7,3 +7,5 @@ var/chip-chat/
 venv/
 *.egg-info/
 .hypothesis/
+docs/cases/dead_letter/*.json
+docs/logs/router_failures.jsonl

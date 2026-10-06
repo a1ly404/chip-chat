@@ -1,0 +1,13 @@
+{
+  "classes": [
+    "transport-blip",
+    "status-drift",
+    "gold-signal-down",
+    "internal-loop-degrade",
+    "suppression-saturation",
+    "skill-runner-fault",
+    "advisor-timeout-banner",
+    "pgs-zero-production",
+    "standup-stall"
+  ]
+}
