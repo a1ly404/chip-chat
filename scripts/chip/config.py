@@ -106,6 +106,22 @@ def default_model() -> str:
     return model or DEFAULT_MODEL
 
 
+def model_for_persona(name: str | None) -> str:
+    """Persona-level model override (personas file 'model' key), else default.
+
+    Ally routing law (2026-10-05): PM = z-ai/glm-5.3-flash (low reasoning is
+    auto-applied by the z-ai/glm- prefix), dev bots = cheapest qwen
+    (qwen/qwen3.7-flash). Blocked personas models fail back to default.
+    """
+    if name:
+        entry = load_personas().get(name)
+        if isinstance(entry, dict):
+            model = str(entry.get("model", "")).strip()
+            if model and model not in blocked_models():
+                return model
+    return default_model()
+
+
 def escalate_model() -> str:
     model = (_read_config_json().get("escalate_model") or "").strip()
     return model or ESCALATE_MODEL

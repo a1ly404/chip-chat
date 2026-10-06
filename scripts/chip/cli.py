@@ -102,7 +102,7 @@ def _resolve_chat_model(args: argparse.Namespace) -> str:
         return config.resolve_model(None, escalate=True)
     if args.model:
         return config.resolve_model(args.model)
-    return config.resolve_model(None)
+    return config.model_for_persona(getattr(args, "persona", None))
 
 
 def _run_chat_turn(
@@ -466,7 +466,7 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     try:
         text, payload, routed, ledger = runtime.complete(
             messages,
-            model=config.default_model(),
+            model=config.model_for_persona(persona),
             max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
             use_mock=use_mock,
             command="room",
@@ -546,7 +546,7 @@ def cmd_room(args: argparse.Namespace) -> int:
         try:
             text, _, routed, ledger = runtime.complete(
                 messages,
-                model=config.default_model(),
+                model=config.model_for_persona(persona),
                 max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
                 use_mock=use_mock,
                 command="room",

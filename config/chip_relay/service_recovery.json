@@ -7,10 +7,10 @@
   "suppressed_services": ["wireguard"],
   "executor_base_url": "http://homelab-executor:48100",
   "executor_script": "docker_restart_container",
-  "executor_model": "qwen/qwen3-30b-a3b",
-  "executor_model_fallback": "deepseek/deepseek-v4.1-flash",
-  "pm_model": "",
+  "executor_model": "qwen/qwen3.7-flash",
+  "executor_model_fallback": "qwen/qwen3-30b-a3b",
+  "pm_model": "z-ai/glm-5.3-flash",
   "restart_timeout_s": 120,
   "live_report": true,
-  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h. W-013: allowlist narrowed to container-only targets (sonarr/radarr/plex are native services); PM-classifier go/no-go gates the executor lane; qwen executor-model runs the playbook narrative (redacted context only). NOTE: OpenRouter workspace guardrails currently block the Qwen provider — executor_model_fallback serves the lane until Qwen is allowed at openrouter.ai/workspaces/chipchat/guardrails. W-015: tautulli rebuilt and un-suppressed (re-added to allowlist); wireguard un-suppressed in monitor after data-path verification (AirVPN exit via wg container + qB netns)."
+  "authorization": "Ally GO 2026-10-05 (W-010): post-wipe restart escalation via homelab-executor, restart-only, fail-closed, 1 attempt/incident, 3/24h. W-013: allowlist narrowed to container-only targets (sonarr/radarr/plex are native services); PM-classifier go/no-go gates the executor lane; qwen executor-model runs the playbook narrative (redacted context only). RAZ-2026-10-05: Qwen provider UNBLOCKED on the chipchat key (verified live — qwen3-30b-a3b, qwen3.7-flash and glm-5.3-flash all returned completions); executor lane = cheapest qwen (qwen/qwen3.7-flash, $0.03/$0.13 per M), fallback qwen/qwen3-30b-a3b; deepseek V4.1 dropped from the lane (morning fault source: ChipConfigError/RuntimeError, 4x price). PM = z-ai/glm-5.3-flash low reasoning (effort:low auto-applied for z-ai/glm-* prefixes in chip.openrouter). W-015: tautulli rebuilt and un-suppressed (re-added to allowlist); wireguard un-suppressed in monitor after data-path verification (AirVPN exit via wg container + qB netns)."
 }

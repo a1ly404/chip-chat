@@ -3,6 +3,7 @@
   "escalate_model": "deepseek/deepseek-v4.1-flash",
   "blocked_models": ["deepseek/deepseek-chat"],
   "notes": {
-    "jev": "typesafe/jev-1.13 — reserved for future Decisions-API routing only; not used by CLI yet"
+    "jev": "typesafe/jev-1.13 — reserved for future Decisions-API routing only; not used by CLI yet",
+    "dev_routing": "Ally 2026-10-05: persona-level 'model' keys in chip_chat_personas.json — PM = z-ai/glm-5.3-flash (low reasoning auto), dev bots = qwen/qwen3.7-flash (cheapest qwen; Qwen provider unblocked on chipchat key, verified live)"
   }
 }
