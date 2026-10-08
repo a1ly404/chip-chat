@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Chip relay startup checks. Does not join Discord. See docs/CHIP_RELAY.md
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m chip_relay "$@"

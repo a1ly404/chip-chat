@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "default_topology": "pm_hub",
+  "one_persona_per_go": true,
+  "interface": {
+    "human_talks_to": "pm",
+    "operator_inject_maps_to": "pm"
+  },
+  "specialists": {
+    "persona_ids": ["dev", "ops", "chipchatdev"]
+  },
+  "visible_room": {
+    "shared_channel": "acme-team-dev",
+    "goal_is_human_visibility_not_agent_coherence": true
+  },
+  "swarm": {
+    "mothballed": true,
+    "min_participants": 2,
+    "unlock_env": "CHIP_TOPOLOGY_SWARM_GO"
+  },
+  "ops_ab_harness": {"mothballed": true, "trio_requires_swarm_unlock": true},
+  "collab_ab": {"mothballed": true},
+  "delegate": {
+    "enabled": true,
+    "max_hops_per_chain": 3,
+    "no_agent_to_agent_reply_chains": true
+  },
+  "relay": {"turn_limit": 1, "auto_multi_persona_fanout": false},
+  "pm_orchestrator": {
+    "enabled_default": false,
+    "unlock_env": "CHIP_RELAY_PM_ORCHESTRATOR",
+    "tick_after_specialist_receipt": true
+  }
+}

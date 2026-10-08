@@ -1,0 +1,5 @@
+{
+  "default_model": "z-ai/glm-5.3-flash",
+  "escalate_model": "deepseek/deepseek-v4.1-flash",
+  "blocked_models": ["deepseek/deepseek-chat"]
+}

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Property-test the skill gates against the reference model (swarm entry point).
+# 500 examples per property by default; --examples N to go deeper.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m proptest.run "$@"

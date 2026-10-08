@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "default_timeout_seconds": 30,
+  "tools": [
+    {
+      "id": "pytest",
+      "argv": ["python3", "-m", "pytest"],
+      "risk": "medium",
+      "allow_extra_args": true,
+      "description": "Run pytest in the Acme example harness"
+    },
+    {
+      "id": "git-status",
+      "argv": ["git", "status", "--short", "--branch"],
+      "risk": "low",
+      "allow_extra_args": false,
+      "description": "Read-only git status"
+    },
+    {
+      "id": "task-show",
+      "argv": ["python3", "-m", "chip", "task", "show"],
+      "risk": "low",
+      "allow_extra_args": true,
+      "description": "Show a task envelope by id"
+    }
+  ]
+}

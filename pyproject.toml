@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chip-chat"
+version = "0.1.0"
+description = "Chip Chat — multi-agent Discord relay and CLI engine"
+license = "MIT"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis>=6.98"]
+relay = ["discord.py>=2.4"]
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["scripts"]
+pythonpath = ["scripts"]
+markers = [
+    "private_pack: requires the operator system pack from the plugin repository",
+]

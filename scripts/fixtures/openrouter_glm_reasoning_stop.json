@@ -1,0 +1,22 @@
+{
+  "id": "gen-stop-no-content",
+  "model": "z-ai/glm-5.3-flash",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "reasoning": "Short internal trace.\n\nAcknowledged, ready for input."
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 50,
+    "completion_tokens": 40,
+    "total_tokens": 90,
+    "completion_tokens_details": {
+      "reasoning_tokens": 35
+    }
+  }
+}

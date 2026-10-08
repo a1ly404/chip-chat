@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "soak_seconds": 120,
+  "policy": {
+    "forbidden_restart_containers": ["legacy-billing", "archive-db"],
+    "allowed_restart_containers": ["checkout-api", "payments"]
+  },
+  "overlay_defaults": {
+    "fix_action": {"kind": "watch_only"},
+    "followup": "ops: review Acme example monitoring catalog entry"
+  },
+  "ignore_any": ["scheduled health ping ok"],
+  "skills": [
+    {
+      "id": "checkout-latency-demo",
+      "title": "Checkout latency spike (demo)",
+      "match_any": ["checkout latency", "p99 latency"],
+      "body_path": "skill-bodies/checkout-latency.md",
+      "fix_action": {"kind": "restart_container", "container": "checkout-api"},
+      "followup": "ops: confirm checkout-api soak after demo restart"
+    }
+  ]
+}

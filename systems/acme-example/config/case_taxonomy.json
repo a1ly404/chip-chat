@@ -1,0 +1,7 @@
+{
+  "classes": [
+    "checkout-latency",
+    "payment-gateway-5xx",
+    "inventory-sync-stall"
+  ]
+}

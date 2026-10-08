@@ -1,0 +1,24 @@
+# acme-example pack: same gates as the default pack (budget 5/10 unchanged), acme channel.
+# Resolved at runtime to repo root unless CHIP_CASE_INTAKE_WRITE_ROOT is set.
+write_root: "@repo"
+pending_clarify_ttl_s: 900
+pending_clarify_max_cycles: 3
+echo_window_s: 600
+correlated_dark_max_cases: 5
+correlated_dark_window_s: 3600
+page_once_per_class_s: 3600
+budget_warn_usd: 5
+budget_hard_usd: 10
+one_strike_block_s: 900
+primary_model: z-ai/glm-5.3-flash
+fallback_model: qwen/qwen3.7-flash
+# Linear HTTP dedupe is slice 2. Slice 1 matches config/case_open_cache.json only.
+linear_dedupe: local_cache
+# Comma-separated discord_channel names (rooms.json discord_channel field).
+intake_channels: ops-alerts
+graduation_consecutive_clean: 200
+open_fail_kill_threshold: 3
+# Slice 6 solver: live route stays off (CASE_INTAKE_SOLVER_LIVE=0
+# default) until operator GO; cooldown is per fingerprint class.
+solver_cooldown_s: 3600
+pager_webhook_env: DISCORD_MONITORING_WEBHOOK_URL

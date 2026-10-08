@@ -1,0 +1,12 @@
+{
+  "restart-named-service": "auto",
+  "clear-stale-suppress": "auto",
+  "re-run-health-probe": "auto",
+  "post-learning": "auto",
+  "compose-recreate": "propose",
+  "disk-cleanup": "propose",
+  "credential-flip": "blocked",
+  "media-delete": "blocked",
+  "media-transcode": "blocked",
+  "streaming-restart": "blocked"
+}

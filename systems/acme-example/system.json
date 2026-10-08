@@ -1,0 +1,59 @@
+{
+  "schema": "chip-system-pack/v0",
+  "name": "acme-example",
+  "description": "Example generic pack (fictional e-commerce stack). CI-only mock adapters; never selected in prod.",
+  "surfaces": {
+    "personas": "config/chip_chat_personas.json",
+    "models": "config/chip_chat_models.json",
+    "rooms": "config/chip_relay/rooms.json",
+    "channel_law_dir": "config/chip_chat/channels",
+    "standing_law": "config/chip_chat/standing_law.md",
+    "persona_dir": "config/chip_chat/personas",
+    "tools": "config/chip_tools.json",
+    "lanes": "config/chip_lanes.json",
+    "topology": "config/chip_topology.json",
+    "case_intake": "config/case_intake.yaml",
+    "case_intake_escalation": "config/case_intake_escalation.yaml",
+    "case_taxonomy": "config/case_taxonomy.json",
+    "monitoring_skills": "config/chip_chat/monitoring_skills.json",
+    "runbooks": "config/chip_chat/runbooks.json",
+    "never_auto_done": "config/chip_chat/never_auto_done.txt",
+    "counter_registry": "config/counter_registry.json",
+    "skill_bodies_dir": "skill-bodies",
+    "alert_fixtures": "config/alerts.jsonl"
+  },
+  "identity": {
+    "operator_discord_id": "111111111111111111",
+    "operator_name": "acme-oncall"
+  },
+  "values": {
+    "default_data_dir_relative": ".local/share/chip-chat",
+    "default_intake_channel": "ops-alerts",
+    "ticket_anchor_prefix": "TICKET",
+    "authorize_blocked_target_label": "storage",
+    "authorize_blocked_patterns": [
+      "native-profile",
+      "compose up",
+      "/mnt/archive"
+    ],
+    "reserved_claim_ids": ["operator", "pager-bot"],
+    "monitor_skip_keys": ["legacy-billing", "archived-queue"],
+    "solver_forbidden_substrings": [
+      "payment-vault",
+      "production-db",
+      "compose",
+      "blob-store",
+      "/mnt/secrets",
+      "volume",
+      "catalog",
+      "checkout-vault"
+    ]
+  },
+  "allowlists": {
+    "service": ["checkout-api", "payments"],
+    "blob_volume": ["acme-uploads", "acme-staging-blobs"],
+    "pack_alert_keys": ["checkout-latency", "payments-queue-depth"],
+    "mock_specialists": ["dev", "ops", "chipchatdev"]
+  },
+  "secrets_key_names": []
+}

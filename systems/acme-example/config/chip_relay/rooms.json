@@ -1,0 +1,35 @@
+{
+  "channel": "acme-relay",
+  "turn_limit": 1,
+  "heartbeat_channel_id": "1000000000000000001",
+  "rooms": [
+    {
+      "id": "dev",
+      "as": "dev",
+      "discord_channel": "dev-room",
+      "channel_id": "1000000000000000002",
+      "webhook_env": "CHIP_WEBHOOK_DEV",
+      "speakers": {
+        "discord_ids": {
+          "111111111111111111": "pm",
+          "1000000000000000099": "dev"
+        },
+        "handles": {}
+      }
+    },
+    {
+      "id": "alerts",
+      "as": "pm",
+      "discord_channel": "ops-alerts",
+      "channel_id": "1000000000000000003",
+      "webhook_env": "CHIP_WEBHOOK_DEV",
+      "monitoring_listen": true,
+      "speakers": {
+        "discord_ids": {
+          "111111111111111111": "pm"
+        },
+        "handles": {}
+      }
+    }
+  ]
+}

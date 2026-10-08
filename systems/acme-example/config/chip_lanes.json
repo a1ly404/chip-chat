@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "personas": {
+    "pm": {"root_env": "CHIP_LANE_PM_ROOT", "tools": ["pytest", "git-status"]},
+    "dev": {"root_env": "CHIP_LANE_DEV_ROOT"},
+    "ops": {"root_env": "CHIP_LANE_OPS_ROOT"},
+    "chipchatdev": {"root_env": "CHIP_LANE_CHIP_ROOT"}
+  },
+  "hard_denies": [".env", "tool_receipts.jsonl"],
+  "go_denies": ["credential-flip"],
+  "build_allowed": ["lane-test", "docker-build"],
+  "build_needs_go": ["deploy", "compose-up"]
+}

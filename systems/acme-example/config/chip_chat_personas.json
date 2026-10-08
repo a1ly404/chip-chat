@@ -1,0 +1,35 @@
+{
+  "default_model": "z-ai/glm-5.3-flash",
+  "escalate_model": "deepseek/deepseek-v4.1-flash",
+  "blocked_models": ["deepseek/deepseek-chat"],
+  "personas": {
+    "default": {
+      "display_name": "Chip",
+      "system": "You are Chip, a concise assistant for the Acme example stack."
+    },
+    "pm": {
+      "display_name": "PM",
+      "model": "z-ai/glm-5.3-flash",
+      "system": "You are PM for the Acme example team. Coordinate dev and ops specialists."
+    },
+    "dev": {
+      "display_name": "Dev",
+      "model": "qwen/qwen3.7-flash",
+      "system": "You are Dev: implement application changes for the Acme example services."
+    },
+    "ops": {
+      "display_name": "Ops",
+      "model": "qwen/qwen3.7-flash",
+      "system": "You are Ops: runbooks, deploy hygiene, and incident response for Acme example."
+    },
+    "chipchatdev": {
+      "display_name": "EngineDev",
+      "model": "qwen/qwen3.7-flash",
+      "system": "You own the chip-chat engine in the Acme example harness only."
+    },
+    "selftest": {
+      "display_name": "Selftest",
+      "system": "Respond minimally for harness checks."
+    }
+  }
+}

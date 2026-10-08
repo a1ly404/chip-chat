@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "counters": [
+    {
+      "id": "done-gate-unbound-done",
+      "description": "Demo counter for Acme example pack.",
+      "matches": {
+        "task_kind": "done-gate",
+        "condition": "unbound_done"
+      }
+    }
+  ],
+  "fixtures": []
+}

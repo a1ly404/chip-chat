@@ -1,0 +1,4 @@
+# Acme example escalation ladder (mock / CI only).
+page_once_per_class_s: 3600
+max_open_cases: 5
+default_channel: acme-alerts

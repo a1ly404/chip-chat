@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# One-turn relay smoke. Refuses at the $5 WARN gate. See docs/CHIP_RELAY.md
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="${ROOT}/scripts${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m chip_relay.selftest "$@"
