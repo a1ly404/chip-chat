@@ -1,0 +1,7 @@
+# Sample scheduler crontab (supercronic format). TZ comes from the worker's env:
+#   TZ=<Region/City>   e.g. set in your compose file; this repo ships no default.
+# Fields: minute hour day-of-month month day-of-week command
+# The command must be one job runner call: `bin/chip-job <job-name>`.
+25 11 * * * bin/chip-job morning-standup
+15 15 * * * bin/chip-job done-gate-watchdog
+35 * * * * bin/chip-job case-intake-beat

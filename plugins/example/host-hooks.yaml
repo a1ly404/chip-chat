@@ -1,0 +1,40 @@
+# Example host-hook manifest. Generic: replace paths with your own.
+# Schema: docs/host-hooks.md. Validated by scripts/test_host_hooks_manifest.py.
+version: 1
+receipts_dir: "${CHIP_HOST_RECEIPTS_DIR}"
+hooks:
+  host-watchdog:
+    cadence: "every 5m"
+    may_restart: false
+    os:
+      linux: "*/5 * * * * /opt/chip-hooks/host-watchdog.sh"
+      macos: "launchd org.example.chip.host-watchdog StartInterval=300"
+      windows: "task Chip-host-watchdog: every 5m + at logon"
+  host-detect-engine:
+    cadence: "every 15m"
+    may_restart: false
+    os:
+      linux: "*/15 * * * * /opt/chip-hooks/host-detect-engine.sh"
+      macos: "launchd org.example.chip.host-detect-engine StartInterval=900"
+      windows: "task Chip-host-detect-engine: every 15m"
+  host-repair-docker:
+    cadence: "at logon + every 15m"
+    may_restart: true
+    os:
+      linux: "systemd chip-host-repair-docker.timer OnCalendar=*:0/15 Persistent=true"
+      macos: "launchd org.example.chip.host-repair-docker RunAtLoad StartInterval=900"
+      windows: "task Chip-host-repair-docker: at logon + every 15m"
+  host-restart-stack:
+    cadence: "at boot"
+    may_restart: true
+    os:
+      linux: "@reboot /opt/chip-hooks/host-restart-stack.sh"
+      macos: "launchd org.example.chip.host-restart-stack RunAtLoad"
+      windows: "task Chip-host-restart-stack: at logon"
+  host-scheduler-receipt-check:
+    cadence: "hourly"
+    may_restart: false
+    os:
+      linux: "50 * * * * /opt/chip-hooks/host-scheduler-receipt-check.sh"
+      macos: "launchd org.example.chip.host-scheduler-receipt-check StartCalendarInterval Minute=50"
+      windows: "task Chip-host-scheduler-receipt-check: hourly at :50 + at logon"

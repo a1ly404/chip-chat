@@ -70,3 +70,12 @@ See `docs/CHIP_CHAT.md` and `docs/CHIP_RELAY.md` in this tree for flags and topo
 ## Contributing
 
 See [AGENTS.md](AGENTS.md) for automated-agent and human contributor conventions.
+
+## Host hooks and scheduling
+
+Some duties (container-engine repair, watchdogs, stack restart after boot) must run on
+the host, not in a container. The engine names them but does not implement them; see
+[docs/host-hooks.md](docs/host-hooks.md) for the contract and
+[plugins/example/host-hooks.yaml](plugins/example/host-hooks.yaml) for a sample manifest.
+Recurring in-stack jobs use a scheduler crontab like
+[docs/examples/scheduler.crontab](docs/examples/scheduler.crontab).
