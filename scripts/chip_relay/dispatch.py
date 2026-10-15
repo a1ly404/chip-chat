@@ -478,6 +478,20 @@ def handle_message(
         logs.append("scoped GO handled")
         return DispatchResult(ok=True, webhook_calls=1, logs=logs)
 
+    # Simple-question lane (flag CHIP_LUMO_SIMPLE_ROUTE, default off). Runs after the
+    # GO/ladder handlers; any lumo failure falls through to normal dispatch.
+    from chip_relay import lumo_route
+
+    if lumo_route.should_route(text, environ):
+        lumo_reply = lumo_route.ask_lumo(text, environ)
+        if lumo_reply:
+            posted = webhook(environ.get(room.webhook_env, ""), "pm", "lumo: " + lumo_reply)
+            if posted.status >= 400:
+                return _fail(logs, f"webhook {posted.status}")
+            logs.append("simple question answered by lumo-tamer")
+            return DispatchResult(ok=True, webhook_calls=1, logs=logs)
+        logs.append("lumo-tamer unavailable; normal dispatch")
+
     if incoming.author != "inject":
         reset_delegate_chain(room.id)
 
