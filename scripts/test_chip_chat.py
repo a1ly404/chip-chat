@@ -128,7 +128,8 @@ def test_spend_command_mock_no_key() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         proc = _run_chip("spend", env={"CHIP_CHAT_DATA_DIR": tmp, "OPENROUTER_CC_API_KEY": ""})
     assert proc.returncode == 0
-    assert "thresholds warn=$5.00 cutoff=$10.00" in proc.stdout
+    assert "thresholds warn=$4.00 cutoff=$5.00" in proc.stdout
+    assert "budget_mode=normal" in proc.stdout
 
 
 def test_blocked_model_rejected() -> None:
@@ -147,16 +148,14 @@ def test_blocked_model_rejected() -> None:
 def test_spend_warn_emits_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from chip import spend
 
-    monkeypatch.setattr(spend, "WARN_MONTHLY_USD", 5.0)
-    monkeypatch.setattr(spend, "CUTOFF_MONTHLY_USD", 10.0)
     monkeypatch.setenv("CHIP_CHAT_DATA_DIR", str(tmp_path))
     ledger = spend.default_ledger()
-    ledger["monthly_usd"] = 5.5
+    ledger["monthly_usd"] = 4.5
     ledger["monthly_source"] = "api"
     spend.save_ledger(ledger)
 
     def fake_auth(_key: str) -> tuple[dict, float | None]:
-        return ledger, 5.5
+        return ledger, 4.5
 
     monkeypatch.setattr(spend, "refresh_from_auth", fake_auth)
     monkeypatch.setattr(spend.openrouter, "chat_completion", lambda *a, **k: {"choices": [], "usage": {}})
@@ -179,8 +178,8 @@ def test_spend_cutoff_blocks_live(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     def fake_refresh(_key: str) -> tuple[dict, float | None]:
         led = spend.default_ledger()
-        led["monthly_usd"] = 10.0
-        return led, 10.0
+        led["monthly_usd"] = 5.0
+        return led, 5.0
 
     monkeypatch.setattr(spend, "refresh_from_auth", fake_refresh)
     with pytest.raises(ChipConfigError) as exc:

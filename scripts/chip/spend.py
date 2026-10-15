@@ -1,4 +1,8 @@
-"""OpenRouter spend ledger and $5 warn / $10 cutoff gates (Chip Chat key only)."""
+"""OpenRouter spend ledger and monthly budget gates (Chip Chat key only).
+
+Defaults: thrift at 80% of the cap ($4.00), HARD STOP at the cap ($5.00).
+Modes and env overrides live in ``chip.budget_mode``.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +12,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from chip.config import data_dir
-from chip import openrouter
+from chip import budget_mode, openrouter
 from chip.store import append_jsonl
 
-WARN_MONTHLY_USD = 5.0
-CUTOFF_MONTHLY_USD = 10.0
+# Defaults only; CHIP_SPEND_CAP_USD / CHIP_SPEND_THRIFT_PCT override (chip.budget_mode).
+WARN_MONTHLY_USD = 4.0  # thrift threshold at the default 80% of the cap
+CUTOFF_MONTHLY_USD = 5.0  # monthly HARD STOP
 
 # Approximate list USD per 1M tokens for token_estimate fallback (hard-stop only; not pricing SoT).
 # GLM / DeepSeek flash family ballparks via OpenRouter:
@@ -73,6 +78,7 @@ def load_ledger() -> dict[str, Any]:
     base = default_ledger()
     if isinstance(raw, dict):
         base.update(raw)
+    budget_mode.roll_month(base)
     return base
 
 
@@ -92,7 +98,15 @@ def _parse_usd(value: Any) -> float | None:
 
 
 def monthly_usd_from_auth(info: dict[str, Any]) -> float | None:
-    """OpenRouter key usage when positive; zero/absent means no authoritative signal."""
+    """OpenRouter key usage when positive; zero/absent means no authoritative signal.
+
+    ``usage_monthly`` wins whenever OpenRouter reports it: at the start of a month
+    it is 0 and must not fall through to lifetime ``usage`` (that would trip the
+    budget gates right after the monthly rollover).
+    """
+    if "usage_monthly" in info and info.get("usage_monthly") is not None:
+        parsed = _parse_usd(info.get("usage_monthly"))
+        return parsed if parsed is not None and parsed > 0 else None
     for key in ("usage_monthly", "usage", "usage_daily"):
         parsed = _parse_usd(info.get(key))
         if parsed is not None and parsed > 0:
@@ -161,18 +175,20 @@ def write_standup_fact(fact: str) -> None:
 
 
 def emit_monthly_warn(monthly_usd: float) -> None:
+    threshold = budget_mode.thrift_usd()
     msg = (
         f"WARN: Chip Chat OpenRouter monthly spend ${monthly_usd:.2f} "
-        f">= ${WARN_MONTHLY_USD:.2f} (OPENROUTER_CC_API_KEY)"
+        f">= ${threshold:.2f} thrift threshold (OPENROUTER_CC_API_KEY)"
     )
     print(msg, file=sys.stderr)
-    write_standup_fact(f"chip-chat: monthly spend WARN ${monthly_usd:.2f} (threshold ${WARN_MONTHLY_USD:.2f})")
+    write_standup_fact(f"chip-chat: monthly spend WARN ${monthly_usd:.2f} (thrift threshold ${threshold:.2f})")
 
 
 def enforce_cutoff(monthly_usd: float) -> None:
-    if monthly_usd >= CUTOFF_MONTHLY_USD:
+    cap = budget_mode.cap_usd()
+    if monthly_usd >= cap:
         raise SpendCutoffError(
-            f"Chip Chat spend cutoff: monthly ${monthly_usd:.2f} >= ${CUTOFF_MONTHLY_USD:.2f}. "
+            f"Chip Chat spend cutoff: monthly ${monthly_usd:.2f} >= ${cap:.2f}. "
             "Live OpenRouter calls refused (mock mode still allowed)."
         )
 
@@ -203,7 +219,7 @@ def guard_before_live_completion(command: str, key: str) -> float:
     ledger, api_monthly = refresh_from_auth(key)
     monthly = effective_monthly_usd(ledger, api_monthly)
     enforce_cutoff(monthly)
-    if monthly >= WARN_MONTHLY_USD:
+    if monthly >= budget_mode.thrift_usd():
         emit_monthly_warn(monthly)
     ledger["last_command"] = command
     save_ledger(ledger)
@@ -291,10 +307,11 @@ def print_spend_report(key: str | None = None) -> int:
     print(f"session_usd={ledger.get('session_usd')}")
     print(f"last_model={ledger.get('last_model')} last_command={ledger.get('last_command')}")
     print(f"last_tokens prompt={ledger.get('last_prompt_tokens')} completion={ledger.get('last_completion_tokens')}")
-    print(f"thresholds warn=${WARN_MONTHLY_USD:.2f} cutoff=${CUTOFF_MONTHLY_USD:.2f}")
-    if monthly >= CUTOFF_MONTHLY_USD:
+    print(f"thresholds warn=${budget_mode.thrift_usd():.2f} cutoff=${budget_mode.cap_usd():.2f}")
+    print(f"budget_mode={budget_mode.mode_for(monthly)} month={budget_mode.ledger_month(ledger)}")
+    if monthly >= budget_mode.cap_usd():
         print("status=CUTOFF")
-    elif monthly >= WARN_MONTHLY_USD:
+    elif monthly >= budget_mode.thrift_usd():
         print("status=WARN")
     else:
         print("status=OK")

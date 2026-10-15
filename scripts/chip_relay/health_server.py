@@ -29,6 +29,17 @@ def health_port() -> int:
     return DEFAULT_PORT
 
 
+def status_payload() -> dict:
+    """Read-only relay status: gateway readiness + monthly budget mode (normal/thrift/stopped)."""
+    try:
+        from chip import budget_mode
+
+        budget = budget_mode.status()
+    except Exception as exc:  # noqa: BLE001 — status must never crash the health server
+        budget = {"mode": "unknown", "error": exc.__class__.__name__}
+    return {"ready": gateway_ready(), "budget": budget}
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         del format, args
@@ -47,6 +58,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if path == "/status":
+            self._json_response(200, status_payload())
             return
         self.send_response(404)
         self.end_headers()
