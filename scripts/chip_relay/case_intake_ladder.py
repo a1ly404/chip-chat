@@ -116,13 +116,19 @@ def make_openrouter_stage_fn(*, command: str = "case-intake-ladder") -> StageFn:
         from chip import openrouter, spend
 
         key = openrouter.require_api_key()
-        spend.guard_before_live_completion(command, key)
+        from chip import budget_mode
+
+        monthly = spend.guard_before_live_completion(command, key)
         model = str(cfg["model"])
+        max_tokens = int(cfg["max_tokens"])
+        if isinstance(monthly, (int, float)) and budget_mode.mode_for(monthly) == budget_mode.THRIFT:
+            model = budget_mode.thrift_model()
+            max_tokens = min(max_tokens, budget_mode.thrift_max_tokens())
         completion = openrouter.chat_completion(
             key,
             model=model,
             messages=[{"role": "system", "content": cfg["system"]}, {"role": "user", "content": payload}],
-            max_tokens=int(cfg["max_tokens"]),
+            max_tokens=max_tokens,
         )
         spend.record_after_live_completion(command, model, completion, key=key)
         cost, _src, pt, ct = spend.cost_from_completion_payload(completion, model)

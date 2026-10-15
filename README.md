@@ -56,6 +56,7 @@ Common variables (values are host-specific; never commit `.env`):
 - `CHIP_CHAT_MOCK` / `--mock` — offline deterministic replies
 - `CHIP_CHAT_DATA_DIR` — ledger, threads, job board
 - `CHIP_SYSTEM_PACK`, `CHIP_PACK_DIR`, `CHIP_PLUGINS` — pack and plugin wiring
+- Monthly budget: `CHIP_SPEND_CAP_USD` (hard stop, default 5.00), `CHIP_SPEND_THRIFT_PCT` (thrift mode from 0.80 of the cap), `CHIP_THRIFT_MODEL`, `CHIP_THRIFT_MAX_TOKENS`, `CHIP_THRIFT_REPLY_CHARS`; see [docs/BUDGET_MODES.md](docs/BUDGET_MODES.md)
 - Relay: `DISCORD_CHIP_RELAY_TOKEN`, `CHIP_WEBHOOK_DEV`, `CHIP_WEBHOOK_SELFTEST`, `CHIP_RELAY_AUTO`, inject/selftest author ids
 
 Copy `.env.example` to `.env` and fill in values on your machine. Secret-store boot env names for private deployments are documented in the private plugin repository, not in this engine tree.

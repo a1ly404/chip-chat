@@ -14,6 +14,10 @@ _PM_STATUS = re.compile(r"^status:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 
 
 def orchestrator_tick_enabled(environ: dict[str, str]) -> bool:
+    from chip import budget_mode
+
+    if budget_mode.act_block_reason("orchestrator hop") is not None:
+        return False
     block = topology.load().get("pm_orchestrator") or {}
     if not block.get("tick_after_specialist_receipt", True):
         return False
