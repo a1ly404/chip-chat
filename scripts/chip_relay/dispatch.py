@@ -126,7 +126,9 @@ def human_safe_body(reply: str, persona: str) -> str:
 
     prose = "\n".join(l for l in reply.splitlines() if not _FIELD.match(l.strip())).strip()
     if prose and receipt_error(prose) is None:
-        return prose
+        from chip import budget_mode
+
+        return budget_mode.clip_reply(prose)
     return f"{persona} here — I couldn't put that answer into a clean reply. Please re-ask and I'll answer in plain prose."
 
 
@@ -154,8 +156,11 @@ def _maybe_apply_scoped_go(incoming: Incoming, room, text: str, environ: dict[st
 
     if str(incoming.author_id or "") not in _operator_ids(room, environ):
         return None
-    from chip import go_write
+    from chip import budget_mode, go_write
 
+    budget_block = budget_mode.act_block_reason("scoped GO write")
+    if budget_block:
+        return budget_block
     try:
         _verdict, receipt = go_write.try_apply_scoped_go(
             text,
@@ -333,6 +338,11 @@ def handle_inbound_delegate(
     request = parse_inbound_handoff(text)
     if request is None:
         return _fail(logs, "no delegate line")
+    from chip import budget_mode as _budget
+
+    budget_block = _budget.act_block_reason("delegate hop")
+    if budget_block:
+        return _fail(logs, budget_block)
     if from_persona not in known_persona_ids():
         return _fail(logs, f"unknown webhook persona {from_persona!r}")
     from chip import taskflow as _taskflow

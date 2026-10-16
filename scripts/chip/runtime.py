@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chip import config, mock, openrouter, spend
+from chip import budget_mode, config, mock, openrouter, spend
 
 
 def complete(
@@ -27,9 +27,16 @@ def complete(
         return openrouter.extract_assistant_text(payload), payload, chosen, spend.load_ledger()
 
     key = openrouter.require_api_key()
-    spend.guard_before_live_completion(command, key)
+    monthly = spend.guard_before_live_completion(command, key)
+    thrift = isinstance(monthly, (int, float)) and budget_mode.mode_for(monthly) == budget_mode.THRIFT
+    if thrift:
+        # Thrift mode: cheapest model, short answers (rest of the month).
+        chosen = budget_mode.thrift_model()
+        max_tokens = min(max_tokens, budget_mode.thrift_max_tokens())
     payload = openrouter.chat_completion(key, model=chosen, messages=messages, max_tokens=max_tokens)
     retry_max = openrouter.retry_max_tokens_if_reasoning_starved(payload, max_tokens)
+    if thrift and retry_max is not None:
+        retry_max = min(retry_max, 2 * budget_mode.thrift_max_tokens())
     if retry_max is not None:
         routed_retry = (payload.get("model") or chosen) if isinstance(payload.get("model"), str) else chosen
         spend.record_after_live_completion(command, routed_retry, payload, key=key)

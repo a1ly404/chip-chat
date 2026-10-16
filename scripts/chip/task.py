@@ -129,6 +129,21 @@ def run_task(
     envelope["status"] = "open"
     save_task(envelope)
 
+    if execute:
+        from chip import budget_mode
+
+        budget_block = budget_mode.act_block_reason("task execution")
+        if budget_block:
+            envelope["status"] = "blocked"
+            envelope["execution_result"] = {
+                "ok": False,
+                "exit_code": -1,
+                "error": budget_block,
+                "gated": True,
+            }
+            save_task(envelope)
+            return envelope
+
     note = str(envelope.get("note") or "")
     try:
         result = tool_exec.run(

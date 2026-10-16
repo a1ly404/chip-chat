@@ -112,6 +112,18 @@ def docker_restart(
     base = {
         "action": "docker_restart", "target": target, "case_id": case_id,
     }
+    from chip import budget_mode
+
+    budget_block = budget_mode.act_block_reason("solver restart")
+    if budget_block:
+        return _receipt(
+            case_path,
+            **base,
+            phase="pre-refused",
+            allowed=False,
+            reason=budget_block,
+            escalate_to=_escalate_to(),
+        )
     allow = restart_policy.solver_restart_allowlist(environ)
     if allow is None:
         detail = "no system pack/restart policy loaded (fail-closed)"

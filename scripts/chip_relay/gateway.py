@@ -12,7 +12,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from chip.spend import WARN_MONTHLY_USD, ledger_monthly_usd, load_ledger
+from chip import budget_mode
+from chip.spend import ledger_monthly_usd, load_ledger
 from chip_relay.config import TOKEN_ENV, RelayConfig, load_config
 from chip_relay.dispatch import (
     CHIP_TIMEOUT_S,
@@ -106,9 +107,10 @@ def run_gateway() -> int:
         print(f"ERROR: {TOKEN_ENV} is unset", file=sys.stderr)
         return 1
     monthly = ledger_monthly_usd(load_ledger())
-    if monthly >= WARN_MONTHLY_USD:
-        print(f"ERROR: monthly_usd={monthly} >= WARN {WARN_MONTHLY_USD}", file=sys.stderr)
-        return 2
+    mode = budget_mode.mode_for(monthly)
+    # Thrift/stopped no longer block startup: status + read-only Q&A stay up and
+    # the per-call gates (chip.spend / chip.budget_mode) refuse what is over budget.
+    print(f"[chip-relay] budget mode={mode} monthly_usd={monthly:.2f}", flush=True)
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -123,7 +125,28 @@ def run_gateway() -> int:
     def monthly_now() -> float:
         return ledger_monthly_usd(load_ledger())
 
+    def post_budget_notice() -> None:
+        from chip_relay.notice_webhook import notice_webhook_env, notice_webhook_url
+
+        url = notice_webhook_url()
+        target = notice_webhook_env()
+        if not url:
+            return
+
+        def _post(line: str) -> bool:
+            result = post_webhook(url, "chip-relay", line[:1900])
+            return 200 <= int(getattr(result, "status", 0)) < 300
+
+        try:
+            posted = budget_mode.maybe_post_notice(_post)
+        except Exception as exc:  # noqa: BLE001 — notices must never crash the gateway
+            print(f"budget notice failed {exc.__class__.__name__}", flush=True)
+            return
+        if posted:
+            print(f"budget notice posted mode={posted} -> {target}", flush=True)
+
     async def post_heartbeat() -> None:
+        await asyncio.to_thread(post_budget_notice)
         now = time.time()
         current_monthly = monthly_now()
         if not should_post_heartbeat(
@@ -227,6 +250,7 @@ def run_gateway() -> int:
             )
 
         result = await asyncio.to_thread(_dispatch)
+        await asyncio.to_thread(post_budget_notice)
         stats["last_message_at"] = time.time()
         if result.ok:
             stats["ok"] += 1
