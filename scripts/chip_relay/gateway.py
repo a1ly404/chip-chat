@@ -126,7 +126,10 @@ def run_gateway() -> int:
         return ledger_monthly_usd(load_ledger())
 
     def post_budget_notice() -> None:
-        url = (os.environ.get("CHIP_WEBHOOK_DEV") or "").strip()
+        from chip_relay.notice_webhook import notice_webhook_env, notice_webhook_url
+
+        url = notice_webhook_url()
+        target = notice_webhook_env()
         if not url:
             return
 
@@ -140,7 +143,7 @@ def run_gateway() -> int:
             print(f"budget notice failed {exc.__class__.__name__}", flush=True)
             return
         if posted:
-            print(f"budget notice posted mode={posted} -> dev channel", flush=True)
+            print(f"budget notice posted mode={posted} -> {target}", flush=True)
 
     async def post_heartbeat() -> None:
         await asyncio.to_thread(post_budget_notice)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from chip_relay.notice_webhook import notice_webhook_url as _notice_url
+
 import hashlib
 import json
 import os
@@ -384,7 +386,7 @@ def _process_alert(
     grad = check_graduation(
         environ,
         post_summary=lambda text: webhook(
-            environ.get("CHIP_WEBHOOK_DEV", "") or environ.get(room.webhook_env, ""),
+            _notice_url(environ) or environ.get(room.webhook_env, ""),
             "dispatcher",
             text,
         ).status < 400,

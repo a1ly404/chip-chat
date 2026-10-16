@@ -16,7 +16,8 @@ rest of the calendar month. Code: `scripts/chip/budget_mode.py`; ledger:
 The relay posts **one** `[chip-budget] THRIFT MODE …` line when it first sees
 thrift mode and **one** `[chip-budget] HARD STOP …` line at the cap. They are
 plain system lines (no LLM call, no mentions) sent through the existing
-`CHIP_WEBHOOK_DEV` webhook (the relay's dev channel). The "already posted" state
+`CHIP_WEBHOOK_RELAY` webhook (#chip-relay), falling back to `CHIP_WEBHOOK_DEV`
+when RELAY is unset. The "already posted" state
 is kept in `spend.json` under `budget_notices` and cleared at the monthly
 rollover. Checks run on every heartbeat tick and after each handled message.
 
