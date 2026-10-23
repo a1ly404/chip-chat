@@ -87,8 +87,17 @@ class _HealthHandler(BaseHTTPRequestHandler):
         except (ValueError, _json.JSONDecodeError):
             self._json_response(400, {"ok": False, "error": "invalid json"})
             return
-        import os as _ose2
+        from chip_relay import event_cases
 
+        if event_cases.is_event(body):
+            # Phase 2 step 1: structured events only touch the case store
+            # (no handlers, no chat posts, no restarts, no paging).
+            try:
+                out = event_cases.handle_event(body, environ=dict(_os.environ))
+            except Exception:  # noqa: BLE001 - never 5xx-crash the handler thread
+                out = {"status": 500, "ok": False, "error": "event store error"}
+            self._json_response(out.get("status", 500), out)
+            return
         out = handle_alert(body, environ=dict(_os.environ))
         self._json_response(out.get("status", 500), out)
 
