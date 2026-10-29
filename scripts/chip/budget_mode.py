@@ -35,6 +35,8 @@ STOPPED = "stopped"
 
 ENV_CAP = "CHIP_SPEND_CAP_USD"
 ENV_THRIFT_PCT = "CHIP_SPEND_THRIFT_PCT"
+ENV_STOP_ALLOW_RESTART = "CHIP_STOP_ALLOW_RESTART"
+OPERATOR_MENTION_ENV = "CHIP_NOTICE_OPERATOR_MENTION"
 ENV_THRIFT_MODEL = "CHIP_THRIFT_MODEL"
 ENV_THRIFT_MAX_TOKENS = "CHIP_THRIFT_MAX_TOKENS"
 ENV_THRIFT_REPLY_CHARS = "CHIP_THRIFT_REPLY_CHARS"
@@ -187,18 +189,46 @@ def current_mode(environ: Mapping[str, str] | None = None) -> str:
         return NORMAL
 
 
-def act_block_reason(action: str, environ: Mapping[str, str] | None = None) -> str | None:
-    """Refusal text when write/act paths are off (thrift or stopped), else None."""
+def stop_allow_restart(environ: Mapping[str, str] | None = None) -> bool:
+    """At the hard stop, may allowlisted availability actions still run? Default yes.
+
+    A spent-out month must still be able to restart an allowlisted container.
+    ``CHIP_STOP_ALLOW_RESTART=0`` turns that off and accepts a watch-only tail.
+    """
+    raw = str(_env(environ).get(ENV_STOP_ALLOW_RESTART, "")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def act_block_reason(
+    action: str,
+    environ: Mapping[str, str] | None = None,
+    *,
+    availability: bool = False,
+) -> str | None:
+    """Refusal text when write/act paths are off, else None.
+
+    ``availability`` marks allowlisted container restarts:
+    thrift keeps them, and the hard stop keeps them too unless
+    ``CHIP_STOP_ALLOW_RESTART=0``. Every write-class act (tasks, GO writes,
+    delegate/orchestrator hops) is refused in both modes.
+    """
     try:
         snap = status(environ=environ)
     except Exception:  # noqa: BLE001
         return None
-    if snap["mode"] == NORMAL:
+    mode = snap["mode"]
+    if mode == NORMAL:
         return None
+    if availability and (mode == THRIFT or stop_allow_restart(environ)):
+        return None
+    if availability:
+        detail = "availability actions disabled at the cap (CHIP_STOP_ALLOW_RESTART=0)"
+    else:
+        detail = "read-only status and short Q&A only"
     return (
-        f"budget-{snap['mode']}: {action} disabled for the rest of the month "
+        f"budget-{mode}: {action} disabled for the rest of the month "
         f"(monthly ${snap['monthly_usd']:.2f} / cap ${snap['cap_usd']:.2f}); "
-        "read-only status and short Q&A only"
+        f"{detail}"
     )
 
 
@@ -215,18 +245,63 @@ def clip_reply(text: str, environ: Mapping[str, str] | None = None) -> str:
 # --- one-shot notices -----------------------------------------------------
 
 
-def notice_line(mode: str, snap: Mapping[str, Any]) -> str:
-    if mode == STOPPED:
-        return (
-            f"{NOTICE_PREFIX} HARD STOP: monthly OpenRouter spend ${snap['monthly_usd']:.2f} "
-            f">= cap ${snap['cap_usd']:.2f}. Live model calls refused until the new month "
-            f"({snap['month']} rollover)."
-        )
+def operator_mention(environ: Mapping[str, str] | None = None) -> str:
+    """`<@id>` that actually pings: env override, else the pack's operator id.
+
+    The system pack's ``identity.operator_discord_id`` is the source of truth;
+    no operator id is baked into engine code. Empty string when neither is available — the
+    notice then posts without a mention rather than guessing one.
+    """
+    raw = str(_env(environ).get(OPERATOR_MENTION_ENV, "")).strip()
+    if raw:
+        return raw
+    try:
+        from chip import system_pack
+
+        who = system_pack.operator_discord_id(dict(_env(environ)))
+    except Exception:  # noqa: BLE001 — a missing pack must not break the notice
+        return ""
+    return f"<@{who}>" if who else ""
+
+
+def topup_hint(environ: Mapping[str, str] | None = None) -> str:
     return (
-        f"{NOTICE_PREFIX} THRIFT MODE: monthly OpenRouter spend ${snap['monthly_usd']:.2f} "
-        f">= ${snap['thrift_usd']:.2f} ({int(round(thrift_pct() * 100))}% of ${snap['cap_usd']:.2f} cap). "
-        f"Cheap model {thrift_model()}, short replies, read-only (no restarts, tasks, or hops) "
-        "until the new month."
+        "Top up: raise CHIP_SPEND_CAP_USD in .env and recreate chip-relay "
+        "(no data loss, state lives on the volume), or wait for the monthly rollover."
+    )
+
+
+def notice_line(
+    mode: str,
+    snap: Mapping[str, Any],
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """One notice per month per mode: spend, cap, what stopped, what still runs, how to top up."""
+    mention = operator_mention(environ)
+    head = f"{NOTICE_PREFIX} " + (f"{mention} " if mention else "")
+    if mode == STOPPED:
+        return "\n".join(
+            [
+                head
+                + f"HARD STOP — monthly spend ${snap['monthly_usd']:.2f} of "
+                f"${snap['cap_usd']:.2f} ({snap['month']}).",
+                "Stopped: live model calls (persona replies, intake parses, digests, Jev review).",
+                "Still running: deterministic watch tick, alert ingest, scheduler jobs, "
+                "webhook posts, allowlisted container restarts.",
+                topup_hint(environ),
+            ]
+        )
+    return "\n".join(
+        [
+            head
+            + f"THRIFT — monthly spend ${snap['monthly_usd']:.2f} of "
+            f"${snap['cap_usd']:.2f} ({snap['month']}), "
+            f"{int(round(thrift_pct() * 100))}% line crossed.",
+            "Stopped: scheduled digests, delegate/orchestrator hops, task execution, scoped GO writes.",
+            f"Still running: detection, paging, allowlisted container restarts, short Q&A on "
+            f"{thrift_model()} (max {thrift_reply_chars()} chars).",
+            topup_hint(environ),
+        ]
     )
 
 
@@ -247,7 +322,7 @@ def maybe_post_notice(
         notices = {}
     if notices.get(mode):
         return None
-    if not post(notice_line(mode, snap)):
+    if not post(notice_line(mode, snap, environ)):
         return None
     notices[mode] = datetime.now(timezone.utc).isoformat()
     if mode == STOPPED:

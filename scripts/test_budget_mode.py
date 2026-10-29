@@ -208,12 +208,15 @@ def test_usage_monthly_zero_does_not_fall_back_to_lifetime_usage() -> None:
 # --- one-shot notices + status ------------------------------------------------
 
 
-def test_notices_post_once_per_mode() -> None:
+def test_notices_post_once_per_mode(monkeypatch) -> None:
     posted: list[str] = []
 
     def post(line: str) -> bool:
         posted.append(line)
         return True
+
+    mention = "<@operator>"  # placeholder: no real Discord id in the repo
+    monkeypatch.setenv("CHIP_NOTICE_OPERATOR_MENTION", mention)
 
     _write_ledger(1.0)
     assert budget_mode.maybe_post_notice(post) is None
@@ -226,9 +229,21 @@ def test_notices_post_once_per_mode() -> None:
     assert budget_mode.maybe_post_notice(post) == "stopped"
     assert budget_mode.maybe_post_notice(post) is None
     assert len(posted) == 2
-    assert posted[0].startswith("[chip-budget] THRIFT MODE")
-    assert posted[1].startswith("[chip-budget] HARD STOP")
-    assert all("@" not in line for line in posted)
+    assert posted[0].startswith(f"[chip-budget] {mention} THRIFT")
+    assert posted[1].startswith(f"[chip-budget] {mention} HARD STOP")
+    assert all(line.count(mention) == 1 for line in posted)
+    # what stopped / what still runs / how to top up
+    assert "Still running:" in posted[0] and "allowlisted container restarts" in posted[0]
+    assert "Top up:" in posted[1] and "CHIP_SPEND_CAP_USD" in posted[1]
+
+
+def test_notice_omits_the_mention_when_none_is_configured(monkeypatch) -> None:
+    monkeypatch.delenv("CHIP_NOTICE_OPERATOR_MENTION", raising=False)
+    monkeypatch.setattr(budget_mode, "operator_mention", lambda environ=None: "")
+    snap = {"monthly_usd": 4.2, "cap_usd": 5.0, "thrift_usd": 4.0, "month": "2026-10"}
+    line = budget_mode.notice_line(budget_mode.THRIFT, snap)
+    assert line.startswith("[chip-budget] THRIFT")
+    assert "<@" not in line
 
 
 def test_failed_post_retries_later() -> None:
@@ -252,3 +267,15 @@ def test_status_endpoint_exposes_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["budget"]["mode"] == "thrift"
     assert payload["budget"]["cap_usd"] == pytest.approx(5.0)
     assert payload["budget"]["thrift_model"] == "qwen/qwen3.7-flash"
+
+
+def test_availability_acts_survive_thrift_and_the_cap(monkeypatch) -> None:
+    """Restarts stay at thrift, and at the stop unless the flag says no."""
+    _write_ledger(4.2)  # thrift
+    assert budget_mode.act_block_reason("restart", availability=True) is None
+    assert budget_mode.act_block_reason("task step") is not None
+
+    _write_ledger(6.0)  # stopped
+    assert budget_mode.act_block_reason("restart", availability=True) is None  # default on
+    monkeypatch.setenv("CHIP_STOP_ALLOW_RESTART", "0")
+    assert budget_mode.act_block_reason("restart", availability=True) is not None

@@ -13,9 +13,12 @@ rest of the calendar month. Code: `scripts/chip/budget_mode.py`; ledger:
 
 ## Notices
 
-The relay posts **one** `[chip-budget] THRIFT MODE …` line when it first sees
-thrift mode and **one** `[chip-budget] HARD STOP …` line at the cap. They are
-plain system lines (no LLM call, no mentions) sent through the existing
+The relay posts **one** `[chip-budget] THRIFT …` notice when it first sees
+thrift mode and **one** `[chip-budget] HARD STOP …` notice at the cap. Each says
+the spend and cap, what stopped, what still runs, and how to top up. They are
+plain system lines (no LLM call) that mention the operator only when one is
+configured: `CHIP_NOTICE_OPERATOR_MENTION` (e.g. `<@id>`), else the pack's
+`operator_discord_id`, else no mention. They are sent through the existing
 `CHIP_WEBHOOK_RELAY` webhook (#chip-relay), falling back to `CHIP_WEBHOOK_DEV`
 when RELAY is unset. The "already posted" state
 is kept in `spend.json` under `budget_notices` and cleared at the monthly
@@ -50,3 +53,11 @@ gates right after the rollover.
 | `CHIP_THRIFT_MODEL` | `qwen/qwen3.7-flash` | Model used in thrift mode |
 | `CHIP_THRIFT_MAX_TOKENS` | `256` | Max completion tokens in thrift mode |
 | `CHIP_THRIFT_REPLY_CHARS` | `600` | Max posted reply length in thrift mode |
+
+## Availability actions at thrift and the cap
+
+`act_block_reason(action, availability=True)` marks an allowlisted container
+restart. Thrift keeps availability actions; the hard stop keeps them too unless
+`CHIP_STOP_ALLOW_RESTART=0` (watch-only tail). Every write-class act (tasks, GO
+writes, delegate/orchestrator hops) is still refused in both modes. Callers that
+do not pass `availability` keep the old behaviour.
