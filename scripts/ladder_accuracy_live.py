@@ -21,6 +21,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from chip import config, openrouter, spend  # noqa: E402
+from chip.money import usd  # noqa: E402
 from chip_relay import case_intake_ladder as ladder  # noqa: E402
 from chip_relay.case_intake import load_limits, parse_freeform  # noqa: E402
 from chip_relay.case_intake_pipeline import live_parser  # noqa: E402
@@ -156,7 +157,7 @@ def render_markdown(report: dict[str, Any], *, tag: str) -> str:
         "",
         f"- cases: **{report['cases']}**",
         f"- first-try accuracy: **{report['first_try_accuracy']:.1%}**",
-        f"- total spend (session delta approx): **${report.get('total_spend_usd', 0):.4f}**",
+        f"- total spend (session delta approx): **{usd(report.get('total_spend_usd', 0))}**",
         f"- monthly_usd at start: **{report.get('monthly_usd_start')}**",
         f"- monthly_usd at end: **{report.get('monthly_usd_end')}**",
         "",
@@ -168,7 +169,7 @@ def render_markdown(report: dict[str, Any], *, tag: str) -> str:
     for row in report.get("case_rows", []):
         lines.append(
             f"| {row['id']} | {row.get('corpus_class')} | {'y' if row.get('hit') else 'n'} "
-            f"| {row.get('spend_usd', 0):.4f} | {row.get('bounces', '')} |"
+            f"| {usd(row.get('spend_usd', 0))} | {row.get('bounces', '')} |"
         )
     lines.extend(["", "## Misses", ""])
     for m in report.get("misses", [])[:20]:

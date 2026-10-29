@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from chip.money import usd
+
 SESSION_ALERT_USD = 0.20
 SESSION_REFUSE_USD = 0.25
 
@@ -82,7 +84,7 @@ class SpendTracker:
             fh.write(json.dumps(row.__dict__) + "\n")
         if self.cumulative_usd >= self.alert and not self.alerted:
             self.alerted = True
-            print(f"SPEND ALERT: ops session at ${self.cumulative_usd:.4f} (>= ${self.alert})",
+            print(f"SPEND ALERT: ops session at {usd(self.cumulative_usd)} (>= {usd(self.alert)})",
                   file=__import__("sys").stderr)
         return row
 

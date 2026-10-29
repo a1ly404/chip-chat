@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from chip.store import append_jsonl
+from chip.money import usd
 from chip_relay.case_intake_ladder import VERDICTS
 
 DEFAULT_CAPS_USD: dict[str, float] = {"pm": 0.50, "executor": 2.00, "verifier": 0.75}
@@ -230,7 +231,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def render_table(s: dict[str, Any]) -> str:
-    spend = " · ".join(f"{k} ${v:.4f}" for k, v in sorted(s["spend_by_tier"].items())) or "$0"
+    spend = " · ".join(f"{k} {usd(v)}" for k, v in sorted(s["spend_by_tier"].items())) or "$0.00"
     status = ", ".join(f"{k}={v}" for k, v in sorted(s["status"].items())) or "none"
     defects = ", ".join(f"{k}={v}" for k, v in sorted(s["defects"].items())) or "none"
     return "\n".join([
