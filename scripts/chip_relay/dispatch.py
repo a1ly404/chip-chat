@@ -519,6 +519,15 @@ def handle_message(
         allowed, wake_reason = _lanes.chipchatdev_wake_allowed(text, room.id)
         if not allowed:
             return _fail(logs, wake_reason)
+    from chip_relay.context_hooks import plugin_context_blocks, suggest_persona
+
+    routed_persona = suggest_persona(text, environ, author_id=incoming.author_id)
+    if routed_persona:
+        persona = routed_persona
+        logs.append(f"pack persona route ->{routed_persona}")
+    for block in plugin_context_blocks(text, environ, author_id=incoming.author_id):
+        text = f"{text}\n\n{block}"
+        logs.append("plugin context block injected")
     prior_speaker = environ.get("CHIP_TURN_SPEAKER")
     environ["CHIP_TURN_SPEAKER"] = persona
     os.environ["CHIP_TURN_SPEAKER"] = persona
