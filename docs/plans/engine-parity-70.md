@@ -55,7 +55,7 @@ Baseline rows already met total **40**.
 | 5 | Spend data-dir pin (slice B) | 4 | `test_spend_data_dir_pin.py` | - |
 | 6 | Sandbox exec + workspace + pytest (slice C) | 10 | `chip/sandbox/` + tests, flag doc | - |
 | 7 | Recipe schema + grounded GO + shadow/live (slice D) | 10 | `chip/recipes/` + JSON schema + tests | - |
-| 8 | Alert ingest -> recipe id (slice E) | 6 | `chip/alert_grounding.py` + fixtures | - |
+| 8 | Alert ingest -> recipe id (slice E) | 6 | `scripts/test_chip_alert_grounding.py` (flag default off; specificity ranking by condition count; missing metadata never invents; deterministic lexicographic tiebreak; invalid rows skipped) + `scripts/fixtures/alert-grounding/recipes.json` (synthetic acme only); doc: `chip/alert_grounding.py` header (semantics + `ground_for_turn` flag gate). Callers hand the id to `grounded_recipe_go`, so evidence/approval boundaries stay in one place. | met (this PR) |
 | 9 | Relay memory: advisory learnings load (slice F) | 6 | relay test showing learnings in prompt context, budgeted | - |
 | 10 | Bounded post-turn worker (slice G) | 6 | `chip/workers.py` + timeout/queue tests | - |
 | 11 | Host-exec interface (slice H) | 6 | `chip/host_exec.py` protocol + manifest test | - |
