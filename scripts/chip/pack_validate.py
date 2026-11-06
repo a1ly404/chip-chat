@@ -42,6 +42,23 @@ KNOWN_SURFACES = frozenset(
         "counter_registry",
         "skill_bodies_dir",
         "alert_fixtures",
+        # A4 (engine parity): packet of event->canned-case mappings; the engine
+        # ships the loader (`chip_relay.event_cases`), so the surface belongs in
+        # the documented contract, not the client-extension warning list.
+        "event_cases",
+    }
+)
+# Client/deployment-specific surfaces allowed as extensions: known-but-private
+# keys that resolve fine but MUST stay warnings in `validate` (and FAIL in
+# `conformance`) until the engine promotes them. Do not silence warnings.
+EXTENSION_SURFACES = frozenset(
+    {
+        "relay_alert_routes",
+        "relay_monitoring_policy",
+        "relay_feed_defaults",
+        "relay_feed_health_rules",
+        "relay_monitoring_adapter",
+        "bot_alert_rules",
     }
 )
 
@@ -246,8 +263,15 @@ def validate_pack_data(
         _err(issues, "bad_surfaces", "surfaces must be a non-empty object")
     else:
         for key, rel in surfaces.items():
-            if key not in KNOWN_SURFACES:
+            if key not in KNOWN_SURFACES and key not in EXTENSION_SURFACES:
                 _warn(issues, "unknown_surface", f"surfaces.{key}: not in engine known set (still resolved)")
+            elif key in EXTENSION_SURFACES:
+                _warn(
+                    issues,
+                    "extension_surface",
+                    f"surfaces.{key}: client-specific extension surface (resolves here; "
+                    "promotes into KNOWN_SURFACES by engine decision only)",
+                )
             path = _resolve_surface(key, rel, pack, pack_dir=pack_dir, repo_root=root, issues=issues)
             if path is not None:
                 surfaces_ok.append(key)
@@ -366,4 +390,84 @@ def format_result(result: Result, *, as_json: bool = False) -> str:
     if result.ok and not result.issues:
         lines.append("  (no issues)")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- init / conformance
+
+INIT_FIXTURE = Path("scripts") / "fixtures" / "packs" / "validate-ok"
+INIT_FILES = (
+    Path("system.json"),
+    Path("config") / "personas.json",
+    Path("config") / "models.json",
+    Path("skill-bodies") / ".gitkeep",
+)
+
+
+def init_pack(target: Path | str, *, root: Path | None = None, force: bool = False) -> list[Path]:
+    """Scaffold a fresh pack from the generic ``validate-ok`` fixture.
+
+    Copies only fictional fixture content (no operator names, no pack data,
+    no homelab anything). Refuses (``FileExistsError``) when any target file
+    already exists unless ``force`` is True — an existing pack is never
+    overwritten by accident. Returns the created files.
+    """
+    base = root if root is not None else REPO_ROOT
+    fixture = (base / INIT_FIXTURE).resolve()
+    if not (fixture / "system.json").is_file():
+        raise FileNotFoundError(f"pack fixture missing: {fixture}")
+    target = Path(target).expanduser().resolve()
+    planned = [target / rel for rel in INIT_FILES]
+    existing = [p for p in planned if p.exists()]
+    if existing and not force:
+        raise FileExistsError(
+            "pack init would overwrite existing file(s): "
+            + ", ".join(str(p) for p in existing)
+            + " — pass force=True / --force to replace on purpose"
+        )
+    target.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    for src_rel in INIT_FILES:
+        src = fixture / src_rel
+        dst = target / src_rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        text = src.read_text(encoding="utf-8")
+        if src_rel == Path("system.json"):
+            # The scaffolded pack is named after its directory; content stays
+            # fictional fixture data (renaming the copy imports no operator data).
+            text = text.replace('"validate-ok"', f'"{target.name}"', 1)
+        dst.write_text(text, encoding="utf-8", newline="\n")
+        created.append(dst)
+    return created
+
+
+def conformance_check(
+    *,
+    pack: str | None = None,
+    pack_dir: str | Path | None = None,
+    root: Path | None = None,
+    check_no_leak: bool | None = None,
+) -> Result:
+    """Conformance pass: same validator, stricter contract.
+
+    ``unknown_surface`` and ``extension_surface`` warnings from ``validate``
+    become errors here — conformance means every surface is part of the
+    documented contract, so the rule is the engine's decision, not the
+    client's convenience. The validator itself is not duplicated.
+    """
+    result = validate_pack(
+        pack=pack, pack_dir=pack_dir, root=root, check_no_leak=check_no_leak
+    )
+    promoted = 0
+    for issue in list(result.issues):
+        if issue.code in {"unknown_surface", "extension_surface"}:
+            result.issues.append(
+                Issue(
+                    "error",
+                    "unconforming_surface",
+                    f"conformance requires documented surfaces: {issue.message}",
+                )
+            )
+            promoted += 1
+    result.ok = not any(i.level == "error" for i in result.issues)
+    return result
 
