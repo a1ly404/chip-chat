@@ -60,16 +60,17 @@ recorded in the "Known honest gaps" table right after the checklist, not silentl
 | 5 | Spend data-dir pin (slice B) | 4 | `scripts/test_chip_spend_data_dir_pin.py` (guard raises `SpendDataDirNotPinned` before auth/ledger when `CHIP_SPEND_PIN_DATA_DIR=1`; monthly cutoff agreed across two worktree cwds sharing one pinned dir); doc: `chip/spend_data_dir.py` header + `.env.example` | met (slice PR) |
 | 6 | Sandbox exec + workspace + pytest (slice C) | 10 | `chip/sandbox/` + tests, flag doc | - |
 | 7 | Recipe schema + grounded GO + shadow/live (slice D) | 10 | `scripts/chip/recipes/{schema,registry,exec}.py` (+ #15), `scripts/test_chip_recipes_exec.py` (live refused when flag off, mutating refused live, evidence_required enforced); doc: `chip/recipes/exec.py` header + refused-receipt contract | met (#15) |
-| 8 | Alert ingest -> recipe id (slice E) | 6 | `chip/alert_grounding.py` + fixtures | - |
+| 8 | Alert ingest -> recipe id (slice E) | 6 | `scripts/test_chip_alert_grounding.py` (flag default off; specificity ranking by condition count; missing metadata never invents; deterministic lexicographic tiebreak; invalid rows skipped) + `scripts/fixtures/alert-grounding/recipes.json` (synthetic acme only); doc: `chip/alert_grounding.py` header (semantics + `ground_for_turn` flag gate). Callers hand the id to `grounded_recipe_go`, so evidence/approval boundaries stay in one place. | met (this PR) |
 | 9 | Relay memory: advisory learnings load (slice F) | 6 | `scripts/test_chip_relay_learnings.py` (default off, budgeted MAX_LINES/MAX_BYTES, ROOM LAW before advisory, never writes) through `chip.cli.build_room_messages` — the shared turn-composition entry the relay's `chip room` shots call (`chip_relay.dispatch._run_chip_shot` → `bin/chip room`); doc: `chip/learnings.py` + `chip_relay/context_hooks.py` | met (#16); strengthened in the learnings-through-dispatch PR when it lands |
 | 10 | Bounded post-turn worker (slice G) | 6 | `chip/workers.py` + timeout/queue tests | - |
 | 11 | Host-exec interface (slice H) | 6 | `chip/host_exec.py` protocol + manifest test | - |
 | 12 | Browser/email/Pages (slice I) | 12 | `docs/plans/engine-parity-70.md` §4 slice I (plan docs merged via #13) | met (#13) |
-| | **Total** | **100** | | **68 → 72 with slice B landing** |
+| | **Total** | **100** | | **72 → 78 with slice E landing** |
 
 Score math after merge states: 40 (rows 1-4) + 10 (#15 row 7) + 6 (#16 row 9) + 12 (#13 row 12) = 68;
-slice B lands 4 more → 72, which crosses the >= 70 target with rows 6, 8, 10, 11 still open.
-The floor rule from the plan stands: no percentage claim without the merged test path it cites.
+slice B added 4 (#18) → 72, crossing the >= 70 target with rows 6, 8, 10, 11 still open;
+slice E adds 6 → 78. The floor rule from the plan stands: no percentage claim without the merged
+test path it cites.
 
 ### Known honest gaps (recorded, not ignored)
 
