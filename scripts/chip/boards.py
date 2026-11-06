@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import tempfile
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, IO, Iterator
@@ -43,17 +44,87 @@ def lock_path(room: str) -> Path:
     return path.with_name(path.name + ".lock")
 
 
-def _lock_exclusive(fh: IO[Any]) -> None:
-    """Exclusive lock on ``fh``. fcntl on POSIX; msvcrt on Windows."""
-    if os.name == "nt":
-        import msvcrt
+# In-process mutex: Windows LockFileEx is process-wide/re-entrant, so threads in
+# the same process still need a threading.Lock to match POSIX flock semantics.
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
 
-        fh.seek(0)
-        if fh.read(1) == "":
-            fh.write("0")
-            fh.flush()
-            fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+
+def _thread_lock_for(path: Path) -> threading.Lock:
+    key = os.path.normcase(str(path))
+    with _THREAD_LOCKS_GUARD:
+        lock = _THREAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _THREAD_LOCKS[key] = lock
+        return lock
+
+
+def _win_lock_file(fh: IO[Any], *, exclusive: bool) -> None:
+    """Exclusive (or shared) whole-file lock via LockFileEx (no msvcrt byte hacks)."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class OVERLAPPED(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.POINTER(ctypes.c_ulong)),
+            ("InternalHigh", ctypes.POINTER(ctypes.c_ulong)),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+
+    LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+    flags = LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0
+    handle = __import__("msvcrt").get_osfhandle(fh.fileno())
+    overlapped = OVERLAPPED()
+    # Lock a large range from offset 0 (works past EOF).
+    ok = kernel32.LockFileEx(
+        wintypes.HANDLE(handle),
+        wintypes.DWORD(flags),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0xFFFFFFFF),
+        wintypes.DWORD(0xFFFFFFFF),
+        ctypes.byref(overlapped),
+    )
+    if not ok:
+        raise OSError(ctypes.get_last_error(), "LockFileEx failed")
+
+
+def _win_unlock_file(fh: IO[Any]) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class OVERLAPPED(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.POINTER(ctypes.c_ulong)),
+            ("InternalHigh", ctypes.POINTER(ctypes.c_ulong)),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+
+    handle = __import__("msvcrt").get_osfhandle(fh.fileno())
+    overlapped = OVERLAPPED()
+    ok = kernel32.UnlockFileEx(
+        wintypes.HANDLE(handle),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0xFFFFFFFF),
+        wintypes.DWORD(0xFFFFFFFF),
+        ctypes.byref(overlapped),
+    )
+    if not ok:
+        raise OSError(ctypes.get_last_error(), "UnlockFileEx failed")
+
+
+def _lock_exclusive(fh: IO[Any]) -> None:
+    """Exclusive lock on ``fh``. fcntl on POSIX; LockFileEx on Windows."""
+    if os.name == "nt":
+        _win_lock_file(fh, exclusive=True)
     else:
         import fcntl
 
@@ -62,10 +133,7 @@ def _lock_exclusive(fh: IO[Any]) -> None:
 
 def _unlock(fh: IO[Any]) -> None:
     if os.name == "nt":
-        import msvcrt
-
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        _win_unlock_file(fh)
     else:
         import fcntl
 
@@ -76,15 +144,18 @@ def _unlock(fh: IO[Any]) -> None:
 def board_lock(room: str) -> Iterator[None]:
     path = lock_path(room)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fh = path.open("a+")
+    tlock = _thread_lock_for(path)
+    tlock.acquire()
+    fh = path.open("a+b")
     try:
         _lock_exclusive(fh)
-        yield
-    finally:
         try:
-            _unlock(fh)
+            yield
         finally:
-            fh.close()
+            _unlock(fh)
+    finally:
+        fh.close()
+        tlock.release()
 
 
 def _empty(room: str) -> dict[str, Any]:
