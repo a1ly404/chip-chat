@@ -1,0 +1,26 @@
+[
+  {
+    "id": "acme-checkout-probe",
+    "version": "1",
+    "match": {"alert_class": "checkout-latency"},
+    "mutating": false,
+    "mode": "shadow",
+    "steps": [
+      {
+        "kind": "probe",
+        "args": {"target": "checkout-api", "check": "latency_p99"},
+        "evidence_required": true
+      }
+    ]
+  },
+  {
+    "id": "acme-echo-ok",
+    "version": "1",
+    "match": {"alert_class": "synthetic-ok"},
+    "mutating": false,
+    "mode": "shadow",
+    "steps": [
+      {"kind": "echo", "args": {"msg": "ok"}, "evidence_required": false}
+    ]
+  }
+]
