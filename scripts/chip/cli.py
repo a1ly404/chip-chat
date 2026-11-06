@@ -304,7 +304,7 @@ def build_room_messages(
         _persona_system(persona),
         law.load_room_law(room),
         session_boot_prefix=boot,
-        learnings_block=learnings.render_learnings_block(persona),
+        learnings_block=learnings.advisory_learnings_for_turn(persona),
     )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)
