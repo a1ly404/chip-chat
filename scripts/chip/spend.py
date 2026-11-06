@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from chip.config import data_dir
-from chip import budget_mode, openrouter
+from chip import budget_mode, openrouter, spend_data_dir
 from chip.store import append_jsonl
 
 # Defaults only; CHIP_SPEND_CAP_USD / CHIP_SPEND_THRIFT_PCT override (chip.budget_mode).
@@ -216,6 +216,11 @@ def refresh_from_auth(key: str) -> tuple[dict[str, Any], float | None]:
 
 
 def guard_before_live_completion(command: str, key: str) -> float:
+    # Slice B: fail closed BEFORE any API call or ledger write when the spend
+    # data dir pin is on and the ledger is not pinned to an absolute
+    # CHIP_CHAT_DATA_DIR (worktrees would otherwise evaluate the cutoff
+    # against the wrong spend history). Mock runs never reach this guard.
+    spend_data_dir.ensure_pinned_data_dir()
     ledger, api_monthly = refresh_from_auth(key)
     monthly = effective_monthly_usd(ledger, api_monthly)
     enforce_cutoff(monthly)
