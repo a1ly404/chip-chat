@@ -1051,6 +1051,21 @@ def build_parser() -> argparse.ArgumentParser:
     pack_conf.add_argument("--json", action="store_true")
     pack_conf.set_defaults(func=cmd_pack_conformance)
 
+    host_exec_p = sub.add_parser(
+        "host-exec",
+        help="Typed dry-run seam over the host-hook contract (docs/host-hooks.md); real execution is plugin-side",
+    )
+    host_exec_sub = host_exec_p.add_subparsers(dest="host_exec_cmd")
+    host_exec_run = host_exec_sub.add_parser("run", help="Dry-run one allowlisted hook through the manifest adapter")
+    host_exec_run.add_argument("hook", help="Host-hook name (must be declared in the manifest)")
+    host_exec_run.add_argument(
+        "--manifest",
+        default=None,
+        help="host-hooks manifest path (default: plugins/example/host-hooks.yaml)",
+    )
+    host_exec_run.add_argument("--json", action="store_true")
+    host_exec_run.set_defaults(func=cmd_host_exec_run)
+
     done_gate_p = sub.add_parser(
         "done-gate",
         help="Done-discipline gate: checked acceptance boxes must carry verified-as-of stamps (offline, no network). Always enforces Done discipline.",
@@ -1120,6 +1135,35 @@ def cmd_pack_conformance(args: argparse.Namespace) -> int:
     )
     print(format_result(result, as_json=bool(args.json)))
     return 0 if result.ok else 2
+
+
+def cmd_host_exec_run(args: argparse.Namespace) -> int:
+    import json
+
+    from chip.host_exec import ManifestAdapter
+
+    manifest_path = Path(args.manifest).expanduser() if args.manifest else Path("plugins") / "example" / "host-hooks.yaml"
+    # YAML is optional for engine callers; the shipped example is YAML.
+    try:
+        import yaml  # type: ignore[import-untyped]  # contract manifests are YAML; importer may not need it
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except ImportError:
+        print("host-exec: PyYAML is required to read the manifest (pip install pyyaml)", file=sys.stderr)
+        return 64
+    if not isinstance(manifest, dict):
+        print(f"host-exec: manifest is not an object: {manifest_path}", file=sys.stderr)
+        return 64
+    try:
+        adapter = ManifestAdapter(manifest)
+        result = adapter.run(args.hook)
+    except (ValueError, NotImplementedError) as exc:
+        print(f"host-exec: {exc}", file=sys.stderr)
+        return 64
+    detail = json.dumps(result.to_dict(), ensure_ascii=False) if args.json else (
+        f"host-exec: exit={result.exit} hook={result.hook} detail={result.detail} receipt={result.receipt_path}"
+    )
+    print(detail)
+    return result.exit
 
 
 def cmd_done_gate(args: argparse.Namespace) -> int:
