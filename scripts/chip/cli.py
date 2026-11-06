@@ -1015,7 +1015,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force public no-leak token scan (default on for systems/ and fixtures packs)",
     )
     pack_validate.add_argument("--json", action="store_true", help="Emit ValidationResult JSON")
+    pack_validate.add_argument(
+        "--repo-root",
+        default=None,
+        help=(
+            "Repository root for repo-anchored surfaces (systems/..., docs/...). "
+            "Required when validating an out-of-tree pack whose surfaces reference its own repo; "
+            "defaults to this checkout, which is wrong for foreign packs."
+        ),
+    )
     pack_validate.set_defaults(func=cmd_pack_validate)
+
+    pack_init = pack_sub.add_parser(
+        "init",
+        help="Scaffold a fresh pack from the generic validate-ok fixture (refuses overwrite)",
+    )
+    pack_init.add_argument(
+        "--pack-dir",
+        required=True,
+        help="Target pack directory to create (must not contain an existing system.json etc.)",
+    )
+    pack_init.add_argument("--force", action="store_true", help="Replace existing scaffold files on purpose")
+    pack_init.add_argument("--json", action="store_true")
+    pack_init.set_defaults(func=cmd_pack_init)
+
+    pack_conf = pack_sub.add_parser(
+        "conformance",
+        help="Same validator as validate, stricter: every surface must be documented contract",
+    )
+    pack_conf.add_argument(
+        "--pack", dest="pack_name", default=None, help="Pack name under systems/ (or CHIP_SYSTEM_PACK)"
+    )
+    pack_conf.add_argument("--pack-dir", default=None, help="Pack directory containing system.json")
+    pack_conf.add_argument("--repo-root", default=None, help="Repository root when validating an out-of-tree pack")
+    pack_conf.add_argument("--json", action="store_true")
+    pack_conf.set_defaults(func=cmd_pack_conformance)
 
     done_gate_p = sub.add_parser(
         "done-gate",
@@ -1049,7 +1083,40 @@ def cmd_pack_validate(args: argparse.Namespace) -> int:
     result = validate_pack(
         pack=getattr(args, "pack_name", None) or None,
         pack_dir=getattr(args, "pack_dir", None) or None,
+        root=Path(args.repo_root).expanduser().resolve() if getattr(args, "repo_root", None) else None,
         check_no_leak=True if getattr(args, "no_leak", False) else None,
+    )
+    print(format_result(result, as_json=bool(args.json)))
+    return 0 if result.ok else 2
+
+
+def cmd_pack_init(args: argparse.Namespace) -> int:
+    import json
+
+    from chip.pack_validate import init_pack
+
+    try:
+        created = init_pack(args.pack_dir, force=getattr(args, "force", False))
+    except (FileExistsError, FileNotFoundError) as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": f"{exc.__class__.__name__}: {exc}"}))
+        else:
+            print(f"pack init: {exc}", file=sys.stderr)
+        return 2
+    if getattr(args, "json", False):
+        print(json.dumps({"ok": True, "created": [str(p) for p in created]}))
+    else:
+        print(f"pack init: created {len(created)} file(s) under {Path(args.pack_dir).name}")
+    return 0
+
+
+def cmd_pack_conformance(args: argparse.Namespace) -> int:
+    from chip.pack_validate import conformance_check, format_result
+
+    result = conformance_check(
+        pack=getattr(args, "pack_name", None) or None,
+        pack_dir=getattr(args, "pack_dir", None) or None,
+        root=Path(args.repo_root).expanduser().resolve() if getattr(args, "repo_root", None) else None,
     )
     print(format_result(result, as_json=bool(args.json)))
     return 0 if result.ok else 2
