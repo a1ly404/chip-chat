@@ -304,7 +304,7 @@ def build_room_messages(
         _persona_system(persona),
         law.load_room_law(room),
         session_boot_prefix=boot,
-        learnings_block=learnings.render_learnings_block(persona),
+        learnings_block=learnings.advisory_learnings_for_turn(persona),
     )
     limit = config.room_history_limit(history_limit)
     history = store.load_room_history(room, limit=limit)
@@ -992,6 +992,31 @@ def build_parser() -> argparse.ArgumentParser:
     tf_bind.add_argument("--linear-anchor", dest="linear_anchor", default=None)
     tf_bind.set_defaults(func=cmd_taskflow)
 
+    pack_p = sub.add_parser("pack", help="System pack helpers (validate)")
+    pack_sub = pack_p.add_subparsers(dest="pack_cmd")
+    pack_validate = pack_sub.add_parser(
+        "validate",
+        help="Pass/fail check for a chip-system-pack/v0 manifest (surfaces, allowlists, no path escape)",
+    )
+    pack_validate.add_argument(
+        "--pack",
+        dest="pack_name",
+        default=None,
+        help="Pack name under systems/ (default: CHIP_SYSTEM_PACK / DEFAULT_PACK / acme-example)",
+    )
+    pack_validate.add_argument(
+        "--pack-dir",
+        default=None,
+        help="Absolute or relative path to a pack directory containing system.json (overrides --pack)",
+    )
+    pack_validate.add_argument(
+        "--no-leak",
+        action="store_true",
+        help="Force public no-leak token scan (default on for systems/ and fixtures packs)",
+    )
+    pack_validate.add_argument("--json", action="store_true", help="Emit ValidationResult JSON")
+    pack_validate.set_defaults(func=cmd_pack_validate)
+
     done_gate_p = sub.add_parser(
         "done-gate",
         help="Done-discipline gate: checked acceptance boxes must carry verified-as-of stamps (offline, no network). Always enforces Done discipline.",
@@ -1015,6 +1040,19 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_p.set_defaults(func=cmd_done_gate_sweep)
 
     return parser
+
+
+
+def cmd_pack_validate(args: argparse.Namespace) -> int:
+    from chip.pack_validate import format_result, validate_pack
+
+    result = validate_pack(
+        pack=getattr(args, "pack_name", None) or None,
+        pack_dir=getattr(args, "pack_dir", None) or None,
+        check_no_leak=True if getattr(args, "no_leak", False) else None,
+    )
+    print(format_result(result, as_json=bool(args.json)))
+    return 0 if result.ok else 2
 
 
 def cmd_done_gate(args: argparse.Namespace) -> int:

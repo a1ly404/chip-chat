@@ -1,0 +1,28 @@
+{
+  "schema": "chip-system-pack/v0",
+  "name": "validate-ok",
+  "description": "Minimal CI fixture pack for chip pack validate (not for production).",
+  "surfaces": {
+    "personas": "config/personas.json",
+    "models": "config/models.json",
+    "skill_bodies_dir": "skill-bodies"
+  },
+  "identity": {
+    "operator_discord_id": "000000000000000000",
+    "operator_name": "fixture-oncall"
+  },
+  "values": {
+    "default_data_dir_relative": ".local/share/chip-chat-fixture"
+  },
+  "allowlists": {
+    "service": ["fixture-api"],
+    "mock_specialists": ["dev"]
+  },
+  "secrets_key_names": [],
+  "env_aliases": {
+    "CHIP_CHAT_MOCK": ["CHIP_FIXTURE_MOCK"]
+  },
+  "cli_aliases": {
+    "fixture_room": "room"
+  }
+}

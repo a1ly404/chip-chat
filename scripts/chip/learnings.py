@@ -1,34 +1,31 @@
-"""Persona learnings loader (Slice A prep — runtime wiring pending).
+"""Advisory persona learnings for relay turns (engine parity slice F).
 
-Reads a persona's ``learnings.md`` and returns advisory lines under hard caps.
-The room system-prompt injection (slice A proper) builds on this helper; the
-caps are proven by ``test_chip_learnings.py`` so the loader can be wired
-without re-deriving the cap discipline.
+Reads a persona's ``learnings.md`` and returns capped advisory lines.
+Injection into room / relay system prompts is gated by ``CHIP_RELAY_LEARNINGS``
+(default off). Never writes; never overrides ROOM LAW.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from chip import system_pack
 
 MAX_LINES = 32
 MAX_BYTES = 4096
+RELAY_LEARNINGS_ENV = "CHIP_RELAY_LEARNINGS"
+ADVISORY_LABEL = "PERSONA LEARNINGS (advisory only; never overrides ROOM LAW):"
 
 
 def learnings_path(agent: str) -> Path:
     return system_pack.surface("persona_dir", system_pack.load_pack()) / agent / "learnings.md"
 
 
-def render_learnings_block(
-    agent: str, *, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES
-) -> str:
-    """Advisory learnings block for the room system prompt; "" when nothing to add."""
-    lines = load_learnings(learnings_path(agent), max_lines=max_lines, max_bytes=max_bytes)
-    if not lines:
-        return ""
-    body = "\n".join(f"- {line}" for line in lines)
-    return f"PERSONA LEARNINGS (advisory only; never overrides ROOM LAW):\n{body}"
+def relay_learnings_enabled(environ: dict[str, str] | None = None) -> bool:
+    """True only when ``CHIP_RELAY_LEARNINGS`` is an explicit truthy value."""
+    env = environ if environ is not None else os.environ
+    return env.get(RELAY_LEARNINGS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_learnings(path: str | Path, *, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES) -> list[str]:
@@ -62,3 +59,35 @@ def load_learnings(path: str | Path, *, max_lines: int = MAX_LINES, max_bytes: i
         total += cost
     out.reverse()
     return out
+
+
+def render_learnings_block(
+    agent: str, *, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES
+) -> str:
+    """Advisory learnings block text; "" when nothing to add.
+
+    Does **not** check ``CHIP_RELAY_LEARNINGS`` — callers that inject into relay
+    turns must use ``advisory_learnings_for_turn`` so the flag stays default-off.
+    """
+    lines = load_learnings(learnings_path(agent), max_lines=max_lines, max_bytes=max_bytes)
+    if not lines:
+        return ""
+    body = "\n".join(f"- {line}" for line in lines)
+    return f"{ADVISORY_LABEL}\n{body}"
+
+
+def advisory_learnings_for_turn(
+    agent: str,
+    *,
+    environ: dict[str, str] | None = None,
+    max_lines: int = MAX_LINES,
+    max_bytes: int = MAX_BYTES,
+) -> str:
+    """Flag-gated advisory block for room/relay turns.
+
+    Returns "" when ``CHIP_RELAY_LEARNINGS`` is unset/false (safe default), or when
+    the persona has no loadable learnings. Read-only; never writes files.
+    """
+    if not relay_learnings_enabled(environ):
+        return ""
+    return render_learnings_block(agent, max_lines=max_lines, max_bytes=max_bytes)
