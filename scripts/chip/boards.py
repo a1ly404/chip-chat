@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -10,7 +9,7 @@ import socket
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, IO, Iterator
 
 from chip import config
 from chip.lanes import decide
@@ -39,9 +38,38 @@ def board_path(room: str) -> Path:
 
 
 def lock_path(room: str) -> Path:
-    """Sidecar lock. Writers flock this file for the whole read-modify-write."""
+    """Sidecar lock. Writers hold an exclusive lock for the whole read-modify-write."""
     path = board_path(room)
     return path.with_name(path.name + ".lock")
+
+
+def _lock_exclusive(fh: IO[Any]) -> None:
+    """Exclusive lock on ``fh``. fcntl on POSIX; msvcrt on Windows."""
+    if os.name == "nt":
+        import msvcrt
+
+        fh.seek(0)
+        if fh.read(1) == "":
+            fh.write("0")
+            fh.flush()
+            fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock(fh: IO[Any]) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -50,11 +78,13 @@ def board_lock(room: str) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     fh = path.open("a+")
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        _lock_exclusive(fh)
         yield
     finally:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        fh.close()
+        try:
+            _unlock(fh)
+        finally:
+            fh.close()
 
 
 def _empty(room: str) -> dict[str, Any]:
@@ -136,7 +166,7 @@ def refresh(board: dict[str, Any], *, under_lock: bool = False) -> dict[str, Any
 def append_entry(board: dict[str, Any], *, actor: str, body: str) -> dict[str, Any]:
     room = str(board["room"])
     with board_lock(room):
-        # CAS: under the flock, a stale version reloads before the append.
+        # CAS: under the exclusive lock, a stale version reloads before the append.
         board = refresh(board, under_lock=True)
         version = int(board["version"]) + 1
         entry_id = f"h{version}"
