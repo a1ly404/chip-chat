@@ -168,7 +168,7 @@ def grounded_recipe_go(
                 recipe_id=recipe.id,
                 status="refused",
                 detail=detail,
-                next_hint="use shadow; mutating live needs a later slice + Ally GO",
+                next_hint="use shadow; mutating live needs a later slice + operator GO",
             ),
         )
 
@@ -209,3 +209,4 @@ def grounded_recipe_go(
         ),
         step_results=tuple(results),
     )
+
