@@ -55,13 +55,25 @@ def recent_turns(room: str, n: int = 20) -> list[dict]:
     return rows[-max(1, n) :]
 
 
+def _chip_cmd(extra: list[str]) -> list[str]:
+    """Same launch contract on every OS: the bash launcher on POSIX, the module
+    entrypoint elsewhere (Windows cannot exec a bash file directly)."""
+    if os.name == "posix" and os.access(str(LAUNCHER), os.X_OK):
+        return [str(LAUNCHER), *extra]
+    return [sys.executable, "-m", "chip", *extra]
+
+
 def send_via_cli(room: str, text: str) -> subprocess.CompletedProcess[str]:
-    cmd = [str(LAUNCHER), "room", room, "--once", text]
+    cmd = _chip_cmd(["room", room, "--once", text])
     if os.environ.get("CHIP_CHAT_UI_LIVE", "").strip().lower() not in ("1", "true", "yes"):
         cmd.append("--mock")
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONPATH", str(REPO / "scripts"))
     return subprocess.run(
         cmd,
         cwd=REPO,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
