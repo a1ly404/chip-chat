@@ -20,6 +20,29 @@ Persistence: one UTF-8 JSON file per job under
 a crash between steps cannot corrupt the ledger; ``recover()`` re-marks jobs
 caught ``running`` across a process restart as ``failed: timeout stale``.
 
+Bounded means bounded at the RECEIPT, not a kill switch: Python cannot
+terminate a thread, so once a runner overruns its deadline the abandon/reap
+cannot undo side effects it already performed. The fence therefore has three
+hard edges (and a documented limit):
+
+* the immune state machine: only ``run_once``/``cancel``/``recover`` write job
+  state, and they read the PERSISTED job (file reconciliation after a thread
+  joins) — a late-finishing runner cannot flip a ``failed: timeout`` receipt
+  back to ``done`` and cannot re-enter the queue (terminal states are never
+  claimed again; a second tick reaps nothing on the same job);
+* the runner sees a fenced COPY of the job envelope (its mutations do not
+  reach the worker's state machine; the returned string is the only detail);
+* the runner law, mirrored by the tests: jobs are non-mutating or explicitly
+  cooperative (poll ``worker.job(id)`` and stop on ``state == cancelled``);
+  a caller that captures the Worker and writes files from inside its thread
+  is not fenced (documented, not hidden).
+
+So a timed-out job's receipts say ``failed: timeout (wall clock)`` even when
+its thread finished late; side effects that a stalled runner already produced
+cannot be undone and must be risk-controlled at enqueue time (non-mutating
+kinds only, or cooperative cancel).
+
+
 Dedup: ``enqueue(dedup_key=...)`` returns the existing active job (queued or
 running) instead of queueing twice; finished jobs may share a key again.
 Cancellation: ``cancel(job_id)`` flips ``queued`` jobs to ``cancelled``;
@@ -274,20 +297,24 @@ class Worker:
                     continue
             deadline = float(job.get("timeout_s") or job_timeout_s(env))
             finished: dict[str, Any] = {}
+            # Fence: the runner gets a COPY of the envelope. Mutations inside
+            # the runner thread cannot reach the worker's state machine —
+            # recorded state upholds only the persisted/claimed writes the
+            # tick itself makes. A runner that captures the Worker itself can
+            # still write files (documented limit, not fenced).
+            view = dict(job)
 
-            def _run(job: dict[str, Any], finished: dict[str, Any]) -> None:
+            def _run(view: dict[str, Any], finished: dict[str, Any]) -> None:
                 try:
-                    finished["detail"] = str(self.runner(job) if self.runner else "no runner: noop")
+                    finished["detail"] = str(self.runner(view) if self.runner else "no runner: noop")
                 except Exception as exc:  # noqa: BLE001 — a failed job is a receipt
-                    job["state"] = "failed"
-                    job["error"] = exc.__class__.__name__
+                    finished["error"] = exc.__class__.__name__
                     finished["detail"] = f"error: {exc.__class__.__name__}"
 
-            thread = threading.Thread(target=_run, args=(job, finished), daemon=True, name=f"chip-worker-{job_id}")
+            thread = threading.Thread(target=_run, args=(view, finished), daemon=True, name=f"chip-worker-{job_id}")
             started_mono = self._now()
             thread.start()
             thread.join(timeout=deadline)
-            elapsed = self._now() - started_mono
             # Reconcile a file-level cancel (a runner may call cancel() mid-run):
             # the persisted terminal state wins over a stale in-memory one.
             fresh = self.job(job_id)
@@ -295,13 +322,15 @@ class Worker:
                 job["state"] = "failed"
                 job["error"] = "timeout (wall clock)"
                 out["failed"].append(job_id)
-                job["detail"] = "timeout (stalled runner abandoned: daemon thread)"
+                job["detail"] = "timeout (stalled runner abandoned: daemon thread; late completion ignored)"
             elif fresh and fresh.get("state") == "cancelled":
                 job["state"] = "cancelled"
                 out["cancelled"] += 1
-            elif job["state"] == "cancelled":
-                out["cancelled"] += 1
-            elif job["state"] == "failed":
+                if "detail" in finished:
+                    job["detail"] = f"cancelled: {finished['detail'][:400]}"
+            elif finished.get("error"):
+                job["state"] = "failed"
+                job["error"] = finished["error"]
                 out["failed"].append(job_id)
             else:
                 job["state"] = "done"
