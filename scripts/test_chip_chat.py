@@ -17,6 +17,7 @@ LAUNCHER = REPO / "bin" / "chip"
 def _run_chip(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged = os.environ.copy()
     merged["PYTHONPATH"] = str(REPO / "scripts")
+    merged.setdefault("PYTHONIOENCODING", "utf-8")  # Windows cp1252 consoles choke on box art else
     if env:
         merged.update(env)
     return subprocess.run(
@@ -583,10 +584,15 @@ def test_chip_ui_launcher_executable() -> None:
 def test_launcher_executable() -> None:
     assert LAUNCHER.is_file()
     with tempfile.TemporaryDirectory() as tmp:
+        if os.name == "posix" and os.access(str(LAUNCHER), os.X_OK):
+            cmd: list[str] = [str(LAUNCHER)]
+        else:
+            cmd = [sys.executable, "-m", "chip"]  # Windows cannot exec a bash file
         proc = subprocess.run(
-            [str(LAUNCHER), "ping", "--mock"],
+            [*cmd, "ping", "--mock"],
             cwd=REPO,
-            env={**os.environ, "CHIP_CHAT_DATA_DIR": tmp, "CHIP_CHAT_MOCK": "1"},
+            env={**os.environ, "CHIP_CHAT_DATA_DIR": tmp, "CHIP_CHAT_MOCK": "1",
+                 "PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(REPO / "scripts")},
             capture_output=True,
             text=True,
             check=False,

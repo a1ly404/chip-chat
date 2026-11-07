@@ -56,13 +56,14 @@ def test_known_task_types_list():
 def _shot(args_extra: list[str], data_dir, tmp_base) -> dict:
     import os
     import subprocess
-
     env = dict(os.environ)
     env["CHIP_CHAT_MOCK"] = "1"
     env["CHIP_CHAT_DATA_DIR"] = str(data_dir)
-    cmd = ["/bin/bash", str(Path(__file__).resolve().parents[1] / "bin" / "chip"),
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "scripts")
+    cmd = [sys.executable, "-m", "chip",
            "room", "demo", "-m", "ping", "--as", "chipchatdev", "--json"] + args_extra
-    out = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+    out = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True, env=env, timeout=60)
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
@@ -85,15 +86,19 @@ def test_cli_task_row_has_all_columns(tmp_path):
 
 
 def test_cli_task_less_row_unchanged_shape(tmp_path):
+    import os
     import subprocess
+    import sys
 
+    repo = Path(__file__).resolve().parents[1]
     data = tmp_path / "appdata2"
-    env = dict(__import__("os").environ)
+    env = dict(os.environ)
     env["CHIP_CHAT_MOCK"] = "1"
     env["CHIP_CHAT_DATA_DIR"] = str(data)
-    cmd = ["/bin/bash", str(Path(__file__).resolve().parents[1] / "bin" / "chip"),
+    env["PYTHONPATH"] = str(repo / "scripts")
+    cmd = [sys.executable, "-m", "chip",
            "room", "demo", "-m", "ping", "--as", "chipchatdev", "--json"]
-    out = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+    out = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, env=env, timeout=60)
     reply = json.loads(out.stdout.strip().splitlines()[-1])
     assert "task_ledger" not in reply
     thread = data / "threads" / "demo.jsonl"
