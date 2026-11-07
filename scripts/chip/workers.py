@@ -162,7 +162,17 @@ class Worker:
         path = self._path(job["id"])
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(job, ensure_ascii=False, default=str, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        # Windows rename can transiently fail when a reader holds the target
+        # (AV, CI watcher). One short retry keeps the write atomic-ish without
+        # masking a real failure.
+        for attempt in range(2):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt:
+                    raise
+                time.sleep(0.05)
 
     def job(self, job_id: str) -> dict[str, Any] | None:
         try:

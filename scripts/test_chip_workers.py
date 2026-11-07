@@ -160,3 +160,50 @@ def test_run_once_runs_at_most_max_active(tmp_path: Path) -> None:
     out = w.run_once()
     assert out["ran"] == 2  # hard bound per tick, remaining stay queued
     assert len(w.list_jobs(states={"queued"})) == 3
+
+
+# ---------------------------------------------------------------- fence (item 1 review)
+
+def test_late_completion_cannot_flip_the_timeout_receipt(tmp_path: Path) -> None:
+    """A runner finishing after the deadline is recorded, not re-run."""
+    w = Worker("late-q", data_dir=tmp_path, runner=lambda job: time.sleep(3) or "should not count",
+               environ={"CHIP_WORKER_TIMEOUT_S": "0.1"})
+    job_id, _ = w.enqueue("echo")
+    out = w.run_once()
+    assert out["failed"] == [job_id]
+    doc = w.job(job_id)
+    assert doc["state"] == "failed" and doc["error"] == "timeout (wall clock)"
+    # A later tick does NOT claim the terminal job again (duplicate-safe).
+    out2 = w.run_once()
+    assert out2["ran"] == 0
+    assert w.job(job_id)["error"] == "timeout (wall clock)"
+
+
+def test_runner_mutations_cannot_reach_the_state_machine(tmp_path: Path) -> None:
+    """The runner sees a fenced copy; only the tick writes state."""
+    def mutate_view(job) -> str:
+        job["state"] = "done"  # naive mutation attempt
+        return "runner says done"
+
+    w = Worker("fence-q", data_dir=tmp_path, runner=mutate_view)
+    job_id, _ = w.enqueue("echo")
+    out = w.run_once()
+    doc = w.job(job_id)
+    assert out["done"] == [job_id] and doc["state"] == "done"
+    assert doc["detail"] == "runner says done"  # detail flows, not state
+
+
+def test_cooperative_cancel_via_job_poll(tmp_path: Path) -> None:
+    """Runner law: cooperative runners poll worker.job(id) and stop at cancelled."""
+    def coop(job) -> str:
+        doc = w.job(job["id"])
+        if doc and doc["state"] == "cancelled":
+            return "stopped early"
+        w.cancel(job["id"])  # the call that fences step 2
+        return "cancelled instead of step 2"
+
+    w = Worker("coop-q", data_dir=tmp_path, runner=coop)
+    job_id, _ = w.enqueue("echo")
+    out = w.run_once()
+    assert out["cancelled"] == 1
+    assert w.job(job_id)["state"] == "cancelled"
