@@ -21,7 +21,16 @@ Fail-closed laws enforced here (all refusals are deterministic, never advisory):
   validity);
 - approvers must be external GO references; the names in
   ``CHIP_ACTION_AUTH_BOT_IDS`` (comma-separated operator identity list) are
-  refused as approvers at load time, so a bot approval can never exist.
+  refused as approvers at load time, so a bot approval can never exist;
+- records MAY carry a ``policy_version`` string and a ``job_id`` string. When
+  the operator pins ``CHIP_ACTION_AUTH_POLICY_VERSION`` in the environment,
+  a record with a different (or absent) policy version refuses at load: the
+  effective policy can only move by an operator changing the pinned
+  environment, never by editing a record;
+- ``CHIP_ACTION_AUTH_PM_ID`` names the authenticated PM principal id. A
+  record whose ``approver`` satisfies the same external-GO law as above may
+  cite that principal; the PM stays an approver of concrete jobs, not a
+  writer of policy: policy version and scope widening remain operator-pinned.
 
 The module creates NOTHING on its own: approval records are provisioned by the
 operator (configuration step, outside the runtime bot path) and only read here.
@@ -85,6 +94,8 @@ class ActionRecord:
     single_use: bool
     approver: str
     go_reference: str
+    policy_version: str = ""
+    job_id: str = ""
 
     @classmethod
     def from_file(cls, path: Path) -> "ActionRecord":
@@ -110,7 +121,21 @@ class ActionRecord:
             single_use=bool(raw["single_use"]),
             approver=str(raw["approver"]),
             go_reference=str(raw["go_reference"]),
+            policy_version=str(raw.get("policy_version", "")).strip(),
+            job_id=str(raw.get("job_id", "")).strip(),
         )
+
+
+def policy_version(environ: dict[str, str] | None = None) -> str:
+    """The operator-pinned policy version, or '' when unpinned."""
+    env = environ if environ is not None else os.environ
+    return str(env.get("CHIP_ACTION_AUTH_POLICY_VERSION", "")).strip()
+
+
+def pm_principal_id(environ: dict[str, str] | None = None) -> str:
+    """The authenticated PM principal id, or '' when the principal is not armed."""
+    env = environ if environ is not None else os.environ
+    return str(env.get("CHIP_ACTION_AUTH_PM_ID", "")).strip()
 
 
 def records_dir(environ: dict[str, str] | None = None) -> Path:
@@ -164,6 +189,15 @@ class ActionBroker:
             )
         if not record.go_reference.strip():
             raise AuthorizationRefused("self-approval", "empty go_reference")
+        # Policy pin (operator environment, read-only to the lane): when the
+        # operator pins a policy version, every record must name THAT version;
+        # widening scope is always an operator action, never a record edit.
+        pinned = policy_version(self.environ)
+        if pinned and record.policy_version != pinned:
+            raise AuthorizationRefused(
+                "policy-version-mismatch",
+                f"record {record.policy_version!r} != operator-pinned {pinned!r}",
+            )
         entry = state.get("records", {}).get(record_id, {})
         # Load-time expiry: an expired record never authorizes anything.
         if _now() >= _iso(record.expires_iso):
