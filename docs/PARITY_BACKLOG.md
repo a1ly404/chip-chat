@@ -16,7 +16,7 @@ Status legend: `done` / `partial` / `missing` / `blocked` / `in-progress`.
 
 ## Phase 1 — core assistant
 
-### P1.1 Scheduled routines with run history — `partial`
+### P1.1 Scheduled routines with run history — `done` (mock runner; real dispatch via P1.4)
 
 Evidence: `docs/examples/scheduler.crontab` (supercronic sample calling a `bin/chip-job` that is **not** in
 `bin/`); `scripts/chip/budget_mode.py` / `topology.py` mention schedules; no engine scheduler, no routine store,
