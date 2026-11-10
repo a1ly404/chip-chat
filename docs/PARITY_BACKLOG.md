@@ -101,6 +101,15 @@ run_pending with history rows; `kind=pm-tick` routines dispatched by `chip routi
 only). Follow-ups (P1.4d): routine path with the real model step, retry cost added to per-job spend,
 daily Discord summary of tick history, and enabling the flags in the live relay (deploy step).
 
+P1.4d — `done`: retry cost of a reasoning-starved attempt returned by `runtime.complete`
+(`runtime.retry_cost_usd`) and added to per-job spend; `chip routine run-due --via-jobs --model-step`
+runs routine and pm-tick jobs with the real model step; `scripts/chip/pm_summary.py` daily summary
+(jobs + why, PR links, refusals, spend, waiting-on-operator with `[[decision]]` lines) posted to a
+generic webhook (`CHIP_PM_SUMMARY_WEBHOOK`, optional decision ping webhook, once per day,
+`CHIP_PM_SUMMARY` default off), CLI `chip bgjob summary`, `kind=pm-summary` routines,
+`scripts/test_chip_pm_summary.py` (17 tests, fakes only). Remaining: enabling the flags in the live
+relay (deploy step).
+
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `missing`
 
 Evidence: none (only a word match in `scripts/chip/taskflow.py`).
@@ -199,7 +208,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 1. ~~P1.1 routines + run history~~ (done)
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
-4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick done; P1.4d summary/live enable later)
+4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick + P1.4d summary done; live enable is a deploy step)
 5. P1.5 MCP client + allowlist/approval levels
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search

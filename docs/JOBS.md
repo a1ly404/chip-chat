@@ -151,5 +151,41 @@ $ chip routine add pm --schedule every:15m --kind pm-tick
 $ CHIP_ROUTINES=1 CHIP_PM_TICK=1 CHIP_PICKER=1 CHIP_JOBS=1 chip routine run-due --via-jobs
 ```
 
-The routine path uses the mock step; `chip bgjob tick --model-step` (with `CHIP_JOBS_MODEL_STEP=1`)
-runs real model turns.
+The routine path uses the mock step unless `--model-step` is given:
+`chip routine run-due --via-jobs --model-step` (with `CHIP_JOBS_MODEL_STEP=1`) runs routine jobs and
+pm-tick jobs with real model turns; `chip bgjob tick --model-step` does the same for a one-off tick.
+
+## Retry cost (P1.4d)
+
+When `runtime.complete` retries a reasoning-starved reply, the discarded first attempt is already in
+the main spend ledger; its cost is now also returned on the payload (`runtime.RETRY_KEY`,
+`runtime.retry_cost_usd(payload)`), and the model step adds it to the job's spend. Rows in
+`bg_jobs_spend.jsonl` carry `retry_cost_usd`.
+
+## Daily PM summary (P1.4d)
+
+`chip bgjob summary [--date YYYY-MM-DD] [--json]` builds one local day (`CHIP_PM_SUMMARY_TZ`, IANA
+name, default `UTC`) from the job records, `pm_tick_history.jsonl` and `bg_jobs_spend.jsonl`:
+
+* **Jobs PM ran and why**: id, status/reason, source (`picker:alert:<id>`, `routine:<id>`, ...) and
+  the quoted input title.
+* **Changes**: pull-request links found in job outputs.
+* **Refusals**: budget/cap refusals and picker policy skips by reason (dedupe skips left out).
+* **Spend**: day total incl. retry cost, number of model hops.
+* **Waiting on you**: queued `mutate` jobs, job output lines starting with `[[decision]]` (the model
+  step's system prompt asks for this), and ticks skipped because the budget is stopped.
+
+`--post` sends it to the incoming webhook in `CHIP_PM_SUMMARY_WEBHOOK` (JSON `{"content": ...}`, all
+mentions disabled). If anything is waiting and `CHIP_PM_SUMMARY_PING_WEBHOOK` is set, a short
+one-line-per-decision ping goes there too; quiet days send no ping. `CHIP_PM_SUMMARY_LINK` (optional,
+`{date}` replaced) is appended to ping lines. Gated by `CHIP_PM_SUMMARY=1` (default off); a day posts
+once unless `--force` (state in `pm_summary_sent.json`).
+
+A routine with `kind=pm-summary` posts yesterday's summary (prompt `today` posts the current day) under
+`chip routine run-due --via-jobs`:
+
+```console
+$ chip bgjob summary --mock
+$ chip routine add daily-summary --schedule every:24h --kind pm-summary
+$ CHIP_ROUTINES=1 CHIP_JOBS=1 CHIP_PM_SUMMARY=1 CHIP_PM_SUMMARY_WEBHOOK=... chip routine run-due --via-jobs
+```

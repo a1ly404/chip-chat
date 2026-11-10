@@ -853,16 +853,29 @@ def cmd_routine(args: argparse.Namespace) -> int:
 
                 if not bg_jobs.enabled():
                     raise bg_jobs.JobsDisabled(f"{bg_jobs.FLAG} is not enabled; refusing --via-jobs")
-                runner = bg_jobs.routine_runner()
-                from chip import pm_tick
+                step = bg_jobs.mock_step
+                if getattr(args, "model_step", False):
+                    # Real model turn for routine jobs and pm-tick jobs (CHIP_JOBS_MODEL_STEP=1).
+                    from chip import bg_model_step
+
+                    step = bg_model_step.make_model_step(use_mock=True if getattr(args, "mock", False) else None)
+                runner = bg_jobs.routine_runner(step=step)
+                from chip import pm_summary, pm_tick
 
                 # kind=pm-tick routines run the PM tick (live inputs -> pick -> run); needs CHIP_PM_TICK=1.
-                runner = pm_tick.routine_dispatch(runner, make_tick=lambda: _pm_tick_once(None))
+                runner = pm_tick.routine_dispatch(runner, make_tick=lambda: _pm_tick_once(None, step=step))
+                # kind=pm-summary routines post the daily summary; needs CHIP_PM_SUMMARY=1 + webhook env.
+                runner = pm_summary.routine_dispatch(runner)
             rows = routines.tick(now, runner)
             print(json.dumps(rows, ensure_ascii=False))
         else:  # pragma: no cover - argparse enforces choices
             return 64
     except (routines.RoutinesDisabled, JobsDisabledError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 3
+    except RuntimeError as exc:  # ModelStepDisabled from --model-step
+        if type(exc).__name__ != "ModelStepDisabled":
+            raise
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
     except (ValueError, FileExistsError, FileNotFoundError) as exc:
@@ -871,14 +884,14 @@ def cmd_routine(args: argparse.Namespace) -> int:
     return 0
 
 
-def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False) -> dict:
-    """Build adapters from args/env and run one PM tick (mock step unless --model-step)."""
+def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False, step=None) -> dict:
+    """Build adapters from args/env and run one PM tick (mock step unless --model-step or ``step``)."""
     from datetime import datetime, timezone
     from pathlib import Path
 
     from chip import bg_jobs, bg_picker, pm_tick
 
-    step = bg_jobs.mock_step
+    step = step or bg_jobs.mock_step
     if args is not None and getattr(args, "model_step", False):
         from chip import bg_model_step
 
@@ -945,13 +958,24 @@ def cmd_bgjob(args: argparse.Namespace) -> int:
             print(json.dumps(bg_picker.pick(items, now=now, dry_run=args.dry_run), ensure_ascii=False))
         elif sub == "tick":
             print(json.dumps(_pm_tick_once(args, dry_run=args.dry_run), ensure_ascii=False))
+        elif sub == "summary":
+            from datetime import date as _date
+
+            from chip import pm_summary
+
+            day = _date.fromisoformat(args.date) if args.date else now.astimezone(pm_summary.zone()).date()
+            if args.post:
+                print(json.dumps(pm_summary.post(day, force=args.force), ensure_ascii=False))
+            else:
+                summary = pm_summary.build(day)
+                print(json.dumps(summary, ensure_ascii=False) if args.json else pm_summary.render(summary))
         else:  # pragma: no cover - argparse enforces choices
             return 64
     except bg_jobs.JobsDisabled as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
     except RuntimeError as exc:  # ModelStepDisabled / PickerDisabled
-        if type(exc).__name__ not in {"ModelStepDisabled", "PickerDisabled", "PmTickDisabled"}:
+        if type(exc).__name__ not in {"ModelStepDisabled", "PickerDisabled", "PmTickDisabled", "SummaryDisabled"}:
             raise
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
@@ -1100,6 +1124,9 @@ def build_parser() -> argparse.ArgumentParser:
     r_due.add_argument(
         "--via-jobs", action="store_true", help="Dispatch each due routine as a capped background job (needs CHIP_JOBS=1)"
     )
+    r_due.add_argument(
+        "--model-step", action="store_true", help="With --via-jobs: run jobs with the real model step (CHIP_JOBS_MODEL_STEP=1)"
+    )
     routine_p.set_defaults(func=cmd_routine)
 
     bg_p = sub.add_parser("bgjob", help="Background agent jobs with hop/spend/daily/concurrency caps (CHIP_JOBS gates run)")
@@ -1132,6 +1159,13 @@ def build_parser() -> argparse.ArgumentParser:
     bg_tick.add_argument("--linear-input", default=None, help="Extra picker inputs (JSON list / JSONL) instead of a live poll")
     bg_tick.add_argument("--model-step", action="store_true", help="Run jobs with the real model step (CHIP_JOBS_MODEL_STEP=1)")
     bg_tick.add_argument("--dry-run", action="store_true", help="Show picks; writes nothing (cursor included)")
+    bg_sum = bg_sub.add_parser(
+        "summary", parents=[common], help="Daily PM summary: jobs + why, PR links, refusals, spend, waiting (CHIP_PM_SUMMARY gates --post)"
+    )
+    bg_sum.add_argument("--date", default=None, help="Local day YYYY-MM-DD (default today in CHIP_PM_SUMMARY_TZ)")
+    bg_sum.add_argument("--json", action="store_true", help="Print the summary dict instead of the message")
+    bg_sum.add_argument("--post", action="store_true", help="Post to CHIP_PM_SUMMARY_WEBHOOK (+ ping webhook if decisions wait)")
+    bg_sum.add_argument("--force", action="store_true", help="Post even if this day was already sent")
     bg_p.set_defaults(func=cmd_bgjob)
 
     memory_p = sub.add_parser("memory", help="Durable memory: remember/forget with provenance, user/room scopes")
