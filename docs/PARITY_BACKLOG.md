@@ -110,7 +110,7 @@ generic webhook (`CHIP_PM_SUMMARY_WEBHOOK`, optional decision ping webhook, once
 `scripts/test_chip_pm_summary.py` (17 tests, fakes only). Remaining: enabling the flags in the live
 relay (deploy step).
 
-### P1.5 MCP connector support with allowlist + per-tool approval levels — `partial` (slice 1 done)
+### P1.5 MCP connector support with allowlist + per-tool approval levels — `partial` (slices 1–2 done)
 
 Slice 1 (done): `scripts/chip/mcp_client.py` stdio client (initialize + `notifications/initialized`,
 paginated `tools/list`, `tools/call`), per-server allowlist in `mcp/servers.json`, per-tool level
@@ -120,8 +120,17 @@ env with `$NAME` references, every decision audited to `mcp/audit.jsonl` (argume
 malformed output / exit / timeout fail closed. CLI `chip mcp servers|tools|call|pending|approve|reject|audit`,
 docs/MCP.md, `scripts/test_chip_mcp.py` (22 tests, in-repo fake stdio server). `CHIP_MCP` default off.
 
-Remaining (slice 2): let model turns / background jobs use allowlisted `auto` tools (tool planner +
-receipts), route `ask` calls to the approval queue / PM summary, optional HTTP transport.
+Slice 2 (done): `scripts/chip/mcp_tools.py` tool planner (offered auto/ask tools from config,
+`[[mcp <server> <tool> {json}]]` call lines, max 3 per reply, receipts in `mcp/receipts.jsonl` with
+argument hash only, results framed as data), wired into the background-job model step (receipts on the
+hop record, a calling hop never ends the job, `params.mcp_max_rounds` default 2 / hard 5,
+`params.mcp_tools: false` opt-out), `ask` calls queue approvals that show in the PM summary's waiting
+section and decision ping, an approved identical call uses its approval once, PM summary counts MCP
+receipts. CLI `chip mcp offered|receipts`. `scripts/test_chip_mcp_tools.py` (16 tests, fake stdio
+server). Still behind `CHIP_MCP` (default off).
+
+Remaining (slice 3): call `plan_turn` from the relay chat turn (with receipts in chat), optional
+HTTP/SSE transport.
 
 ## Phase 2 — tools
 
@@ -211,7 +220,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
 4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick + P1.4d summary done; live enable is a deploy step)
-5. ~~P1.5 MCP client + allowlist/approval levels~~ (slice 1 done; slice 2 = turn/job wiring)
+5. ~~P1.5 MCP client + allowlist/approval levels~~ (slices 1–2 done; slice 3 = relay chat-turn wiring, HTTP transport)
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
 8. P2.2 files/attachments

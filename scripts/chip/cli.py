@@ -1085,6 +1085,15 @@ def cmd_mcp(args: argparse.Namespace) -> int:
             print(json.dumps(mc.read_audit(args.limit), ensure_ascii=False))
         elif sub == "pending":
             print(json.dumps(mc.pending_approvals(), ensure_ascii=False))
+        elif sub == "offered":
+            from chip import mcp_tools
+
+            tools = mcp_tools.offered_tools()
+            print(json.dumps({"enabled": mc.enabled(), "tools": tools, "prompt": mcp_tools.planner_prompt(tools)}, ensure_ascii=False))
+        elif sub == "receipts":
+            from chip import mcp_tools
+
+            print(json.dumps(mcp_tools.read_receipts(args.limit), ensure_ascii=False))
         elif sub in {"approve", "reject"}:
             rec = mc.decide_approval(args.approval_id, by=args.by, approve=sub == "approve")
             print(json.dumps(rec, ensure_ascii=False))
@@ -1269,6 +1278,9 @@ def build_parser() -> argparse.ArgumentParser:
         mc_dec = mcp_sub.add_parser(verb, parents=[common], help=f"{verb.title()} a pending call (not by its requester)")
         mc_dec.add_argument("approval_id")
         mc_dec.add_argument("--by", required=True)
+    mcp_sub.add_parser("offered", parents=[common], help="Tools offered to model turns / jobs (auto + ask) and the planner prompt")
+    mc_rec = mcp_sub.add_parser("receipts", parents=[common], help="Show recent tool-call receipts from turns and jobs")
+    mc_rec.add_argument("--limit", type=int, default=50)
     mc_audit = mcp_sub.add_parser("audit", parents=[common], help="Show recent audit rows")
     mc_audit.add_argument("--limit", type=int, default=50)
     mcp_p.set_defaults(func=cmd_mcp)
