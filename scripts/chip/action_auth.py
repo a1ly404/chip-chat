@@ -78,7 +78,9 @@ def sha256_bytes(raw: bytes) -> str:
 
 def args_digest(args: dict[str, Any]) -> str:
     """Canonical argument digest: sorted keys, compact separators, UTF-8."""
-    canonical = json.dumps(args, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    canonical = json.dumps(
+        args, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return sha256_bytes(canonical.encode("utf-8"))
 
 
@@ -101,15 +103,29 @@ class ActionRecord:
     def from_file(cls, path: Path) -> "ActionRecord":
         raw = json.loads(path.read_text(encoding="utf-8"))
         for field in (
-            "record_id", "artifact_sha256", "args_digest", "arg_keys", "target",
-            "execution_identity", "expires_iso", "single_use", "approver", "go_reference",
+            "record_id",
+            "artifact_sha256",
+            "args_digest",
+            "arg_keys",
+            "target",
+            "execution_identity",
+            "expires_iso",
+            "single_use",
+            "approver",
+            "go_reference",
         ):
             if field not in raw:
-                raise AuthorizationRefused("malformed-record", f"{path.name} missing {field}")
+                raise AuthorizationRefused(
+                    "malformed-record", f"{path.name} missing {field}"
+                )
         if not re.fullmatch(r"[0-9a-f]{64}", raw["artifact_sha256"]):
-            raise AuthorizationRefused("malformed-record", f"{path.name} artifact_sha256 shape")
+            raise AuthorizationRefused(
+                "malformed-record", f"{path.name} artifact_sha256 shape"
+            )
         if not re.fullmatch(r"[0-9a-f]{64}", raw["args_digest"]):
-            raise AuthorizationRefused("malformed-record", f"{path.name} args_digest shape")
+            raise AuthorizationRefused(
+                "malformed-record", f"{path.name} args_digest shape"
+            )
         return cls(
             record_id=str(raw["record_id"]),
             artifact_sha256=str(raw["artifact_sha256"]),
@@ -144,13 +160,31 @@ def records_dir(environ: dict[str, str] | None = None) -> Path:
     return Path(raw) if raw else data_dir() / DIRNAME
 
 
+def state_dir(environ: dict[str, str] | None = None) -> Path:
+    """The consumable execution-state directory (writes land here, ONLY here).
+
+    Default: the records dir (unchanged behavior). When the operator sets
+    CHIP_ACTION_AUTH_STATE_DIR, the single-use consume/executed bookkeeping
+    lives there instead — this is the boundary that lets a consumer hold the
+    records store READ-ONLY (records = pre-provisioned approvals written by
+    a separate provisioning identity) while still consuming records.
+    """
+    env = environ if environ is not None else os.environ
+    raw = str(env.get("CHIP_ACTION_AUTH_STATE_DIR", "")).strip()
+    return Path(raw) if raw else records_dir(environ)
+
+
 def status_path(environ: dict[str, str] | None = None) -> Path:
-    return records_dir(environ) / "consumed_state.json"
+    return state_dir(environ) / "consumed_state.json"
 
 
 def _bot_ids(environ: dict[str, str] | None = None) -> set[str]:
     env = environ if environ is not None else os.environ
-    return {x.strip() for x in env.get("CHIP_ACTION_AUTH_BOT_IDS", "").split(",") if x.strip()}
+    return {
+        x.strip()
+        for x in env.get("CHIP_ACTION_AUTH_BOT_IDS", "").split(",")
+        if x.strip()
+    }
 
 
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -202,7 +236,11 @@ class ActionBroker:
         # Load-time expiry: an expired record never authorizes anything.
         if _now() >= _iso(record.expires_iso):
             raise AuthorizationRefused("expired", record.expires_iso)
-        if record.single_use and entry.get("consumed_ts") and not entry.get("executed_ts"):
+        if (
+            record.single_use
+            and entry.get("consumed_ts")
+            and not entry.get("executed_ts")
+        ):
             raise AuthorizationRefused(
                 "consumed-uncertain",
                 "record consumed without a verified execution result; fresh approval required",
@@ -221,8 +259,11 @@ class ActionBroker:
         state = self._state()
         entry = state["records"].setdefault(record.record_id, {})
         if entry.get("consumed_ts") and record.single_use:
-            raise AuthorizationRefused("replayed", f"{record.record_id} consumed concurrently")
+            raise AuthorizationRefused(
+                "replayed", f"{record.record_id} consumed concurrently"
+            )
         entry["consumed_ts"] = _now().isoformat()
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(self.state_path, state)
 
     def mark_executed(self, record: ActionRecord, exit_code: int) -> None:
@@ -230,6 +271,7 @@ class ActionBroker:
         entry = state["records"].setdefault(record.record_id, {})
         entry["executed_ts"] = _now().isoformat()
         entry["exit_code"] = int(exit_code)
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(self.state_path, state)
 
     # -- authorization -----------------------------------------------------
@@ -258,7 +300,9 @@ class ActionBroker:
         if args_digest(args) != record.args_digest:
             raise AuthorizationRefused("args-drift", record_id)
         if target != record.target:
-            raise AuthorizationRefused("target-mismatch", f"{target!r} != {record.target!r}")
+            raise AuthorizationRefused(
+                "target-mismatch", f"{target!r} != {record.target!r}"
+            )
         if identity != record.execution_identity:
             raise AuthorizationRefused(
                 "identity-mismatch", f"{identity!r} != {record.execution_identity!r}"
@@ -274,7 +318,5 @@ class ActionBroker:
             if record_ids is not None and rid not in record_ids:
                 continue
             if entry.get("consumed_ts") and not entry.get("executed_ts"):
-                out.append(
-                    {"record_id": rid, "status": "consumed-uncertain", **entry}
-                )
+                out.append({"record_id": rid, "status": "consumed-uncertain", **entry})
         return out

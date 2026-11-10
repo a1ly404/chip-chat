@@ -33,14 +33,20 @@ def _record_yaml(tmp_path: Path, **overrides) -> dict:
     valid_until = datetime.now(timezone.utc) + timedelta(hours=1)
     rec = {
         "record_id": overrides.get("record_id", "rec-1"),
-        "artifact_sha256": overrides.get("artifact_sha256", hashlib.sha256(ARTIFACT).hexdigest()),
-        "args_digest": overrides.get("args_digest", aa.args_digest({"container": "wave-canary"})),
+        "artifact_sha256": overrides.get(
+            "artifact_sha256", hashlib.sha256(ARTIFACT).hexdigest()
+        ),
+        "args_digest": overrides.get(
+            "args_digest", aa.args_digest({"container": "wave-canary"})
+        ),
         "arg_keys": overrides.get("arg_keys", ["container"]),
         "target": overrides.get("target", "wave-canary"),
         "execution_identity": overrides.get("execution_identity", "homelab-executor"),
         "expires_iso": overrides.get("expires_iso", valid_until.isoformat()),
         "single_use": overrides.get("single_use", True),
-        "approver": overrides.get("approver", "Ally (GO 2026-11-07 reply, live-wave GO)"),
+        "approver": overrides.get(
+            "approver", "Ally (GO 2026-11-07 reply, live-wave GO)"
+        ),
         "go_reference": overrides.get("go_reference", "ALLY-GO-live-wave-2026-11-07"),
     }
     if "policy_version" in overrides:
@@ -86,7 +92,10 @@ def test_authorize_consume_before_return(tmp_path):
     rec = _authorize(env)
     assert rec.record_id == "rec-1"
     state = json.loads((tmp_path / "action_auth" / "consumed_state.json").read_text())
-    assert "consumed_ts" in state["records"]["rec-1"] and "executed_ts" not in state["records"]["rec-1"]
+    assert (
+        "consumed_ts" in state["records"]["rec-1"]
+        and "executed_ts" not in state["records"]["rec-1"]
+    )
 
 
 def test_unknown_record_refuses(tmp_path):
@@ -98,7 +107,10 @@ def test_unknown_record_refuses(tmp_path):
 
 def test_expired_record_refuses(tmp_path):
     env = _env(tmp_path)
-    _record_yaml(tmp_path, expires_iso=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+    _record_yaml(
+        tmp_path,
+        expires_iso=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    )
     with pytest.raises(aa.AuthorizationRefused) as err:
         _authorize(env)
     assert err.value.code == "expired"
@@ -177,8 +189,13 @@ def test_crash_reconcile_reports_consumed_uncertain(tmp_path):
     broker.consume(broker.load_record("rec-1")[0])
     # process crash simulation: consumed, never marked executed
     rows = aa.ActionBroker(environ=env).reconcile(["rec-1"])
-    assert rows == [{"record_id": "rec-1", "status": "consumed-uncertain",
-                     "consumed_ts": rows[0]["consumed_ts"]}]
+    assert rows == [
+        {
+            "record_id": "rec-1",
+            "status": "consumed-uncertain",
+            "consumed_ts": rows[0]["consumed_ts"],
+        }
+    ]
     with pytest.raises(aa.AuthorizationRefused) as err:
         aa.ActionBroker(environ=env).load_record("rec-1")
     assert err.value.code == "consumed-uncertain"
@@ -242,11 +259,48 @@ def test_pm_principal_cannot_shield_bot_approver(tmp_path):
         "CHIP_ACTION_AUTH_POLICY_VERSION": "PM-JOBS-R1",
     }
     _record_yaml(tmp_path, approver="pm-principal", policy_version="PM-JOBS-R1")
-    assert aa.ActionBroker(environ=env).load_record("rec-1")[0].approver == "pm-principal"
-    _record_yaml(tmp_path, approver="dev-bot", record_id="rec-2", policy_version="PM-JOBS-R1")
+    assert (
+        aa.ActionBroker(environ=env).load_record("rec-1")[0].approver == "pm-principal"
+    )
+    _record_yaml(
+        tmp_path, approver="dev-bot", record_id="rec-2", policy_version="PM-JOBS-R1"
+    )
     with pytest.raises(aa.AuthorizationRefused) as err:
         aa.ActionBroker(environ=env).load_record("rec-2")
     assert err.value.code == "self-approval"
+
+
+# --- state-dir split (records read-only vs consume state) --------------------
+
+
+def test_state_dir_split_keeps_records_readonly(tmp_path):
+    """The operator splits the stores: records pre-provisioned elsewhere
+    (read-only for the consumer), consume state in its own writable dir."""
+    records = tmp_path / "authority" / "records"
+    state = tmp_path / "data" / "pm_state"
+    env = {**_env(tmp_path), "CHIP_ACTION_AUTH_DIR": str(records)}
+    env["CHIP_ACTION_AUTH_STATE_DIR"] = str(state)
+    _record_yaml(tmp_path)  # writes under tmp_path/"action_auth"
+    # place the record under the records dir directly
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "rec-1.json").write_text(
+        (tmp_path / "action_auth" / "rec-1.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    broker = aa.ActionBroker(environ=env)
+    rec, _entry = broker.load_record("rec-1")
+    broker.consume(rec)  # consumed state MUST land in the STATE dir
+    st_path = state / "consumed_state.json"
+    assert st_path.is_file()
+    assert not (records / "consumed_state.json").exists()  # records dir untouched
+    state = json.loads(st_path.read_text(encoding="utf-8"))
+    assert state["records"]["rec-1"]["consumed_ts"]
+
+
+def test_state_dir_absent_falls_back(tmp_path):
+    env = _env(tmp_path)
+    _record_yaml(tmp_path)
+    assert aa.state_dir(env) == aa.records_dir(env) == Path(env["CHIP_ACTION_AUTH_DIR"])
 
 
 def test_non_single_use_record_reusable(tmp_path):
@@ -257,7 +311,8 @@ def test_non_single_use_record_reusable(tmp_path):
     broker.consume(broker.load_record("rec-1")[0])  # idempotent while not single_use
     assert rec["single_use"] is False
     assert json.loads((tmp_path / "action_auth" / "consumed_state.json").read_text())[
-        "records"]["rec-1"]["consumed_ts"]
+        "records"
+    ]["rec-1"]["consumed_ts"]
 
 
 def test_executed_record_replay_refuses(tmp_path):
