@@ -896,11 +896,28 @@ def cmd_bgjob(args: argparse.Namespace) -> int:
         elif sub == "caps":
             print(json.dumps({"enabled": bg_jobs.enabled(), "caps": bg_jobs.caps(), "today": bg_jobs.daily_usage(now)}))
         elif sub == "run":
-            # Offline mock step only; a real model step is wired by callers, never by this CLI.
-            print(json.dumps(bg_jobs.run_pending(now, bg_jobs.mock_step), ensure_ascii=False))
+            step = bg_jobs.mock_step
+            if getattr(args, "model_step", False):
+                # Real model turn (CHIP_JOBS_MODEL_STEP=1): spend guard, thrift/stop rules, ledger rows.
+                from chip import bg_model_step
+
+                step = bg_model_step.make_model_step(use_mock=True if args.mock else None)
+            print(json.dumps(bg_jobs.run_pending(now, step), ensure_ascii=False))
+        elif sub == "pick":
+            from pathlib import Path
+
+            from chip import bg_picker
+
+            items = bg_picker.read_items(Path(args.input))
+            print(json.dumps(bg_picker.pick(items, now=now, dry_run=args.dry_run), ensure_ascii=False))
         else:  # pragma: no cover - argparse enforces choices
             return 64
     except bg_jobs.JobsDisabled as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 3
+    except RuntimeError as exc:  # ModelStepDisabled / PickerDisabled
+        if type(exc).__name__ not in {"ModelStepDisabled", "PickerDisabled"}:
+            raise
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
     except (ValueError, FileExistsError, FileNotFoundError) as exc:
@@ -1065,7 +1082,13 @@ def build_parser() -> argparse.ArgumentParser:
         bp = bg_sub.add_parser(name, parents=[common], help=f"{name.capitalize()} a background job")
         bp.add_argument("job_id")
     bg_sub.add_parser("caps", parents=[common], help="Effective caps and today's usage")
-    bg_sub.add_parser("run", parents=[common], help="Run startable queued jobs once (mock step; needs CHIP_JOBS=1)")
+    bg_run = bg_sub.add_parser("run", parents=[common], help="Run startable queued jobs once (mock step; needs CHIP_JOBS=1)")
+    bg_run.add_argument(
+        "--model-step", action="store_true", help="Use the real model-turn step (needs CHIP_JOBS_MODEL_STEP=1)"
+    )
+    bg_pick = bg_sub.add_parser("pick", parents=[common], help="PM picker: enqueue read jobs from alerts/Linear inputs (CHIP_PICKER=1)")
+    bg_pick.add_argument("--input", required=True, help="JSON list or JSONL of {kind, id, title, ...}")
+    bg_pick.add_argument("--dry-run", action="store_true", help="Show what would be enqueued; writes nothing")
     bg_p.set_defaults(func=cmd_bgjob)
 
     memory_p = sub.add_parser("memory", help="Durable memory: remember/forget with provenance, user/room scopes")

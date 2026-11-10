@@ -68,3 +68,50 @@ $ chip bgjob caps --mock
 {"enabled": false, "caps": {...}, "today": {"day": "...", "started": 1, "spent_usd": 0.0, "reserved_usd": 0.0}}
 $ CHIP_ROUTINES=1 CHIP_JOBS=1 chip routine run-due --via-jobs --mock
 ```
+
+## Real model-turn step (P1.4b)
+
+Module: `scripts/chip/bg_model_step.py`. `make_model_step()` returns a step that runs one chat
+completion per hop through `chip.runtime.complete`, so live hops get the existing monthly spend
+guard (hard stop at `CHIP_SPEND_CAP_USD`, default $5), the thrift downgrade, and rows in the main
+spend ledger. Each hop also appends a per-job row to `CHIP_CHAT_DATA_DIR/bg_jobs_spend.jsonl`
+(`job_id`, `hop`, `model`, `cost_usd`, `cost_source`, `budget_mode`, `mock`).
+
+| budget mode | read job | mutate job |
+| --- | --- | --- |
+| normal | runs | runs |
+| thrift | runs (thrift model, short answers) | refused before the call (`step error: BudgetRefused`) |
+| stopped | refused | refused |
+
+Off by default: building the step needs `CHIP_JOBS_MODEL_STEP=1` (plus `CHIP_JOBS=1` to run).
+Jobs are single-turn unless `params.single_turn` is false; multi-hop jobs finish when the reply
+contains `[[done]]`, else the hop cap ends them. All existing per-job hop/spend and daily caps
+still apply. Offline (`--mock` / `CHIP_CHAT_MOCK=1`) never calls OpenRouter and records $0.
+
+## PM job picker (P1.4b)
+
+Module: `scripts/chip/bg_picker.py`. Turns normalized alert / Linear inputs into **read-only**
+background jobs so PM can queue investigation work on its own:
+
+```json
+{"kind": "alert", "id": "disk-01", "title": "Disk 95%", "severity": "critical", "detail": "..."}
+{"kind": "linear", "id": "ABC-12", "title": "Flaky CI", "labels": ["chip-job"], "state": "Todo"}
+```
+
+Policy (`CHIP_CHAT_DATA_DIR/bg_picker_policy.json`, unknown keys ignored): `alert_severities`
+(default critical, warning), `linear_labels` (default `chip-job`), `linear_closed_states`,
+`daily_max` (`CHIP_PICKER_DAILY_MAX`, default 10, hard max 100), `job_max_spend_usd` and
+`job_max_hops` (default 1), both clamped to the bg_jobs ceilings.
+
+Fixed rules: picked jobs are always `mode=read`; one job per input per UTC day; no new job while
+an earlier one for the same input is queued or running; input text is quoted as data in the
+prompt. Enqueueing needs `CHIP_PICKER=1`; `--dry-run` works with it off and writes nothing.
+
+```console
+$ chip bgjob pick --input alerts.jsonl --dry-run --mock
+$ CHIP_PICKER=1 chip bgjob pick --input alerts.jsonl --mock
+$ CHIP_JOBS=1 CHIP_JOBS_MODEL_STEP=1 chip bgjob run --model-step --mock
+```
+
+Not yet: fetching inputs from the live alert stream / Linear (callers pass files or dicts), and
+any mutating or host-executor job from the picker.

@@ -85,6 +85,14 @@ spend caps (pre- and post-hop), daily job + spend caps with running-job reservat
 model-turn step (budget-mode aware, spend ledger rows) and a PM job picker that enqueues from alerts/Linear
 within policy.
 
+P1.4b slice 1 — `done`: `scripts/chip/bg_model_step.py` (real model step via `runtime.complete`: spend guard,
+thrift/stop rules — mutate refused in thrift, everything refused at the cap — per-job rows in
+`bg_jobs_spend.jsonl`; `CHIP_JOBS_MODEL_STEP` default off) and `scripts/chip/bg_picker.py` (policy-driven
+read-only picks from alert/Linear inputs, per-day dedupe, daily pick cap; `CHIP_PICKER` default off), CLI
+`chip bgjob pick` and `chip bgjob run --model-step`, `scripts/test_chip_bg_model_step.py` (21 tests, fakes
+only). P1.4c: live input adapters (alert stream + Linear poll) feeding the picker, and a scheduled PM tick
+(routine) that runs pick → run_pending.
+
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `missing`
 
 Evidence: none (only a word match in `scripts/chip/taskflow.py`).
@@ -183,7 +191,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 1. ~~P1.1 routines + run history~~ (done)
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
-4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b real step later)
+4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 done; P1.4c live input adapters next)
 5. P1.5 MCP client + allowlist/approval levels
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
