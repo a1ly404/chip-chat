@@ -88,7 +88,9 @@ def authorize_execute(
 
     from chip import system_pack
 
-    cli_label = system_pack.pack_identity_string("human_cli_speaker", default="operator-cli")
+    cli_label = system_pack.pack_identity_string(
+        "human_cli_speaker", default="operator-cli"
+    )
     effective_speaker = speaker or (cli_label if is_human_or_inject else "")
     return authorize_mod.authorize(
         effective_speaker,
@@ -126,16 +128,40 @@ def build_argv(spec: ToolSpec, extra_args: Sequence[str]) -> list[str]:
         raise ToolNotAllowedError(
             f"tool {spec.id!r} does not accept extra arguments (allowlist argv only)"
         )
-    return list(spec.argv) + extras
+    argv = list(spec.argv) + extras
+    # Cross-platform interpreter alias: manifests written for the Linux/venv
+    # convention (bare python3) cannot resolve reliably on Windows where
+    # PATH usually only reaches a Microsoft Store alias (a stub that exits
+    # 9009). Substitution fires when the alias resolves INSIDE WindowsApps OR
+    # when nothing resolves at all: we then use the RUNNING interpreter (a
+    # deliberate alias, not a search of wider PATH).
+    import shutil
+    import sys
+
+    if argv and argv[0] in ("python3", "python"):
+        resolved = shutil.which(argv[0])
+        if resolved is None or "windowsapps" in str(Path(resolved)).lower():
+            argv = [sys.executable, *argv[1:]]
+    return argv
 
 
 _PM_GIT = {
-    "git-add": ToolSpec("git-add", ("git", "add", "--"), "low", True, "git add inside the pm root"),
-    "git-commit": ToolSpec("git-commit", ("git", "commit", "-m"), "low", True, "git commit inside the pm root"),
+    "git-add": ToolSpec(
+        "git-add", ("git", "add", "--"), "low", True, "git add inside the pm root"
+    ),
+    "git-commit": ToolSpec(
+        "git-commit",
+        ("git", "commit", "-m"),
+        "low",
+        True,
+        "git commit inside the pm root",
+    ),
 }
 
 
-def _confine_pm_git(speaker: str, spec: ToolSpec, extra_args: Sequence[str], workdir: Path) -> None:
+def _confine_pm_git(
+    speaker: str, spec: ToolSpec, extra_args: Sequence[str], workdir: Path
+) -> None:
     root = lanes.persona_root(speaker)
     if root is None:
         raise ToolNotAllowedError(f"{speaker} git tool requires a lane root")
@@ -178,9 +204,16 @@ def run(
     """
     allow = lanes.persona_tool_allow(speaker)
     if allow is not None and tool_name not in allow:
-        raise ToolNotAllowedError(f"tool {tool_name!r} is outside the {speaker} allowlist")
+        raise ToolNotAllowedError(
+            f"tool {tool_name!r} is outside the {speaker} allowlist"
+        )
     spec = resolve_tool(tool_name)
-    if spec is None and tool_name in _PM_GIT and allow is not None and tool_name in allow:
+    if (
+        spec is None
+        and tool_name in _PM_GIT
+        and allow is not None
+        and tool_name in allow
+    ):
         spec = _PM_GIT[tool_name]
     if spec is None:
         raise NeedToolError(tool_name)
@@ -219,7 +252,9 @@ def run(
         )
         _learn(-1, denied)
         raise ToolGatedError(denied)
-    timeout = timeout_seconds if timeout_seconds is not None else default_timeout_seconds()
+    timeout = (
+        timeout_seconds if timeout_seconds is not None else default_timeout_seconds()
+    )
     allowed = execution_allowed(execute=execute)
 
     base_audit: dict[str, Any] = {
@@ -280,7 +315,14 @@ def run(
                 risk=spec.risk,
                 cwd=str(workdir),
             )
-            append_audit({**base_audit, **result.to_dict(), "gated": True, "authz_refused": reason})
+            append_audit(
+                {
+                    **base_audit,
+                    **result.to_dict(),
+                    "gated": True,
+                    "authz_refused": reason,
+                }
+            )
             _learn(result.exit_code, result.stderr)
             return result
 
@@ -302,7 +344,9 @@ def run(
         exit_code = -9
         stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
         stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
-        stderr = (stderr + "\n").strip() + f"timed out after {timeout}s (process killed)"
+        stderr = (
+            stderr + "\n"
+        ).strip() + f"timed out after {timeout}s (process killed)"
     except OSError as exc:
         timed_out = False
         exit_code = 127
