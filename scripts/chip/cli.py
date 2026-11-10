@@ -854,6 +854,10 @@ def cmd_routine(args: argparse.Namespace) -> int:
                 if not bg_jobs.enabled():
                     raise bg_jobs.JobsDisabled(f"{bg_jobs.FLAG} is not enabled; refusing --via-jobs")
                 runner = bg_jobs.routine_runner()
+                from chip import pm_tick
+
+                # kind=pm-tick routines run the PM tick (live inputs -> pick -> run); needs CHIP_PM_TICK=1.
+                runner = pm_tick.routine_dispatch(runner, make_tick=lambda: _pm_tick_once(None))
             rows = routines.tick(now, runner)
             print(json.dumps(rows, ensure_ascii=False))
         else:  # pragma: no cover - argparse enforces choices
@@ -865,6 +869,35 @@ def cmd_routine(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     return 0
+
+
+def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False) -> dict:
+    """Build adapters from args/env and run one PM tick (mock step unless --model-step)."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from chip import bg_jobs, bg_picker, pm_tick
+
+    step = bg_jobs.mock_step
+    if args is not None and getattr(args, "model_step", False):
+        from chip import bg_model_step
+
+        step = bg_model_step.make_model_step(use_mock=True if getattr(args, "mock", False) else None)
+    alerts = None
+    if not (args is not None and getattr(args, "no_alerts", False)):
+        raw = getattr(args, "alerts", None) if args is not None else None
+        alerts = pm_tick.AlertStream(Path(raw) if raw else pm_tick.default_alerts_path())
+    extra: list = []
+    if args is not None and getattr(args, "linear_input", None):
+        extra = bg_picker.read_items(Path(args.linear_input))
+    return pm_tick.tick(
+        datetime.now(timezone.utc),
+        alerts=alerts,
+        linear=pm_tick.linear_client_from_env(),
+        extra_items=extra,
+        step=step,
+        dry_run=dry_run,
+    )
 
 
 def cmd_bgjob(args: argparse.Namespace) -> int:
@@ -910,13 +943,15 @@ def cmd_bgjob(args: argparse.Namespace) -> int:
 
             items = bg_picker.read_items(Path(args.input))
             print(json.dumps(bg_picker.pick(items, now=now, dry_run=args.dry_run), ensure_ascii=False))
+        elif sub == "tick":
+            print(json.dumps(_pm_tick_once(args, dry_run=args.dry_run), ensure_ascii=False))
         else:  # pragma: no cover - argparse enforces choices
             return 64
     except bg_jobs.JobsDisabled as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
     except RuntimeError as exc:  # ModelStepDisabled / PickerDisabled
-        if type(exc).__name__ not in {"ModelStepDisabled", "PickerDisabled"}:
+        if type(exc).__name__ not in {"ModelStepDisabled", "PickerDisabled", "PmTickDisabled"}:
             raise
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
@@ -1089,6 +1124,14 @@ def build_parser() -> argparse.ArgumentParser:
     bg_pick = bg_sub.add_parser("pick", parents=[common], help="PM picker: enqueue read jobs from alerts/Linear inputs (CHIP_PICKER=1)")
     bg_pick.add_argument("--input", required=True, help="JSON list or JSONL of {kind, id, title, ...}")
     bg_pick.add_argument("--dry-run", action="store_true", help="Show what would be enqueued; writes nothing")
+    bg_tick = bg_sub.add_parser(
+        "tick", parents=[common], help="PM tick: alert stream + Linear poll -> pick -> run (CHIP_PM_TICK=1)"
+    )
+    bg_tick.add_argument("--alerts", default=None, help="Alert JSONL path (default CHIP_PM_ALERTS_PATH or relay dispatch log)")
+    bg_tick.add_argument("--no-alerts", action="store_true", help="Skip the alert stream adapter")
+    bg_tick.add_argument("--linear-input", default=None, help="Extra picker inputs (JSON list / JSONL) instead of a live poll")
+    bg_tick.add_argument("--model-step", action="store_true", help="Run jobs with the real model step (CHIP_JOBS_MODEL_STEP=1)")
+    bg_tick.add_argument("--dry-run", action="store_true", help="Show picks; writes nothing (cursor included)")
     bg_p.set_defaults(func=cmd_bgjob)
 
     memory_p = sub.add_parser("memory", help="Durable memory: remember/forget with provenance, user/room scopes")

@@ -93,6 +93,14 @@ read-only picks from alert/Linear inputs, per-day dedupe, daily pick cap; `CHIP_
 only). P1.4c: live input adapters (alert stream + Linear poll) feeding the picker, and a scheduled PM tick
 (routine) that runs pick → run_pending.
 
+P1.4c — `done`: `scripts/chip/pm_tick.py` (alert-stream adapter with a persisted byte cursor over the
+relay's `monitoring_dispatch.jsonl` or any JSONL path; Linear poll adapter via an injected client plus a
+small read-only GraphQL client behind `CHIP_PM_LINEAR`; `tick()` = recover → budget check → pick →
+run_pending with history rows; `kind=pm-tick` routines dispatched by `chip routine run-due --via-jobs`;
+`CHIP_PM_TICK` default off), CLI `chip bgjob tick`, `scripts/test_chip_pm_tick.py` (20 tests, fakes
+only). Follow-ups (P1.4d): routine path with the real model step, retry cost added to per-job spend,
+daily Discord summary of tick history, and enabling the flags in the live relay (deploy step).
+
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `missing`
 
 Evidence: none (only a word match in `scripts/chip/taskflow.py`).
@@ -191,7 +199,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 1. ~~P1.1 routines + run history~~ (done)
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
-4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 done; P1.4c live input adapters next)
+4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick done; P1.4d summary/live enable later)
 5. P1.5 MCP client + allowlist/approval levels
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
