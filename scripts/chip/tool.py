@@ -126,7 +126,21 @@ def build_argv(spec: ToolSpec, extra_args: Sequence[str]) -> list[str]:
         raise ToolNotAllowedError(
             f"tool {spec.id!r} does not accept extra arguments (allowlist argv only)"
         )
-    return list(spec.argv) + extras
+    argv = list(spec.argv) + extras
+    # Cross-platform interpreter alias: manifests written for the Linux/venv
+    # convention (bare python3) cannot resolve reliably on Windows where
+    # PATH usually only reaches a Microsoft Store alias (a stub that exits
+    # 9009). Substitution fires when the alias resolves INSIDE WindowsApps OR
+    # when nothing resolves at all: we then use the RUNNING interpreter (a
+    # deliberate alias, not a search of wider PATH).
+    import shutil
+    import sys
+
+    if argv and argv[0] in ("python3", "python"):
+        resolved = shutil.which(argv[0])
+        if resolved is None or "windowsapps" in str(Path(resolved)).lower():
+            argv = [sys.executable, *argv[1:]]
+    return argv
 
 
 _PM_GIT = {
