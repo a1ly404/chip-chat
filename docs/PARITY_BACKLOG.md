@@ -65,7 +65,7 @@ Done-test: `scripts/test_chip_skills.py` — parse front-matter; invalid skill s
 pack + user dirs (user cannot shadow pack id without explicit override flag); select by trigger; turn
 injection respects budget; CLI `chip skill list|show|add`.
 
-### P1.4 General background workers with hop/spend caps — `partial`
+### P1.4 General background workers with hop/spend caps — `done` (mock step; real model step is P1.4b)
 
 Evidence: `scripts/chip/workers.py` (bounded post-turn queue: active/timeout/depth caps, spend guard, restart
 recovery) with `scripts/test_chip_workers.py`; relay delegate hop cap in `scripts/chip_relay/delegate.py`.
@@ -77,6 +77,13 @@ job, and no CLI to enqueue/inspect.
 Done-test: `scripts/test_chip_workers_agent.py` — agent job kind runs a mock turn loop bounded by
 `max_hops`; exceeding hops → `failed: hop cap`; per-job spend ceiling enforced before each hop; receipts list
 hops and spend; CLI `chip worker enqueue|list|show` mock transcript.
+
+Shipped: `scripts/chip/bg_jobs.py`, `chip bgjob enqueue|list|show|cancel|caps|run`,
+`chip routine run-due --via-jobs`, `docs/JOBS.md`, `scripts/test_chip_bg_jobs.py` (25 tests): per-job hop and
+spend caps (pre- and post-hop), daily job + spend caps with running-job reservation, parallel read jobs up to
+`CHIP_JOBS_READ_CONCURRENCY`, mutating jobs serialized, `CHIP_JOBS` default off. Follow-up P1.4b: a real
+model-turn step (budget-mode aware, spend ledger rows) and a PM job picker that enqueues from alerts/Linear
+within policy.
 
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `missing`
 
@@ -175,8 +182,8 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 
 1. ~~P1.1 routines + run history~~ (done)
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
-3. P1.3 skills catalog
-4. P1.4 background agent jobs with hop/spend caps
+3. ~~P1.3 skills catalog~~ (done)
+4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b real step later)
 5. P1.5 MCP client + allowlist/approval levels
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
