@@ -48,7 +48,10 @@ recall budget respected. CLI `chip memory add|list|search|forget` mock transcrip
 Shipped: `scripts/chip/memory_store.py`, `docs/MEMORY.md`, 19 tests. Follow-up (P1.2b): inject recall for
 user + current room into turns when `CHIP_MEMORY=1`, and agent-proposed memories that need confirmation.
 
-### P1.3 Reusable skills catalog — `partial`
+### P1.3 Reusable skills catalog — `done`
+
+Shipped: `scripts/chip/skills.py`, `chip skill list|show|search|add|delete`, `docs/SKILLS.md`,
+`scripts/test_chip_skills.py`. Turn injection behind `CHIP_SKILLS` (default off) is follow-up P1.3b.
 
 Evidence: pack surface `skill_bodies_dir` (`scripts/chip/system_pack.py`, `scripts/chip/pack_validate.py`),
 `systems/acme-example/skill-bodies/checkout-latency.md`, `monitoring_skills.json`; plan
