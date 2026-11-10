@@ -819,6 +819,46 @@ def cmd_board_append(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_routine(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from chip import routines
+
+    now = datetime.now(timezone.utc)
+    sub = args.routine_cmd
+    try:
+        if sub == "add":
+            doc = routines.add(
+                args.routine_id, schedule=args.schedule, kind=args.kind, prompt=args.prompt or "", now=now
+            )
+            print(json.dumps(doc, ensure_ascii=False))
+        elif sub == "list":
+            print(json.dumps(routines.list_all(), ensure_ascii=False))
+        elif sub in ("enable", "disable"):
+            doc = routines.set_enabled(args.routine_id, sub == "enable", now=now)
+            print(f"routine {doc['id']} enabled={doc['enabled']} next_run={doc['next_run']}")
+        elif sub == "delete":
+            if not routines.delete(args.routine_id):
+                print(f"ERROR: no routine: {args.routine_id}", file=sys.stderr)
+                return 1
+            print(f"routine {args.routine_id} deleted (history kept)")
+        elif sub == "history":
+            print(json.dumps(routines.history(args.routine_id, limit=args.limit), ensure_ascii=False))
+        elif sub == "run-due":
+            # Only the offline mock runner is wired here; real dispatch lands with background jobs.
+            rows = routines.tick(now, routines.mock_runner)
+            print(json.dumps(rows, ensure_ascii=False))
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except routines.RoutinesDisabled as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 3
+    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -851,6 +891,23 @@ def build_parser() -> argparse.ArgumentParser:
     job_list.add_argument("room")
     job_list.add_argument("--status", default=None, help="Filter by status")
     job_list.set_defaults(func=cmd_job_list)
+
+    routine_p = sub.add_parser("routine", help="Scheduled routines + run history (CHIP_ROUTINES gates run-due)")
+    routine_sub = routine_p.add_subparsers(dest="routine_cmd", required=True)
+    r_add = routine_sub.add_parser("add", parents=[common], help="Add a routine")
+    r_add.add_argument("routine_id")
+    r_add.add_argument("--schedule", required=True, help="every:<N><s|m|h|d> or 'cron:<min hour dom month dow>' (UTC)")
+    r_add.add_argument("--kind", required=True, help="Job kind the runner dispatches")
+    r_add.add_argument("--prompt", default="")
+    routine_sub.add_parser("list", parents=[common], help="List routines")
+    for name in ("enable", "disable", "delete"):
+        rp = routine_sub.add_parser(name, parents=[common], help=f"{name.capitalize()} a routine")
+        rp.add_argument("routine_id")
+    r_hist = routine_sub.add_parser("history", parents=[common], help="Show run history (JSONL rows)")
+    r_hist.add_argument("routine_id")
+    r_hist.add_argument("--limit", type=int, default=None)
+    routine_sub.add_parser("run-due", parents=[common], help="Run due routines once (mock runner; needs CHIP_ROUTINES=1)")
+    routine_p.set_defaults(func=cmd_routine)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)
