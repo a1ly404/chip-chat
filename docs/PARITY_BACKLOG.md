@@ -31,7 +31,7 @@ Done-test: `scripts/test_chip_routines.py` — create/list/enable/disable/delete
 tick dispatches via injected runner (mock) and appends run history; runner error → `failed` row; flag
 `CHIP_ROUTINES=0` default → tick refuses. CLI: `chip routine add|list|run-due|history` mock transcript.
 
-### P1.2 Durable memory and recall — `partial`
+### P1.2 Durable memory and recall — `done` (store + CLI; turn injection behind `CHIP_MEMORY` is a follow-up)
 
 Evidence: `scripts/chip/mempalace.py` (per room/agent JSONL, regex extraction, keyword `select_top_k`,
 `format_recall_block`), `scripts/chip/learnings.py` (advisory, read-only), tests
@@ -44,6 +44,9 @@ CLI to list/search, and caps on stored size.
 Done-test: `scripts/test_chip_memory_store.py` — remember → recall round-trip across scopes; forget by id
 removes from recall; supersede keeps newest; size cap evicts oldest; secret-shaped text refused on write;
 recall budget respected. CLI `chip memory add|list|search|forget` mock transcript.
+
+Shipped: `scripts/chip/memory_store.py`, `docs/MEMORY.md`, 19 tests. Follow-up (P1.2b): inject recall for
+user + current room into turns when `CHIP_MEMORY=1`, and agent-proposed memories that need confirmation.
 
 ### P1.3 Reusable skills catalog — `partial`
 
@@ -167,8 +170,8 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 
 ## Ranked order (next unblocked first)
 
-1. P1.1 routines + run history
-2. P1.2 memory remember/forget/scopes
+1. ~~P1.1 routines + run history~~ (done)
+2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. P1.3 skills catalog
 4. P1.4 background agent jobs with hop/spend caps
 5. P1.5 MCP client + allowlist/approval levels
