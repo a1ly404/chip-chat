@@ -19,6 +19,15 @@ path (``use_mock=True`` or ``CHIP_CHAT_MOCK=1``) never calls OpenRouter and reco
 Done rule: ``params.single_turn`` (default true) finishes after one hop; multi-hop jobs set
 ``single_turn: false`` and finish when the reply contains :data:`DONE_MARKER`; otherwise the
 job's hop cap ends it.
+
+MCP tools (parity P1.5 slice 2): when ``CHIP_MCP=1`` and ``mcp/servers.json`` allowlists tools at
+level ``auto`` or ``ask``, the system prompt lists them (see :mod:`chip.mcp_tools`) unless the job
+sets ``params.mcp_tools: false``. Call lines in a reply run through the normal MCP policy gate as
+requester ``bgjob:<id>``; the hop returns their receipts (stored on the hop record) and the next hop
+receives the results as data. A hop that made calls is never the final hop, so the model always sees
+its results; ``params.mcp_max_rounds`` (default 2, hard 5) caps tool rounds per job, after which
+further call lines are refused without running. ``ask`` tools queue an approval and come back
+``pending``; they show up in the PM summary's "Waiting on you" section.
 """
 
 from __future__ import annotations
@@ -27,7 +36,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
-from chip import budget_mode, config, spend
+from chip import budget_mode, config, mcp_tools, spend
 from chip.bg_jobs import Step
 from chip.config import data_dir
 from chip.store import append_jsonl
@@ -65,12 +74,25 @@ def ledger_path():
     return data_dir() / "bg_jobs_spend.jsonl"
 
 
-def build_messages(job: Mapping[str, Any], prior: list[Mapping[str, Any]]) -> list[dict[str, str]]:
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": str(job["prompt"])}]
+def build_messages(
+    job: Mapping[str, Any], prior: list[Mapping[str, Any]], *, tools: list[Mapping[str, str]] | None = None
+) -> list[dict[str, str]]:
+    system = SYSTEM_PROMPT
+    block = mcp_tools.planner_prompt(list(tools or []))
+    if block:
+        system = f"{SYSTEM_PROMPT}\n\n{block}"
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": str(job["prompt"])}]
     for h in prior:
         msgs.append({"role": "assistant", "content": str(h.get("output", ""))})
-        msgs.append({"role": "user", "content": f"Continue. Reply with {DONE_MARKER} when finished."})
+        results = mcp_tools.render_results(list(h.get("receipts") or []))
+        follow = f"Continue. Reply with {DONE_MARKER} when finished."
+        msgs.append({"role": "user", "content": f"{results}\n\n{follow}" if results else follow})
     return msgs
+
+
+def _tool_rounds(prior: list[Mapping[str, Any]]) -> int:
+    """Prior hops in which at least one MCP call went through the policy gate."""
+    return sum(1 for h in prior if any("args_sha256" in r for r in (h.get("receipts") or [])))
 
 
 def budget_block(job: Mapping[str, Any], env: Mapping[str, str] | None = None) -> str | None:
@@ -89,6 +111,8 @@ def make_model_step(
     complete: Completer | None = None,
     env: Mapping[str, str] | None = None,
     clock: Callable[[], datetime] | None = None,
+    mcp_caller: mcp_tools.Caller | None = None,
+    mcp_config: Any = None,
 ) -> Step:
     """Build the real step. Refuses unless ``CHIP_JOBS_MODEL_STEP`` is on."""
     if not enabled(env):
@@ -111,8 +135,13 @@ def make_model_step(
             max_tokens = DEFAULT_MAX_TOKENS
         max_tokens = min(max(16, max_tokens), HARD_MAX_TOKENS)
         command = f"bgjob:{job['id']}:{hop}"
+        tools = (
+            mcp_tools.offered_tools(config=mcp_config, env=env)
+            if params.get("mcp_tools", True) is not False
+            else []
+        )
         text, payload, routed, _ledger = complete(
-            build_messages(job, prior),
+            build_messages(job, prior, tools=tools),
             model=params.get("model") or None,
             max_tokens=max_tokens,
             use_mock=mock,
@@ -145,7 +174,23 @@ def make_model_step(
         )
         single = params.get("single_turn", True)
         done = bool(single) or DONE_MARKER in (text or "")
-        return {"output": (text or "").replace(DONE_MARKER, "").strip(), "spend_usd": float(cost), "done": done}
+        out: dict[str, Any] = {"output": (text or "").replace(DONE_MARKER, "").strip(), "spend_usd": float(cost), "done": done}
+        if tools:
+            if mcp_tools.parse_calls(text or "")[0] and _tool_rounds(prior) >= mcp_tools.clamp_rounds(params.get("mcp_max_rounds")):
+                planned = mcp_tools.plan_turn(
+                    text or "", requested_by=f"bgjob:{job['id']}", config=mcp_config, refuse_reason="tool round cap"
+                )
+                receipts = planned["receipts"]
+            else:
+                planned = mcp_tools.plan_turn(
+                    text or "", requested_by=f"bgjob:{job['id']}", tools=tools, config=mcp_config, caller=mcp_caller
+                )
+                receipts = planned["receipts"]
+                if any("args_sha256" in r for r in receipts):
+                    out["done"] = False  # the model must see its results before the job can finish
+            if receipts:
+                out["receipts"] = receipts
+        return out
 
     return _step
 

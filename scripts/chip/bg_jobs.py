@@ -267,6 +267,26 @@ def select(
 # ------------------------------------------------------------------ execution
 
 
+MAX_RECEIPTS_PER_HOP = 10
+_RECEIPT_KEYS = ("server", "tool", "status", "reason", "approval_id", "is_error", "excerpt", "args_sha256", "ms")
+
+
+def _clean_receipts(raw: Any) -> list[dict[str, Any]]:
+    """Tool receipts a step reported for one hop: known keys only, bounded size."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for r in raw[:MAX_RECEIPTS_PER_HOP]:
+        if not isinstance(r, dict):
+            continue
+        row = {k: r[k] for k in _RECEIPT_KEYS if k in r}
+        for k, v in list(row.items()):
+            if isinstance(v, str):
+                row[k] = v[:1500]
+        out.append(row)
+    return out
+
+
 def run_job(job: dict[str, Any], step: Step, *, clock: Callable[[], datetime]) -> dict[str, Any]:
     """Run one claimed job's bounded loop; persists and returns the final record."""
     hops: list[dict[str, Any]] = list(job.get("hops") or [])
@@ -281,12 +301,16 @@ def run_job(job: dict[str, Any], step: Step, *, clock: Callable[[], datetime]) -
             hop_spend = max(0.0, float(res.get("spend_usd", 0.0) or 0.0))
             out = str(res.get("output", ""))[:2000]
             done = bool(res.get("done"))
+            receipts = _clean_receipts(res.get("receipts"))
         except Exception as exc:  # step errors fail the job, never raise
             hops.append({"hop": i, "at": _iso(clock()), "output": "", "spend_usd": 0.0, "error": f"{type(exc).__name__}: {exc}"[:500]})
             status, reason = "failed", f"step error: {type(exc).__name__}"
             break
         spend = round(spend + hop_spend, 9)
-        hops.append({"hop": i, "at": _iso(clock()), "output": out, "spend_usd": hop_spend})
+        hop_rec: dict[str, Any] = {"hop": i, "at": _iso(clock()), "output": out, "spend_usd": hop_spend}
+        if receipts:
+            hop_rec["receipts"] = receipts
+        hops.append(hop_rec)
         if spend > float(job["max_spend_usd"]) + 1e-9:
             status, reason = "failed", "spend cap"
             break

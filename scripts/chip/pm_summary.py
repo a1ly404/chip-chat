@@ -11,7 +11,9 @@
   reasoning-starved attempts (``retry_cost_usd``), and the number of model hops.
 * ``waiting`` — items that need a human decision: queued ``mutate`` jobs (the PM never runs those on
   its own), job outputs carrying a line that starts with :data:`DECISION_MARKER`, and ticks skipped
-  because the monthly budget is stopped.
+  because the monthly budget is stopped, plus pending MCP approvals (``ask``-level tool calls queued by
+  jobs or turns; see :mod:`chip.mcp_tools`).
+* ``mcp`` — MCP tool receipts for the day counted by status (ok / pending / refused / error).
 
 :func:`render` turns that into one chat message (Discord-style markdown, capped length).
 :func:`render_ping` returns a short one-line-per-decision message, or ``None`` on quiet days.
@@ -40,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chip import bg_jobs
+from chip import bg_jobs, mcp_tools
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_SUMMARY"
@@ -197,6 +199,12 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         refusals["tick: budget stopped"] += stopped
         waiting.append(f"monthly budget is stopped: PM skipped {stopped} tick(s); raise the cap or wait for the reset")
 
+    waiting += mcp_tools.pending_waiting()
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    mcp_counts = mcp_tools.day_counts(start.strftime(fmt), end.strftime(fmt))
+    if mcp_counts.get("refused"):
+        refusals["mcp: tool call refused"] += mcp_counts["refused"]
+
     spend_rows = [r for r in _jsonl(data_dir() / "bg_jobs_spend.jsonl") if _in(r.get("ts"), start, end)]
     total = sum(float(r.get("cost_usd") or 0.0) for r in spend_rows)
     retry = sum(float(r.get("retry_cost_usd") or 0.0) for r in spend_rows)
@@ -209,6 +217,7 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         "refusals": dict(sorted(refusals.items())),
         "spend": {"usd": round(total, 6), "retry_usd": round(retry, 6), "hops": len(spend_rows)},
         "waiting": waiting,
+        "mcp": dict(sorted(mcp_counts.items())),
     }
 
 
@@ -228,7 +237,12 @@ def render(summary: Mapping[str, Any]) -> str:
         f"**PM daily summary {summary.get('date')}** ({summary.get('tz')})",
         f"ticks {summary.get('ticks', 0)} · jobs {len(jobs)} ({ok} ok) · spend ${float(sp.get('usd', 0)):.4f}"
         + (f" (retries ${float(sp.get('retry_usd', 0)):.4f})" if sp.get("retry_usd") else "")
-        + f" over {sp.get('hops', 0)} model hops",
+        + f" over {sp.get('hops', 0)} model hops"
+        + (
+            " · MCP " + ", ".join(f"{k} {v}" for k, v in (summary.get("mcp") or {}).items())
+            if summary.get("mcp")
+            else ""
+        ),
         "",
         "**Jobs PM ran and why**",
     ]

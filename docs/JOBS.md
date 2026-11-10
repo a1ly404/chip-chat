@@ -189,3 +189,9 @@ $ chip bgjob summary --mock
 $ chip routine add daily-summary --schedule every:24h --kind pm-summary
 $ CHIP_ROUTINES=1 CHIP_JOBS=1 CHIP_PM_SUMMARY=1 CHIP_PM_SUMMARY_WEBHOOK=... chip routine run-due --via-jobs
 ```
+
+## MCP tools in jobs (P1.5 slice 2)
+
+With `CHIP_MCP=1`, the model step offers allowlisted `auto`/`ask` MCP tools to jobs (opt out with
+`params.mcp_tools: false`; `params.mcp_max_rounds` default 2, hard 5). Receipts are stored on each hop
+record and pending `ask` approvals appear in the PM summary. See docs/MCP.md.

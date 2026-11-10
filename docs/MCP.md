@@ -74,7 +74,44 @@ chip mcp audit --limit 20
 
 Exit codes: 0 ok, 1 protocol error, 2 refused / bad input, 3 `CHIP_MCP` off, 4 pending approval.
 
+## Model turns and background jobs (slice 2)
+
+`scripts/chip/mcp_tools.py` is the tool planner. It never widens policy: every call still goes
+through `mcp_client.call` (allowlist, level, advertised check, approvals, audit).
+
+* **Offered tools.** `offered_tools()` lists allowlisted tools at level `auto` or `ask` from
+  `servers.json` (no subprocess). `deny` / unknown levels are never offered. Empty when `CHIP_MCP` is off.
+* **Planner prompt.** `planner_prompt()` adds a short block to the system prompt. The model asks for a
+  tool with one line per call:
+
+  ```text
+  [[mcp notes search {"q": "deploy"}]]
+  ```
+
+  At most 3 calls per reply. Malformed lines, non-object arguments, extra calls and tools that were not
+  offered become `refused` receipts and never run.
+* **Receipts.** `run_calls()` / `plan_turn()` return one receipt per call: `ok` (with a text excerpt
+  clipped to 1500 chars), `pending` (an `ask` tool queued an approval; nothing ran), `refused` or
+  `error`. Receipts are appended to `mcp/receipts.jsonl` with the requester, the argument hash and the
+  excerpt size, never the arguments or the result. `render_results()` frames results for the next turn
+  as data, not instructions.
+* **Background jobs.** With `CHIP_MCP=1` the model step (`bg_model_step`) offers the tools to every job
+  unless the job sets `params.mcp_tools: false`. Calls run as requester `bgjob:<id>`. The hop record
+  stores its receipts (max 10, bounded strings). A hop that made calls is never the last one, so the
+  model always sees its results; `params.mcp_max_rounds` (default 2, hard 5) caps tool rounds per job,
+  after which call lines are refused with `tool round cap`.
+* **Ask → approval queue → PM summary.** An `ask` call queues a single-use approval bound to the exact
+  arguments. Pending approvals show in the PM daily summary under **Waiting on you** (and in the
+  decision ping). After someone other than the requester approves (`chip mcp approve <id> --by <you>`),
+  the next identical call (same server, tool and arguments) from any turn or job uses it once.
+  The summary also counts the day's MCP receipts by status; refused calls count as refusals.
+* **Model turns.** `plan_turn(reply, requested_by=...)` is the entry point for any turn loop: it strips
+  call lines from the reply, runs the calls and returns `{"text", "receipts", "results"}`.
+
+CLI: `chip mcp offered` (tools + planner prompt), `chip mcp receipts --limit N`.
+
 ## Not yet
 
-Model turns do not call MCP tools yet (slice 2: expose allowlisted `auto` tools to the tool planner
-and background jobs, with `ask` routed to the approval queue). HTTP/SSE transport is later.
+The relay's chat turn does not call `plan_turn` yet (engine hook is ready; wiring is a later slice).
+Resuming a specific job automatically after its `ask` call is approved is not automatic: the approval
+is used by the next identical call. HTTP/SSE transport is later.
