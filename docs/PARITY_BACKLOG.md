@@ -110,16 +110,18 @@ generic webhook (`CHIP_PM_SUMMARY_WEBHOOK`, optional decision ping webhook, once
 `scripts/test_chip_pm_summary.py` (17 tests, fakes only). Remaining: enabling the flags in the live
 relay (deploy step).
 
-### P1.5 MCP connector support with allowlist + per-tool approval levels — `missing`
+### P1.5 MCP connector support with allowlist + per-tool approval levels — `partial` (slice 1 done)
 
-Evidence: none (only a word match in `scripts/chip/taskflow.py`).
+Slice 1 (done): `scripts/chip/mcp_client.py` stdio client (initialize + `notifications/initialized`,
+paginated `tools/list`, `tools/call`), per-server allowlist in `mcp/servers.json`, per-tool level
+`auto` / `ask` / `deny` (unknown = deny), tool must also be advertised by the server, `ask` creates a
+single-use approval bound to the argument hash that the requester cannot approve, minimal subprocess
+env with `$NAME` references, every decision audited to `mcp/audit.jsonl` (argument hash only),
+malformed output / exit / timeout fail closed. CLI `chip mcp servers|tools|call|pending|approve|reject|audit`,
+docs/MCP.md, `scripts/test_chip_mcp.py` (22 tests, in-repo fake stdio server). `CHIP_MCP` default off.
 
-Gap: an MCP client (stdio transport first) that lists tools from a configured server, an allowlist per
-server, and per-tool approval level (`auto` / `ask` / `deny`), with every call audited.
-
-Done-test: `scripts/test_chip_mcp.py` against an in-repo fake stdio MCP server fixture — initialize +
-`tools/list`; un-allowlisted tool refused; `ask` tool returns a pending approval and does not run; `auto`
-tool runs and is audited; malformed server output fails closed. Flag `CHIP_MCP=0` default.
+Remaining (slice 2): let model turns / background jobs use allowlisted `auto` tools (tool planner +
+receipts), route `ask` calls to the approval queue / PM summary, optional HTTP transport.
 
 ## Phase 2 — tools
 
@@ -209,7 +211,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
 4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick + P1.4d summary done; live enable is a deploy step)
-5. P1.5 MCP client + allowlist/approval levels
+5. ~~P1.5 MCP client + allowlist/approval levels~~ (slice 1 done; slice 2 = turn/job wiring)
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
 8. P2.2 files/attachments

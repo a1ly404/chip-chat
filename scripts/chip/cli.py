@@ -1073,6 +1073,47 @@ def cmd_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from chip import mcp_client as mc
+
+    sub = args.mcp_cmd
+    try:
+        if sub == "servers":
+            out = {"enabled": mc.enabled(), "servers": [c.summary() for c in mc.load_config().values()]}
+            print(json.dumps(out, ensure_ascii=False))
+        elif sub == "audit":
+            print(json.dumps(mc.read_audit(args.limit), ensure_ascii=False))
+        elif sub == "pending":
+            print(json.dumps(mc.pending_approvals(), ensure_ascii=False))
+        elif sub in {"approve", "reject"}:
+            rec = mc.decide_approval(args.approval_id, by=args.by, approve=sub == "approve")
+            print(json.dumps(rec, ensure_ascii=False))
+        elif sub == "tools":
+            print(json.dumps(mc.list_tools(args.server), ensure_ascii=False))
+        elif sub == "call":
+            try:
+                arguments = json.loads(args.args) if args.args else {}
+            except json.JSONDecodeError as exc:
+                print(f"ERROR: --args is not JSON: {exc}", file=sys.stderr)
+                return 2
+            res = mc.call(args.server, args.tool, arguments, requested_by=args.by, approval_id=args.approval)
+            print(json.dumps(res, ensure_ascii=False))
+            if res["status"] == "pending":
+                return 4
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except mc.McpDisabled as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 3
+    except (mc.McpRefused, mc.McpConfigError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    except mc.McpProtocolError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -1211,6 +1252,26 @@ def build_parser() -> argparse.ArgumentParser:
     s_del = skill_sub.add_parser("delete", parents=[common], help="Delete a user skill")
     s_del.add_argument("skill_id")
     skill_p.set_defaults(func=cmd_skill)
+
+    mcp_p = sub.add_parser("mcp", help="MCP stdio client: allowlisted tools with auto/ask/deny approval (CHIP_MCP=1)")
+    mcp_sub = mcp_p.add_subparsers(dest="mcp_cmd", required=True)
+    mcp_sub.add_parser("servers", parents=[common], help="Show configured servers and tool policy")
+    mc_tools = mcp_sub.add_parser("tools", parents=[common], help="List a server's advertised tools with policy level")
+    mc_tools.add_argument("server")
+    mc_call = mcp_sub.add_parser("call", parents=[common], help="Call a tool (policy-gated, audited)")
+    mc_call.add_argument("server")
+    mc_call.add_argument("tool")
+    mc_call.add_argument("--args", default="", help="JSON object of tool arguments")
+    mc_call.add_argument("--approval", default=None, help="Approved approval id for an ask-level tool")
+    mc_call.add_argument("--by", default="cli", help="Requester identity recorded in the audit log")
+    mcp_sub.add_parser("pending", parents=[common], help="List pending approvals")
+    for verb in ("approve", "reject"):
+        mc_dec = mcp_sub.add_parser(verb, parents=[common], help=f"{verb.title()} a pending call (not by its requester)")
+        mc_dec.add_argument("approval_id")
+        mc_dec.add_argument("--by", required=True)
+    mc_audit = mcp_sub.add_parser("audit", parents=[common], help="Show recent audit rows")
+    mc_audit.add_argument("--limit", type=int, default=50)
+    mcp_p.set_defaults(func=cmd_mcp)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)
