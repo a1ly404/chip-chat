@@ -859,6 +859,48 @@ def cmd_routine(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_memory(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from chip import memory_store
+
+    now = datetime.now(timezone.utc)
+    sub = args.memory_cmd
+    try:
+        if sub == "add":
+            rec = memory_store.remember(
+                args.scope,
+                args.text,
+                by=args.by,
+                source=args.source,
+                now=now,
+                kind=args.kind,
+                key=args.key or None,
+            )
+            print(json.dumps(rec, ensure_ascii=False))
+        elif sub == "list":
+            rows = memory_store.list_records(args.scope, include_superseded=args.all)
+            print(json.dumps(rows, ensure_ascii=False))
+        elif sub == "search":
+            scopes = args.scope or None
+            rows = memory_store.recall(args.query, scopes=scopes, top_k=args.top_k, budget_chars=args.budget)
+            print(json.dumps(rows, ensure_ascii=False))
+        elif sub == "forget":
+            if not memory_store.forget(args.record_id, by=args.by, now=now):
+                print(f"ERROR: no memory: {args.record_id}", file=sys.stderr)
+                return 1
+            print(f"memory {args.record_id} forgotten")
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except memory_store.MemoryRefused as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 3
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -908,6 +950,28 @@ def build_parser() -> argparse.ArgumentParser:
     r_hist.add_argument("--limit", type=int, default=None)
     routine_sub.add_parser("run-due", parents=[common], help="Run due routines once (mock runner; needs CHIP_ROUTINES=1)")
     routine_p.set_defaults(func=cmd_routine)
+
+    memory_p = sub.add_parser("memory", help="Durable memory: remember/forget with provenance, user/room scopes")
+    memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
+    m_add = memory_sub.add_parser("add", parents=[common], help="Remember one fact")
+    m_add.add_argument("text")
+    m_add.add_argument("--scope", default="user", help="'user' (default) or 'room:<name>'")
+    m_add.add_argument("--by", default="cli", help="Who is writing (provenance)")
+    m_add.add_argument("--source", default="cli", help="Where the fact came from (provenance)")
+    m_add.add_argument("--kind", default="fact", choices=["fact", "preference", "decision"])
+    m_add.add_argument("--key", default="", help="Stable key; a newer fact with the same key supersedes")
+    m_list = memory_sub.add_parser("list", parents=[common], help="List active facts")
+    m_list.add_argument("--scope", default=None)
+    m_list.add_argument("--all", action="store_true", help="Include superseded facts")
+    m_search = memory_sub.add_parser("search", parents=[common], help="Keyword recall across scopes")
+    m_search.add_argument("query")
+    m_search.add_argument("--scope", action="append", default=[], help="Repeatable; default all scopes")
+    m_search.add_argument("--top-k", type=int, default=5)
+    m_search.add_argument("--budget", type=int, default=2000, help="Max total characters returned")
+    m_forget = memory_sub.add_parser("forget", parents=[common], help="Forget a fact by id")
+    m_forget.add_argument("record_id")
+    m_forget.add_argument("--by", default="cli")
+    memory_p.set_defaults(func=cmd_memory)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)
