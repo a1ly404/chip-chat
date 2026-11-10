@@ -12,6 +12,7 @@ from pathlib import Path
 
 from chip import config, constraints, law, learnings, mempalace, mock, openrouter, pack_values, runtime, spend, store, task, task_ledger, tool
 from chip import standing_law
+from chip.bg_jobs import JobsDisabled as JobsDisabledError
 from chip.need_tool import NeedToolError
 from chip.tools_manifest import list_tools
 
@@ -845,12 +846,61 @@ def cmd_routine(args: argparse.Namespace) -> int:
         elif sub == "history":
             print(json.dumps(routines.history(args.routine_id, limit=args.limit), ensure_ascii=False))
         elif sub == "run-due":
-            # Only the offline mock runner is wired here; real dispatch lands with background jobs.
-            rows = routines.tick(now, routines.mock_runner)
+            # Offline only: mock runner, or (with --via-jobs) a background job using the mock step.
+            runner = routines.mock_runner
+            if getattr(args, "via_jobs", False):
+                from chip import bg_jobs
+
+                if not bg_jobs.enabled():
+                    raise bg_jobs.JobsDisabled(f"{bg_jobs.FLAG} is not enabled; refusing --via-jobs")
+                runner = bg_jobs.routine_runner()
+            rows = routines.tick(now, runner)
             print(json.dumps(rows, ensure_ascii=False))
         else:  # pragma: no cover - argparse enforces choices
             return 64
-    except routines.RoutinesDisabled as exc:
+    except (routines.RoutinesDisabled, JobsDisabledError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 3
+    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_bgjob(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from chip import bg_jobs
+
+    now = datetime.now(timezone.utc)
+    sub = args.bgjob_cmd
+    try:
+        if sub == "enqueue":
+            doc = bg_jobs.enqueue(
+                args.prompt,
+                now=now,
+                mode=args.mode,
+                max_hops=args.max_hops,
+                max_spend_usd=args.max_spend,
+                source=args.source,
+                job_id=args.job_id or None,
+            )
+            print(json.dumps(doc, ensure_ascii=False))
+        elif sub == "list":
+            print(json.dumps(bg_jobs.list_all(status=args.status), ensure_ascii=False))
+        elif sub == "show":
+            print(json.dumps(bg_jobs.load(args.job_id), ensure_ascii=False, indent=2))
+        elif sub == "cancel":
+            doc = bg_jobs.cancel(args.job_id, now=now)
+            print(f"job {doc['id']} cancelled")
+        elif sub == "caps":
+            print(json.dumps({"enabled": bg_jobs.enabled(), "caps": bg_jobs.caps(), "today": bg_jobs.daily_usage(now)}))
+        elif sub == "run":
+            # Offline mock step only; a real model step is wired by callers, never by this CLI.
+            print(json.dumps(bg_jobs.run_pending(now, bg_jobs.mock_step), ensure_ascii=False))
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except bg_jobs.JobsDisabled as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 3
     except (ValueError, FileExistsError, FileNotFoundError) as exc:
@@ -994,8 +1044,29 @@ def build_parser() -> argparse.ArgumentParser:
     r_hist = routine_sub.add_parser("history", parents=[common], help="Show run history (JSONL rows)")
     r_hist.add_argument("routine_id")
     r_hist.add_argument("--limit", type=int, default=None)
-    routine_sub.add_parser("run-due", parents=[common], help="Run due routines once (mock runner; needs CHIP_ROUTINES=1)")
+    r_due = routine_sub.add_parser("run-due", parents=[common], help="Run due routines once (mock; needs CHIP_ROUTINES=1)")
+    r_due.add_argument(
+        "--via-jobs", action="store_true", help="Dispatch each due routine as a capped background job (needs CHIP_JOBS=1)"
+    )
     routine_p.set_defaults(func=cmd_routine)
+
+    bg_p = sub.add_parser("bgjob", help="Background agent jobs with hop/spend/daily/concurrency caps (CHIP_JOBS gates run)")
+    bg_sub = bg_p.add_subparsers(dest="bgjob_cmd", required=True)
+    bg_enq = bg_sub.add_parser("enqueue", parents=[common], help="Queue a background job")
+    bg_enq.add_argument("--prompt", required=True)
+    bg_enq.add_argument("--mode", choices=("read", "mutate"), default="read")
+    bg_enq.add_argument("--max-hops", type=int, default=None)
+    bg_enq.add_argument("--max-spend", type=float, default=None, help="Per-job USD ceiling")
+    bg_enq.add_argument("--source", default="cli")
+    bg_enq.add_argument("--job-id", default="")
+    bg_list = bg_sub.add_parser("list", parents=[common], help="List background jobs")
+    bg_list.add_argument("--status", default=None)
+    for name in ("show", "cancel"):
+        bp = bg_sub.add_parser(name, parents=[common], help=f"{name.capitalize()} a background job")
+        bp.add_argument("job_id")
+    bg_sub.add_parser("caps", parents=[common], help="Effective caps and today's usage")
+    bg_sub.add_parser("run", parents=[common], help="Run startable queued jobs once (mock step; needs CHIP_JOBS=1)")
+    bg_p.set_defaults(func=cmd_bgjob)
 
     memory_p = sub.add_parser("memory", help="Durable memory: remember/forget with provenance, user/room scopes")
     memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
