@@ -901,6 +901,52 @@ def cmd_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_skill(args: argparse.Namespace) -> int:
+    from chip import skills
+
+    sub = args.skill_cmd
+    try:
+        cat = skills.load_catalog()
+        if sub == "list":
+            out: dict[str, object] = {"skills": [s.summary() for s in cat.list()]}
+            if args.skipped:
+                out["skipped"] = cat.skipped
+            print(json.dumps(out, ensure_ascii=False))
+        elif sub == "show":
+            sk = cat.get(args.skill_id)
+            if sk is None:
+                print(f"ERROR: no skill: {args.skill_id}", file=sys.stderr)
+                return 1
+            print(json.dumps({**sk.summary(), "body": sk.body}, ensure_ascii=False))
+        elif sub == "search":
+            rows = skills.search(cat, args.query, top_k=args.top_k)
+            print(json.dumps([s.summary() for s in rows], ensure_ascii=False))
+        elif sub == "add":
+            body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else args.body
+            sk = skills.add_skill(
+                args.skill_id,
+                name=args.name,
+                description=args.description,
+                body=body or "",
+                triggers=[t for t in args.trigger],
+                override=args.override,
+                replace=args.replace,
+                catalog=cat,
+            )
+            print(json.dumps(sk.summary(), ensure_ascii=False))
+        elif sub == "delete":
+            if not skills.delete_skill(args.skill_id):
+                print(f"ERROR: no user skill: {args.skill_id}", file=sys.stderr)
+                return 1
+            print(f"skill {args.skill_id} deleted")
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except skills.SkillError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -972,6 +1018,28 @@ def build_parser() -> argparse.ArgumentParser:
     m_forget.add_argument("record_id")
     m_forget.add_argument("--by", default="cli")
     memory_p.set_defaults(func=cmd_memory)
+
+    skill_p = sub.add_parser("skill", help="Reusable skills catalog (pack skills read-only, user skills in data dir)")
+    skill_sub = skill_p.add_subparsers(dest="skill_cmd", required=True)
+    s_list = skill_sub.add_parser("list", parents=[common], help="List skills (pack + user)")
+    s_list.add_argument("--skipped", action="store_true", help="Also show invalid/shadowing files and why")
+    s_show = skill_sub.add_parser("show", parents=[common], help="Show one skill with its body")
+    s_show.add_argument("skill_id")
+    s_search = skill_sub.add_parser("search", parents=[common], help="Search skills by name/description/triggers")
+    s_search.add_argument("query")
+    s_search.add_argument("--top-k", type=int, default=5)
+    s_add = skill_sub.add_parser("add", parents=[common], help="Add a user skill")
+    s_add.add_argument("skill_id")
+    s_add.add_argument("--name", required=True)
+    s_add.add_argument("--description", required=True, help="When to use this skill")
+    s_add.add_argument("--body", default="")
+    s_add.add_argument("--body-file", default="")
+    s_add.add_argument("--trigger", action="append", default=[], help="Repeatable trigger phrase")
+    s_add.add_argument("--override", action="store_true", help="Allow shadowing a pack skill with the same id")
+    s_add.add_argument("--replace", action="store_true", help="Rewrite an existing user skill")
+    s_del = skill_sub.add_parser("delete", parents=[common], help="Delete a user skill")
+    s_del.add_argument("skill_id")
+    skill_p.set_defaults(func=cmd_skill)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)

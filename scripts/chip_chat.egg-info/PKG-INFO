@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: chip-chat
+Version: 0.1.0
+Summary: Chip Chat — multi-agent Discord relay and CLI engine
+License-Expression: MIT
+Requires-Python: >=3.11
+License-File: LICENSE
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pyyaml>=6; extra == "dev"
+Requires-Dist: hypothesis>=6.98; extra == "dev"
+Provides-Extra: relay
+Requires-Dist: discord.py>=2.4; extra == "relay"
+Dynamic: license-file
