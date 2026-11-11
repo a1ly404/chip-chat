@@ -249,6 +249,53 @@ class AlertStream:
         self._pending = None
 
 
+class MultiAlertStream:
+    """Several :class:`AlertStream` files read as one (each keeps its own cursor)."""
+
+    def __init__(self, streams: list[AlertStream]) -> None:
+        self.streams = list(streams)
+
+    def read(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        infos = []
+        for st in self.streams:
+            got, info = st.read()
+            items.extend(got)
+            infos.append(info)
+        total = {k: sum(int(i.get(k, 0) or 0) for i in infos) for k in ("lines", "bad", "ignored")}
+        return items, {**total, "streams": infos}
+
+    def commit(self) -> None:
+        for st in self.streams:
+            st.commit()
+
+
+def extra_alert_paths(env: Mapping[str, str] | None = None) -> list[Path]:
+    """``CHIP_PM_ALERTS_EXTRA_PATHS``: more JSONL alert files (comma or os.pathsep separated),
+    e.g. a deployment's own health probe output, read alongside the default alert log."""
+    raw = str(_env(env).get("CHIP_PM_ALERTS_EXTRA_PATHS", "")).strip()
+    parts = [p.strip() for p in re.split(r"[,%s]" % re.escape(os.pathsep), raw) if p.strip()]
+    out: list[Path] = []
+    for p in parts[:8]:
+        path = Path(p)
+        if path not in out:
+            out.append(path)
+    return out
+
+
+def default_alert_stream(env: Mapping[str, str] | None = None) -> AlertStream | MultiAlertStream:
+    """The default alert log plus any ``CHIP_PM_ALERTS_EXTRA_PATHS`` files (one cursor per file)."""
+    base = AlertStream(default_alerts_path(env))
+    extra = extra_alert_paths(env)
+    if not extra:
+        return base
+    streams = [base]
+    for path in extra:
+        tag = hashlib.sha256(str(path).encode()).hexdigest()[:12]
+        streams.append(AlertStream(path, cursor_name=f"pm_tick_alert_cursor_{tag}.json"))
+    return MultiAlertStream(streams)
+
+
 # ------------------------------------------------------------------ routine failure adapter
 
 
@@ -416,7 +463,7 @@ def _append_history(row: dict[str, Any]) -> None:
 def tick(
     now: datetime,
     *,
-    alerts: AlertStream | None = None,
+    alerts: AlertStream | MultiAlertStream | None = None,
     linear: LinearClient | None = None,
     routine_failures: RoutineFailures | None = None,
     extra_items: Iterable[Mapping[str, Any]] = (),

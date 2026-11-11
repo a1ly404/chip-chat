@@ -222,7 +222,44 @@ Tests: `scripts/test_chip_policy_exec_d3.py`. Same flags as slice 2 (nothing new
   one line per failed/refused run. Refused runs also count under refusals
   (`executor: run refused`). The rendered message gets an **Executor runs** section on days with runs.
 
-## Next (slice 4)
+## Alert remediations (slice 4)
+
+Module `scripts/chip/remediations.py`, tests `scripts/test_chip_remediations.py`. Off by default:
+needs `CHIP_PICKER_REMEDIATE=1` on top of `CHIP_JOB_POLICY=1` and `CHIP_POLICY_EXEC=1`.
+
+The operator lists **remediations** in the pinned policy file. Each one maps an alert **id** (full
+regex match, never title/detail text) to an exact fix request: dev-bot requester, job type,
+action, argv with a single `{target}` placeholder, target, optional hash-bound script, sudo flag
+and time cap. The captured `target` must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`.
+
+```json
+"remediations": [{
+  "id": "container-heal",
+  "match": "^container-down:(?P<target>[a-z0-9][a-z0-9_.-]{0,62})$",
+  "requested_by": "dev:remediator", "job_type": "container-heal", "action": "restart-container",
+  "command": ["/opt/chip/heal.sh", "{target}"], "target": "{target}",
+  "script_path": "/opt/chip/heal.sh", "sudo": true, "max_seconds": 180
+}]
+```
+
+When the PM picker sees a matching alert it queues a single-hop `mutate` job with `params.exec`,
+`params.policy_request` (job id forced to the bg job id) and a PM reason, spending no model money.
+`bg_jobs.run_pending` then gates it like any mutate job: hard denies, job-type allowlists, the sudo
+decision (operator rule, YOLO grant, or an operator confirm request), a decision-bound ticket, the
+executor and a receipt. A remediation therefore never widens anything: a target outside the job
+type's `allow_targets`, or one a plugin hard-deny hook refuses, fails the job with a deny receipt in
+the audit log. An edited, unpinned policy file disables every remediation. The same alert id is
+picked at most once per UTC day (picker dedupe).
+
+Fix scripts should verify their own result (e.g. wait for the service to report healthy) and exit
+non-zero otherwise, so the receipt says whether the fix held.
+
+`CHIP_PM_ALERTS_EXTRA_PATHS` (comma or path-separator list) adds JSONL alert files, such as a
+deployment's own health-probe output, to the PM tick next to the default alert log; each file keeps
+its own cursor. `chip policy remediations [--alert-id ID]` shows the loaded templates and the PM's
+plan for an alert id (read-only).
+
+## Next (slice 5)
 
 * `chip policy exec --request JSON` (operator-side authorize → execute from the CLI).
 * Relay/dev-bot wiring that calls `run_dev_job`; the plugin's operator-channel notifier and deployment
