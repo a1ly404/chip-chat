@@ -502,7 +502,10 @@ def test_audit_receipts_hash_only(setup):
     assert row["verdict"] == "allow" and row["command_sha256"] and "secretive-name" not in json.dumps(row)
 
 
-def test_summary_lists_pending_confirms_and_policy_counts(setup):
+def test_summary_lists_pending_confirms_and_policy_counts(setup, monkeypatch):
+    # Pin the wall clock: requests made at NOW have a 24h TTL, so reading them
+    # with the real clock after NOW+24h would expire them (date time bomb).
+    monkeypatch.setattr(jp, "_now", lambda now=None: (now or NOW).astimezone(timezone.utc))
     ev(setup, req())
     ev(setup, req(job_type="nope"))
     s = pm_summary.build(date(2026, 11, 10), env={"CHIP_PM_SUMMARY_TZ": "UTC"})
