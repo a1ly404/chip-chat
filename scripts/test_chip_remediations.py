@@ -200,7 +200,9 @@ def test_alert_to_yolo_fix_with_receipt_no_human(setup):
     assert jp.pending_requests() == []  # nobody was asked
 
 
-def test_alert_without_yolo_asks_operator_and_waits(setup):
+def test_alert_without_yolo_asks_operator_and_waits(setup, monkeypatch):
+    # Pin the wall clock so the 24h confirm TTL is measured from NOW, not today.
+    monkeypatch.setattr(jp, "_now", lambda now=None: (now or NOW).astimezone(timezone.utc))
     env = {**setup["env"], jp.YOLO_ENV: "0"}
     setup["env"].update(env)
     _alert(setup["alerts"], "container-down:app-web")
