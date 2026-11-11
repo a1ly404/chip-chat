@@ -330,8 +330,15 @@ def run_pending(
     *,
     clock: Callable[[], datetime] | None = None,
     env: dict[str, str] | None = None,
+    exec_runner: Callable[..., dict[str, Any]] | None = None,
+    notifier: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Start every job ``select()`` allows: reads in parallel (capped), mutates one at a time.
+
+    With ``CHIP_JOB_POLICY=1`` every mutate job is routed through the job policy first
+    (``policy_exec.gate_job``): ``allow`` attaches a fresh decision ticket, ``ask`` leaves the job
+    queued and posts an operator confirm request, ``deny`` fails it. A mutate job with
+    ``params.exec`` and a ticket runs its ``params.policy_request`` argv through the policy executor.
 
     Returns ``{"ran": [final job records], "deferred": [{"id", "reason"}]}``.
     """
@@ -343,8 +350,31 @@ def run_pending(
     c = caps(env)
     picked = select(now, env=env)
     claimed: list[dict[str, Any]] = []
+    refused: list[dict[str, Any]] = []
+    from chip import job_policy
+
+    policy_on = job_policy.enabled(env)
     for job in picked["start"]:
         job = dict(job)
+        job.pop("policy", None)  # a ticket is only ever minted here, never carried in by the record
+        if job["mode"] == "mutate" and policy_on:
+            from chip import policy_exec
+
+            gate = policy_exec.gate_job(job, env=env, now=clock(), notifier=notifier)
+            if gate["verdict"] == "ask":
+                job["policy"] = {k: gate[k] for k in ("verdict", "request_id", "notify") if k in gate}
+                with _io_lock:
+                    _save(job)
+                picked["deferred"].append({"id": job["id"], "reason": f"waiting on operator confirm {gate.get('request_id', '')}"})
+                continue
+            if gate["verdict"] != "allow":
+                job.update(status="failed", reason=f"policy deny: {gate['reason']}"[:300], ended_at=_iso(clock()),
+                           policy={"verdict": "deny"})
+                with _io_lock:
+                    _save(job)
+                refused.append(job)
+                continue
+            job["policy"] = {"verdict": "allow", "ticket": gate["ticket"]}
         job.update(status="running", started_at=_iso(clock()))
         with _io_lock:
             _save(job)
@@ -355,8 +385,14 @@ def run_pending(
     with ThreadPoolExecutor(max_workers=max(1, c["read_concurrency"])) as pool:
         futures = [pool.submit(run_job, j, step, clock=clock) for j in reads]
         for j in mutates:  # serialized: select() yields at most one
-            ran.append(run_job(j, step, clock=clock))
+            jstep = step
+            if (j.get("policy") or {}).get("ticket") and (j.get("params") or {}).get("exec"):
+                from chip import policy_exec
+
+                jstep = policy_exec.exec_step(env=env, runner=exec_runner, clock=clock)
+            ran.append(run_job(j, jstep, clock=clock))
         ran.extend(f.result() for f in futures)
+    ran.extend(refused)
     ran.sort(key=lambda d: (d.get("created_at", ""), d["id"]))
     return {"ran": ran, "deferred": picked["deferred"]}
 

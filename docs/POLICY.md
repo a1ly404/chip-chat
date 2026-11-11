@@ -5,8 +5,9 @@ by itself, without a separate job runner. Module: `scripts/chip/job_policy.py` (
 Tests: `scripts/test_chip_job_policy.py` (attack matrix included).
 
 **Off by default.** `CHIP_JOB_POLICY=1` enables evaluation; with it off every request is denied.
-This slice only *decides*. Wiring a decision into privileged execution (and into `bg_jobs` mutate
-jobs) is slice 2. Nothing here enables `CHIP_JOBS_ALLOW_MUTATE`, `CHIP_HOST_EXEC` or `CHIP_RECIPE_EXEC`.
+`job_policy` only *decides*; `scripts/chip/policy_exec.py` (slice 2, below) is the only place an
+approved argv runs, and needs `CHIP_POLICY_EXEC=1` as well. Nothing here enables
+`CHIP_JOBS_ALLOW_MUTATE`, `CHIP_HOST_EXEC` or `CHIP_RECIPE_EXEC`.
 
 ## Roles
 
@@ -141,9 +142,66 @@ the operator key path, or secret-named variables (`*TOKEN*`, `*SECRET*`, `*PASSW
 | `chip policy confirm <id> [--rule-ttl S]` / `decline <id>` / `revoke <rule>` / `pin` | operator key | 2 refused |
 | `chip policy keygen --out PATH` | operator | 2 if the file exists or is inside the data dir |
 
-## Next (slice 2)
+## Executor (slice 2)
 
-Consume an `allow` decision in the executor: run the approved argv with `job_env`, the per-job time
-cap and spend cap, sudo only when the decision says so, and a receipt bound to the decision; route
-`bg_jobs` mutate jobs and dev-bot jobs through `evaluate`; post asks to the operator channel.
-Deployment-specific hard denies are added later from a private plugin via the hook.
+Module `scripts/chip/policy_exec.py`, tests `scripts/test_chip_policy_exec.py` (executor attack matrix).
+Off by default: needs `CHIP_JOB_POLICY=1` **and** `CHIP_POLICY_EXEC=1`.
+
+1. `policy_exec.authorize(request, actor="pm")` runs `evaluate`. An **allow** becomes a *decision
+   ticket*: id, job id, requester, request digest, command sha256, sudo flag, basis (`rule_id` or YOLO
+   `grant_id`), issue and expiry time (`CHIP_POLICY_DECISION_TTL_S`, default 900 s, max 3600), plus a
+   `binding` sha256 over all of it. Tickets are appended to `policy/decisions.jsonl` (inside the
+   protected policy store, so a job can't touch it). An **ask** posts the confirm request to the
+   operator channel (below). A **deny** returns the reason.
+2. `policy_exec.execute(ticket, request)` refuses (nothing runs, a receipt is still written) unless:
+   * both flags are on and the process is not a job (`CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR` unset);
+   * the ticket equals the row the PM stored and its binding hash verifies (hand-made or edited
+     tickets refuse), it hasn't expired, and it hasn't been used (single use, `policy/consumed.jsonl`,
+     claimed before the run so a crash can't replay it);
+   * the request has the ticket's digest, job id, requester and sudo flag (an argv, target, context,
+     script or requester swap after the decision refuses);
+   * `job_policy.recheck` passes again: authority chain, policy pin, hard denies (including hooks
+     registered after the decision), job-type policy and caps, and the script hash;
+   * for sudo, the basis still holds (`job_policy.sudo_basis_ok`): the operator rule is still active
+     and matches, or the YOLO grant is unexpired with exactly this scope and job. A non-sudo ticket
+     never carries a basis.
+
+   The argv then runs with `shell=False`, no stdin, under `job_env()` (no policy controls, no secrets),
+   with the time cap (request `max_seconds`, else the job type's, max 3600) and spend cap (request
+   `max_spend_usd`; a runner reporting more fails the job). Only granted sudo prepends
+   `sudo -n --`; inline sudo stays a hard deny.
+3. Every outcome writes a receipt to `policy/exec_receipts.jsonl` that is bound to `decision_id` + `binding`.
+   It holds the command sha256, rule/grant id, status/reason, exit, seconds, spend, and the stdout sha256 plus a 400-char tail.
+   It never holds the raw argv.
+
+Entry points:
+
+* **Dev bots**: `policy_exec.run_dev_job(request, pm_reason=...)` (PM authorizes, executor runs).
+* **`bg_jobs` mutate jobs**: with `CHIP_JOB_POLICY=1`, `run_pending` routes every selected mutate
+  job through `policy_exec.gate_job`. The job carries its request in `params.policy_request` (its
+  `job_id` is forced to the bg job id).
+  * allow: a fresh ticket goes on the record. Any ticket already on the record is dropped first.
+  * ask: the job stays `queued` (deferred "waiting on operator confirm <id>") until the operator
+    confirms. The next tick then matches the saved rule.
+  * deny: the job fails with `policy deny: ...`.
+  * A mutate job without a request is denied.
+
+  Jobs with `params.exec: true` run their argv through the executor (`policy_exec.exec_step`).
+  Other allowed mutate jobs run their normal step. With the policy flag off nothing changes, and
+  `params.exec` jobs never reach the executor.
+
+### Operator confirm notifications
+
+`CHIP_POLICY_NOTIFY=1` (default off) posts each new confirm request once (`policy/notified.jsonl`):
+what, command, PM reason, expiry and the `chip policy confirm|decline <id>` commands. The channel is a
+hook: `policy_exec.register_notifier(fn)` or `CHIP_POLICY_NOTIFY_HOOK=module:func`
+(`fn(message, request_row)`). The engine ships no channel; a plugin wires its operator chat. Hook
+errors never raise and the request is retried on the next ask; no notifier → `no-notifier`.
+
+## Next (slice 3)
+
+* `chip policy exec --request JSON` / `chip policy receipts` CLI and executor receipts in the PM summary.
+* Kill the whole process group on a time cap (a `sudo` child can outlive the direct child today), and
+  run a private copy of hash-bound scripts to close the hash-then-exec window.
+* Relay/dev-bot wiring that calls `run_dev_job`; the plugin's operator-channel notifier and deployment
+  hard denies (via `register_hard_deny`).

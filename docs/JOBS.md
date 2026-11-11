@@ -224,3 +224,13 @@ record and pending `ask` approvals appear in the PM summary. See docs/MCP.md.
 
 Which jobs may run, and which may run with sudo, is decided by the engine-native job policy
 (PM as team lead, operator-confirmed rules, YOLO default off, hard denies): see [POLICY.md](POLICY.md).
+
+With `CHIP_JOB_POLICY=1`, `run_pending` routes every mutate job through the policy before it starts
+(D slice 2). The job's request lives in `params.policy_request`:
+
+* allow: the job gets a fresh decision ticket.
+* ask: the job stays queued and the operator confirm is posted.
+* deny: the job fails with `policy deny: ...`.
+
+A mutate job with `params.exec: true` runs its approved argv through `policy_exec` with time and spend
+caps, a scrubbed env, sudo only when granted, and receipts bound to the decision. See POLICY.md "Executor".
