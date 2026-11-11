@@ -28,14 +28,15 @@ Decision order (:func:`evaluate`) — first match wins, everything fails closed:
 
 Storage (under ``CHIP_CHAT_DATA_DIR/policy/``):
 
-* ``authority.jsonl`` — tamper-evident, HMAC-SHA256 hash-chained rows (rules added/revoked, policy
-  pins, confirms/declines). Only :class:`OperatorKey` holders can write a valid row.
+* ``authority.jsonl`` — tamper-evident, hash-chained rows (rules added/revoked, policy
+  pins, confirms/declines), Ed25519-signed. Only :class:`OperatorKey` holders can write a valid row.
 * ``requests.jsonl`` — pending/decided operator confirm requests (event log).
 * ``grants.jsonl`` — YOLO grants (reason, scope, expiry).
 * ``audit.jsonl`` — one receipt per evaluation (command hash only, never raw argv).
 
 Default off: ``CHIP_JOB_POLICY=1`` enables evaluation. ``CHIP_PM_YOLO`` (env) overrides the system
-pack value ``values.pm_yolo``; both default false. This slice decides; it never executes anything.
+pack value ``values.pm_yolo``; both default false. This module decides; execution of ``allow``
+decisions lives in :mod:`chip.policy_exec` (slice 2).
 """
 
 from __future__ import annotations
@@ -576,7 +577,7 @@ def _base(token: str) -> str:
 
 
 def _protected_paths(env: Mapping[str, str]) -> list[Path]:
-    paths = [policy_dir(), Path(__file__), Path(ed25519_ref.__file__)]
+    paths = [policy_dir(), Path(__file__), Path(__file__).with_name("policy_exec.py"), Path(ed25519_ref.__file__)]
     for name in (KEY_FILE_ENV, POLICY_FILE_ENV):
         raw = str(env.get(name, "")).strip()
         if raw:
@@ -843,6 +844,62 @@ def evaluate(
     return done("ask", "sudo needs operator confirm", request_id=rid)
 
 
+def recheck(
+    req: JobRequest, *, env: Mapping[str, str] | None = None, now: datetime | None = None
+) -> tuple[str | None, dict[str, Any], list[dict[str, Any]]]:
+    """Side-effect-free re-run of decision steps 1-6 at execution time (no audit, no request, no grant).
+
+    Returns ``(refusal reason or None, job-type spec, verified authority rows)``. The executor calls
+    this right before running so a revoked policy pin, a new hard deny, an edited script or a flag
+    flipped off between decision and run still refuses.
+    """
+    e = _env(env)
+    if not enabled(e):
+        return "job policy disabled", {}, []
+    try:
+        rows = verify_chain(e)
+    except AuthorityTampered as exc:
+        return f"authority store tampered: {exc}", {}, []
+    try:
+        policy, sha = load_policy(e)
+    except PolicyError as exc:
+        return f"policy unavailable: {exc}", {}, rows
+    if sha is not None and pinned_policy_sha(rows) != sha:
+        return "policy file changed or not pinned by the operator", {}, rows
+    why = builtin_hard_deny(req, e)
+    if why:
+        return f"hard deny: {why}", {}, rows
+    why, spec = _job_type_check(req, policy, e)
+    if why:
+        return why, spec, rows
+    return None, spec, rows
+
+
+def sudo_basis_ok(
+    req: JobRequest, *, rule_id: str = "", grant_id: str = "", rows: list[dict[str, Any]] | None = None,
+    env: Mapping[str, str] | None = None, now: datetime | None = None,
+) -> str | None:
+    """Re-check that a sudo decision's basis still holds: an active matching operator rule, or an
+    unexpired YOLO grant whose scope equals this request. Returns a refusal reason or None."""
+    n = _now(now)
+    if rule_id:
+        for rule in active_rules(rows if rows is not None else verify_chain(env), n):
+            if rule.get("id") == rule_id:
+                return None if _rule_matches(rule, req) else "operator rule no longer matches this request"
+        return "operator rule revoked or expired"
+    if grant_id:
+        for g in _jsonl(grants_path()):
+            if g.get("id") != grant_id:
+                continue
+            if g.get("scope") != req.scope() or g.get("job_id") != req.job_id:
+                return "YOLO grant scope does not match this request"
+            if _parse(str(g.get("expires_at"))) <= n:
+                return "YOLO grant expired"
+            return None
+        return "no such YOLO grant"
+    return "sudo without an operator rule or YOLO grant"
+
+
 # ------------------------------------------------------------------ operator actions
 
 
@@ -982,7 +1039,7 @@ def status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
 __all__ = [
     "AuthorityTampered", "Decision", "JobRequest", "OperatorKey", "PolicyError", "active_rules",
-    "builtin_hard_deny", "confirm", "decline", "enabled", "evaluate", "grants", "job_env", "pending_requests",
+    "builtin_hard_deny", "confirm", "recheck", "sudo_basis_ok", "decline", "enabled", "evaluate", "grants", "job_env", "pending_requests",
     "pending_waiting", "pin_policy", "register_hard_deny", "revoke", "status", "verify_chain", "was_confirmed",
     "yolo",
 ]

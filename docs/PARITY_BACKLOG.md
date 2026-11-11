@@ -128,9 +128,24 @@ lets the PM grant sudo itself with every grant logged and shown in the PM summar
 (inline sudo, secret access/exfiltration, unrelated deletes, policy/YOLO edits from a job) plus a
 plugin hook; `job_env()` strips policy controls and secrets. CLI `chip policy
 status|verify|rules|pending|grants|audit|check|confirm|decline|revoke|pin|keygen`, docs/POLICY.md,
-`scripts/test_chip_job_policy.py` (attack matrix). Follow-up D slice 2: executor consumes `allow`
-decisions (job env, caps, sudo only when decided, receipts), bg_jobs mutate/dev-bot jobs routed through
-`evaluate`, asks posted to the operator; deployment-specific hard denies from the plugin.
+`scripts/test_chip_job_policy.py` (attack matrix).
+
+D slice 2 — `done`: `scripts/chip/policy_exec.py` executor (`CHIP_POLICY_EXEC` default off, on top of
+`CHIP_JOB_POLICY`):
+* PM `allow` decisions become single-use, expiring, hash-bound decision tickets.
+* The executor refuses argv/target/requester swaps, edited or hand-made tickets, expired or replayed
+  decisions, and running inside a job.
+* It re-checks the chain, pin, hard denies, policy and script hash, and requires a live rule or YOLO
+  grant for sudo.
+* Runs use `shell=False` under `job_env` with time and spend caps, and `sudo -n --` only when granted.
+  Receipts are bound to the decision.
+* Dev-bot entry point is `run_dev_job`. `bg_jobs` mutate jobs are routed through the policy (ask stays
+  queued, deny fails, `params.exec` runs via the executor).
+* Asks are posted once through an operator notifier hook (`CHIP_POLICY_NOTIFY` default off).
+* Tests: `scripts/test_chip_policy_exec.py`.
+
+Follow-up D slice 3: exec/receipts CLI and PM summary, process-group kill, private script copy, relay
+wiring, plugin notifier and deployment hard denies.
 
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `done` (slices 1–3; HTTP/SSE transport is follow-up P1.5b)
 
