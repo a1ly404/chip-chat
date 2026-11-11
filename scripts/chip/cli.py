@@ -1159,6 +1159,19 @@ def cmd_policy(args: argparse.Namespace) -> int:
             print(json.dumps(jp.grants(), ensure_ascii=False))
         elif sub == "audit":
             print(json.dumps(jp.read_audit(args.limit), ensure_ascii=False))
+        elif sub == "receipts":
+            from chip import policy_exec as px
+
+            rows = px.receipts(args.limit, status=args.status or None, job_id=args.job or None)
+            print(json.dumps(rows, ensure_ascii=False))
+        elif sub == "receipt":
+            from chip import policy_exec as px
+
+            rows = px.receipt(args.decision_id)
+            if not rows:
+                print(f"NOT FOUND: no executor receipt for {args.decision_id}", file=sys.stderr)
+                return 3
+            print(json.dumps(rows, ensure_ascii=False))
         elif sub == "keygen":
             out = Path(args.out).expanduser()
             if out.exists():
@@ -1386,6 +1399,12 @@ def build_parser() -> argparse.ArgumentParser:
         pol_sub.add_parser(name, parents=[common], help=hlp)
     pol_audit = pol_sub.add_parser("audit", parents=[common], help="Recent evaluation receipts")
     pol_audit.add_argument("--limit", type=int, default=50)
+    pol_rc = pol_sub.add_parser("receipts", parents=[common], help="Recent executor receipts (read-only)")
+    pol_rc.add_argument("--limit", type=int, default=50)
+    pol_rc.add_argument("--status", default="", choices=["", "ok", "failed", "refused"])
+    pol_rc.add_argument("--job", default="", help="Filter by job id")
+    pol_r1 = pol_sub.add_parser("receipt", parents=[common], help="Executor receipt(s) for one decision id (exit 3 if none)")
+    pol_r1.add_argument("decision_id")
     pol_kg = pol_sub.add_parser("keygen", parents=[common], help="Operator: create an Ed25519 operator key file (prints the public key)")
     pol_kg.add_argument("--out", required=True)
     pol_check = pol_sub.add_parser("check", parents=[common], help="Evaluate a job request JSON as the PM (exit 0 allow, 4 ask, 2 deny)")

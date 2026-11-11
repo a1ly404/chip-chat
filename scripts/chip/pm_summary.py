@@ -15,6 +15,8 @@
   jobs or turns; see :mod:`chip.mcp_tools`) and pending sudo confirm requests (:mod:`chip.job_policy`).
 * ``policy`` / ``sudo_grants`` — job-policy verdict counts for the day and every YOLO sudo grant
   (reason, scope, expiry); denied requests count as refusals.
+* ``executor`` — job-policy executor receipts for the day (:mod:`chip.policy_exec`): counts by
+  status, granted sudo runs, and failed/refused runs; refused runs also count as refusals.
 * ``mcp`` — MCP tool receipts for the day counted by status (ok / pending / refused / error).
 
 :func:`render` turns that into one chat message (Discord-style markdown, capped length).
@@ -44,7 +46,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chip import bg_jobs, job_policy, mcp_tools
+from chip import bg_jobs, job_policy, mcp_tools, policy_exec
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_SUMMARY"
@@ -211,6 +213,9 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
     policy_counts = job_policy.day_counts(start.strftime(fmt), end.strftime(fmt))
     if policy_counts.get("deny"):
         refusals["policy: job request denied"] += policy_counts["deny"]
+    executor = policy_exec.day_receipts(start.strftime(fmt), end.strftime(fmt))
+    if executor["counts"].get("refused"):
+        refusals["executor: run refused"] += executor["counts"]["refused"]
     sudo_grants = [
         {
             "id": g.get("id"),
@@ -239,6 +244,7 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         "mcp": dict(sorted(mcp_counts.items())),
         "policy": dict(sorted(policy_counts.items())),
         "sudo_grants": sudo_grants,
+        "executor": executor,
     }
 
 
@@ -284,6 +290,12 @@ def render(summary: Mapping[str, Any]) -> str:
     ]
     if grants:
         lines += ["", "**Sudo grants (YOLO)**"] + _bullets(grants)
+    ex = summary.get("executor") or {}
+    if ex.get("counts"):
+        head = ", ".join(f"{k} {v}" for k, v in ex["counts"].items())
+        if ex.get("sudo_runs"):
+            head += f" · sudo runs {ex['sudo_runs']}"
+        lines += ["", f"**Executor runs** ({head})"] + _bullets(list(ex.get("problems") or []))
     lines += ["", "**Waiting on you**"] + (_bullets(list(summary.get("waiting") or [])) or ["- nothing"])
     text = "\n".join(lines)
     return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 12].rstrip() + "\n…(clipped)"

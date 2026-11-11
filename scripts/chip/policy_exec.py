@@ -24,15 +24,26 @@ Flow
    with the per-job time cap and spend cap, and ``sudo -n --`` prepended only for granted sudo.
    Every outcome (ran or refused) writes a receipt bound to the decision id and binding hash to
    ``policy/exec_receipts.jsonl`` (command sha256 and output sha256 + short tail, never raw argv).
+   Slice 3 hardening: the default runner starts the child in its own session (process group) and
+   kills the whole group on the time cap, so grandchildren cannot outlive the job. A hash-bound
+   script never runs from its original path: its bytes are copied once into a private ``0700`` temp
+   dir, the copy is re-hashed against the bound ``script_sha256``, and the copy is what runs (closes
+   the window between the hash check and exec). The copy is removed afterwards.
 3. :func:`run_dev_job` is the dev-bot entry point (authorize → execute); :func:`gate_job` and
    :func:`exec_step` route ``bg_jobs`` mutate jobs through the same path.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib
+import os
 import shlex
+import shutil
+import signal
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -189,19 +200,101 @@ def authorize(
 # ------------------------------------------------------------------ execution
 
 
+def _kill_group(proc: subprocess.Popen, grace_s: float = 1.0) -> None:
+    """Kill the child's whole process group (own session); fall back to the child alone.
+
+    SIGTERM first (``sudo`` relays it to its command), then SIGKILL after a short grace period.
+    """
+    killpg = getattr(os, "killpg", None)
+    if killpg is None:  # pragma: no cover - Windows: no process groups via killpg
+        proc.kill()
+        return
+    for sig, wait in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 0.0)):
+        try:
+            killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        except PermissionError:  # e.g. a root-owned group under sudo: kill what we can
+            try:
+                proc.send_signal(sig)
+            except ProcessLookupError:
+                return
+        if wait:
+            try:
+                proc.wait(timeout=wait)
+            except subprocess.TimeoutExpired:
+                continue
+            # leader is gone; still sweep the group for stragglers
+            try:
+                killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            return
+
+
 def subprocess_runner(argv: list[str], env: dict[str, str], timeout_s: int) -> dict[str, Any]:
-    """Default runner: no shell, no stdin, captured output, hard timeout."""
+    """Default runner: no shell, no stdin, captured output, hard timeout, own process group.
+
+    On the time cap the whole process group is killed, so children and grandchildren the job
+    spawned do not outlive it (and cannot hold the output pipes open).
+    """
+    posix = os.name == "posix"
     try:
-        cp = subprocess.run(  # argv approved by job policy, shell=False
-            argv, env=env, timeout=timeout_s, capture_output=True, text=True, stdin=subprocess.DEVNULL, shell=False,
-            check=False,
+        proc = subprocess.Popen(  # argv approved by job policy, shell=False
+            argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+            text=True, shell=False, start_new_session=posix,
         )
-    except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        return {"exit": 124, "stdout": out, "stderr": "", "timed_out": True}
     except OSError as exc:
         return {"exit": 127, "stdout": "", "stderr": f"{type(exc).__name__}", "timed_out": False}
-    return {"exit": cp.returncode, "stdout": cp.stdout or "", "stderr": cp.stderr or "", "timed_out": False}
+    try:
+        out, err = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        if posix:
+            _kill_group(proc)
+        else:  # pragma: no cover
+            proc.kill()
+        try:
+            out, err = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:  # pragma: no cover - pipes held by an unkillable process
+            out, err = "", ""
+        return {"exit": 124, "stdout": out or "", "stderr": err or "", "timed_out": True}
+    finally:
+        if posix and proc.returncode is not None:
+            # job finished: sweep any background stragglers left in its group
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    return {"exit": proc.returncode, "stdout": out or "", "stderr": err or "", "timed_out": False}
+
+
+def private_script_copy(script_path: str, want_sha256: str) -> tuple[Path, Path]:
+    """Copy a hash-bound script into a private temp dir and verify the hash *on the copy*.
+
+    Returns ``(copy_path, temp_dir)``. Raises :class:`ExecRefused` (after cleaning up) when the
+    original cannot be read or the copy does not hash to ``want_sha256``. The original is read
+    once; the copy lives in a fresh ``0700`` dir and is made read+exec only for the owner.
+    """
+    src = Path(script_path).expanduser()
+    tmp = Path(tempfile.mkdtemp(prefix="chip-exec-"))
+    try:
+        os.chmod(tmp, 0o700)
+        try:
+            data = src.read_bytes()
+        except OSError as exc:
+            raise ExecRefused(f"script unreadable: {type(exc).__name__}") from None
+        dst = tmp / (src.name or "script")
+        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.chmod(dst, 0o500)
+        actual = hashlib.sha256(dst.read_bytes()).hexdigest()
+        if not want_sha256 or not hmac.compare_digest(actual, str(want_sha256).lower()):
+            raise ExecRefused("script hash mismatch on the private copy")
+        return dst, tmp
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
 
 def _receipt(ticket: Mapping[str, Any] | None, req: jp.JobRequest | None, status: str, reason: str,
@@ -293,6 +386,13 @@ def execute(
     secs = max(1, min(req.max_seconds or max_secs, max_secs))
     spend_cap = float(req.max_spend_usd or 0.0)
     argv = list(req.command)
+    private_dir: Path | None = None
+    if req.script_path:
+        try:
+            copy, private_dir = private_script_copy(req.script_path, req.script_sha256)
+        except ExecRefused as exc:
+            return _receipt(tdict, req, "refused", str(exc), n)
+        argv = [str(copy) if tok == req.script_path else tok for tok in argv]
     if req.sudo:
         argv = [*SUDO_ARGV, *argv]
     child_env = jp.job_env(e, job_id=req.job_id, actor=req.requested_by)
@@ -302,6 +402,9 @@ def execute(
         res = run(argv, child_env, secs) or {}
     except Exception as exc:  # runner errors fail the job, never raise
         return _receipt(tdict, req, "failed", f"runner error: {type(exc).__name__}", n, seconds_cap=secs)
+    finally:
+        if private_dir is not None:
+            shutil.rmtree(private_dir, ignore_errors=True)
     took = round(time.monotonic() - started, 3)
     spend = max(0.0, float(res.get("spend_usd", 0.0) or 0.0))
     out, err = str(res.get("stdout", "")), str(res.get("stderr", ""))
@@ -318,6 +421,7 @@ def execute(
         tdict, req, status, reason, n,
         exit=code, seconds=took, seconds_cap=secs, spend_usd=spend, spend_cap_usd=spend_cap,
         stdout_sha256=jp.sha256_text(out), stdout_tail=_tail(out), stderr_tail=_tail(err),
+        private_copy=private_dir is not None,
     )
 
 
@@ -453,12 +557,42 @@ def exec_step(*, env: Mapping[str, str] | None = None, runner: Runner | None = N
     return _step
 
 
-def receipts(limit: int = 50) -> list[dict[str, Any]]:
-    return jp._jsonl(receipts_path())[-max(1, int(limit)):]
+def receipts(limit: int = 50, *, status: str | None = None, job_id: str | None = None) -> list[dict[str, Any]]:
+    """Most recent executor receipts (oldest first), optionally filtered by status / job id."""
+    rows = jp._jsonl(receipts_path())
+    if status:
+        rows = [r for r in rows if r.get("status") == status]
+    if job_id:
+        rows = [r for r in rows if r.get("job_id") == job_id]
+    return rows[-max(1, int(limit)):]
+
+
+def receipt(decision_id: str) -> list[dict[str, Any]]:
+    """Every receipt written for one decision id (normally one; refused replays add more)."""
+    return [r for r in jp._jsonl(receipts_path()) if r.get("decision_id") == decision_id]
+
+
+def day_receipts(start: str, end: str) -> dict[str, Any]:
+    """Executor receipts with ``start <= ts < end`` (ISO-Z strings): counts by status, sudo runs,
+    and short lines for failed / refused runs (for the PM daily summary)."""
+    counts: dict[str, int] = {}
+    sudo_runs = 0
+    problems: list[str] = []
+    for r in jp._jsonl(receipts_path()):
+        ts = str(r.get("ts", ""))
+        if not (start <= ts < end):
+            continue
+        st = str(r.get("status", "?"))
+        counts[st] = counts.get(st, 0) + 1
+        if r.get("sudo") and st == "ok":
+            sudo_runs += 1
+        if st in {"failed", "refused"}:
+            problems.append(f"{st} job {r.get('job_id') or '-'} by {r.get('requested_by') or '-'}: {str(r.get('reason', ''))[:120]}")
+    return {"counts": dict(sorted(counts.items())), "sudo_runs": sudo_runs, "problems": problems}
 
 
 __all__ = [
     "Authorization", "ExecRefused", "Ticket", "authorize", "clear_notifiers", "confirm_message", "exec_enabled",
-    "exec_step", "execute", "gate_job", "notify_ask", "receipts", "register_notifier", "run_dev_job",
-    "subprocess_runner",
+    "day_receipts", "exec_step", "execute", "gate_job", "notify_ask", "private_script_copy", "receipt", "receipts",
+    "register_notifier", "run_dev_job", "subprocess_runner",
 ]
