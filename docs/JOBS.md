@@ -219,3 +219,8 @@ $ CHIP_ROUTINES=1 CHIP_JOBS=1 CHIP_PM_SUMMARY=1 CHIP_PM_SUMMARY_WEBHOOK=... chip
 With `CHIP_MCP=1`, the model step offers allowlisted `auto`/`ask` MCP tools to jobs (opt out with
 `params.mcp_tools: false`; `params.mcp_max_rounds` default 2, hard 5). Receipts are stored on each hop
 record and pending `ask` approvals appear in the PM summary. See docs/MCP.md.
+
+## Job policy
+
+Which jobs may run, and which may run with sudo, is decided by the engine-native job policy
+(PM as team lead, operator-confirmed rules, YOLO default off, hard denies): see [POLICY.md](POLICY.md).
