@@ -473,3 +473,38 @@ def test_bg_exec_refusal_fails_job(setup):
     _exec_job("m6", target="/srv/elsewhere")
     res = bg_jobs.run_pending(NOW, env=_bg_env(setup), exec_runner=FakeRunner())
     assert res["ran"][0]["status"] == "failed" and "policy deny" in res["ran"][0]["reason"]
+
+
+# ------------------------------------------------------------------ M5 attack matrix: explicit gap cases
+
+
+def test_sudo_without_signed_rule_or_yolo_grant_refused(setup):
+    r0 = jp.JobRequest.from_dict(req(sudo=True))
+    rows = jp.verify_chain(setup["env"])
+    assert jp.sudo_basis_ok(r0, rows=rows, env=setup["env"], now=NOW) == "sudo without an operator rule or YOLO grant"
+    assert "no such YOLO grant" in jp.sudo_basis_ok(r0, grant_id="yg-forged", rows=rows, env=setup["env"], now=NOW)
+    assert "revoked or expired" in jp.sudo_basis_ok(r0, rule_id="rule-forged", rows=rows, env=setup["env"], now=NOW)
+    # with YOLO off and no rule, the PM can only ask; no ticket, nothing runs
+    a = auth(setup, req(sudo=True))
+    assert a.verdict == "ask" and a.ticket is None and jp.grants() == []
+
+
+def test_yolo_flip_from_inside_a_job_has_no_effect(setup):
+    # the env a job gets carries no YOLO / policy controls; flipping YOLO there leaves policy off
+    inside = jp.job_env(setup["env"], job_id="j0", actor="dev:alpha")
+    flipped = {**inside, jp.YOLO_ENV: "1"}
+    d = jp.evaluate(req(sudo=True), actor="pm", env=flipped, now=NOW)
+    assert d.verdict == "deny" and jp.grants() == []
+    # commands that would flip YOLO are hard-denied
+    for argv in (["export", "CHIP_PM_YOLO=1"], ["sed", "-i", "s/false/true/", "pm_yolo.json"]):
+        assert auth(setup, req(command=argv)).verdict == "deny"
+    # even with every flag re-armed inside the job, the executor refuses to run anything there
+    rearmed = {**setup["env"], jp.YOLO_ENV: "1", "CHIP_BGJOB_ID": "j0", "CHIP_JOB_ACTOR": "dev:alpha"}
+    a = auth(setup, req(sudo=True, job_id="j0"))  # PM outside the job: YOLO still off
+    assert a.verdict == "ask" and a.ticket is None
+    ok = auth(setup, req(job_id="j0"))
+    r = FakeRunner()
+    rec = run(setup, ok.ticket, req(job_id="j0"), r, env=rearmed)
+    assert rec["status"] == "refused" and "inside a job" in rec["reason"] and r.calls == []
+    # and back in the PM process YOLO is still off: sudo still asks the operator
+    assert auth(setup, req(sudo=True, job_id="j3")).verdict == "ask"
