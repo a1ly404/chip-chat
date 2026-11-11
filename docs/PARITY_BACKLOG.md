@@ -110,7 +110,7 @@ generic webhook (`CHIP_PM_SUMMARY_WEBHOOK`, optional decision ping webhook, once
 `scripts/test_chip_pm_summary.py` (17 tests, fakes only). Remaining: enabling the flags in the live
 relay (deploy step).
 
-### P1.5 MCP connector support with allowlist + per-tool approval levels — `partial` (slices 1–2 done)
+### P1.5 MCP connector support with allowlist + per-tool approval levels — `done` (slices 1–3; HTTP/SSE transport is follow-up P1.5b)
 
 Slice 1 (done): `scripts/chip/mcp_client.py` stdio client (initialize + `notifications/initialized`,
 paginated `tools/list`, `tools/call`), per-server allowlist in `mcp/servers.json`, per-tool level
@@ -129,8 +129,15 @@ section and decision ping, an approved identical call uses its approval once, PM
 receipts. CLI `chip mcp offered|receipts`. `scripts/test_chip_mcp_tools.py` (16 tests, fake stdio
 server). Still behind `CHIP_MCP` (default off).
 
-Remaining (slice 3): call `plan_turn` from the relay chat turn (with receipts in chat), optional
-HTTP/SSE transport.
+Slice 3 (done): `scripts/chip/mcp_chat.py` `run_chat_turn` wired into the `chip room -m` shot path
+the relay uses for chat replies. Flag off or nothing offered = one plain completion (unchanged).
+Otherwise the planner block joins the room system prompt, calls run as `room:<room>:<agent>`
+(the asker cannot approve its own `ask` call), results go back to the model as data for at most
+`CHIP_MCP_CHAT_ROUNDS` rounds (default 2, hard 5; later calls refused with `tool round cap`), and the
+reply ends with a data-free receipt footer; `--json` and the stored room row carry sanitized
+`mcp_receipts`. `scripts/test_chip_mcp_chat.py` (12 tests, fake stdio server + fake completer).
+
+Follow-up P1.5b: optional HTTP/SSE transport; live enable needs an operator-chosen `servers.json`.
 
 ## Phase 2 — tools
 
@@ -220,7 +227,7 @@ Evidence: `README.md` quick start (mock). Gap: per-feature docs for new Phase 1�
 2. ~~P1.2 memory remember/forget/scopes~~ (done; P1.2b turn injection later)
 3. ~~P1.3 skills catalog~~ (done)
 4. ~~P1.4 background agent jobs with hop/spend caps~~ (done; P1.4b slice 1 + P1.4c PM tick + P1.4d summary done; live enable is a deploy step)
-5. ~~P1.5 MCP client + allowlist/approval levels~~ (slices 1–2 done; slice 3 = relay chat-turn wiring, HTTP transport)
+5. ~~P1.5 MCP client + allowlist/approval levels~~ (slices 1–3 done; HTTP/SSE transport = P1.5b, later)
 6. P3.3 Windows CI (cheap, protects everything after)
 7. P2.1 web fetch/search
 8. P2.2 files/attachments

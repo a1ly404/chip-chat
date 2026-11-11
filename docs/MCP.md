@@ -110,8 +110,33 @@ through `mcp_client.call` (allowlist, level, advertised check, approvals, audit)
 
 CLI: `chip mcp offered` (tools + planner prompt), `chip mcp receipts --limit N`.
 
+## Chat turns (slice 3)
+
+`chip room <name> -m TEXT` (the shot path the relay uses for each chat reply) runs through
+`chip.mcp_chat.run_chat_turn`:
+
+* `CHIP_MCP` off, or no `auto` / `ask` tool allowlisted: exactly one completion, same messages and
+  reply as before.
+* Otherwise the planner block is appended to the room's system prompt. Call lines in the reply run
+  through `plan_turn` as `room:<room>:<agent>`, so the asker can never approve its own `ask` call.
+  If any call reached the policy gate, the model gets one more completion with the results framed
+  as data. `CHIP_MCP_CHAT_ROUNDS` caps tool rounds per turn (default 2, hard 5); later call lines
+  are refused with `tool round cap`.
+* The posted reply is the final text with call lines removed, followed by a receipt footer:
+
+  ```
+  MCP receipts:
+  - files read: ok
+  - tracker create: pending (approval mcpa-… waiting on a human)
+  ```
+
+  Receipts in chat, in `--json` output (`mcp_receipts`, `completions`) and on the stored room row
+  carry server, tool, status, approval id, reason, argument hash and duration only, never the
+  arguments or the tool output.
+* Spend: every round is a normal `runtime.complete` call, so the session ledger and the row's
+  `cost_usd` cover all rounds.
+
 ## Not yet
 
-The relay's chat turn does not call `plan_turn` yet (engine hook is ready; wiring is a later slice).
 Resuming a specific job automatically after its `ask` call is approved is not automatic: the approval
 is used by the next identical call. HTTP/SSE transport is later.

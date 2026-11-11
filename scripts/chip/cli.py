@@ -468,17 +468,26 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     )
     before = float(spend.load_ledger().get("session_usd") or 0.0)
     store.log_message(room, "user", message)
+    from chip import mcp_chat
+
     try:
-        text, payload, routed, ledger = runtime.complete(
+        # P1.5 slice 3: MCP tool rounds when CHIP_MCP=1 and tools are allowlisted; otherwise one plain completion.
+        turn = mcp_chat.run_chat_turn(
             messages,
-            model=config.model_for_persona(persona),
-            max_tokens=config.ROOM_COMPLETION_MAX_TOKENS,
-            use_mock=use_mock,
-            command="room",
+            complete=lambda msgs, **kw: runtime.complete(msgs, **kw),
+            requested_by=f"room:{room}:{agent}",
+            complete_kwargs={
+                "model": config.model_for_persona(persona),
+                "max_tokens": config.ROOM_COMPLETION_MAX_TOKENS,
+                "use_mock": use_mock,
+                "command": "room",
+            },
         )
     except openrouter.ChipConfigError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+    text, payload, routed, ledger = turn["reply"], turn["payload"], turn["routed"], turn["ledger"]
+    mcp_receipts = turn["receipts"]
     prompt_n, completion_n, session_usd, monthly_usd = _shot_usage(payload, ledger)
     call_cost = max(0.0, session_usd - before)
     # Phase-1 task ledger (operator lock 2026-09-28): task binding is FIRST-CLASS —
@@ -508,6 +517,7 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
             "tokens_completion": completion_n,
             "cost_usd": call_cost,
             **task_extra,
+            **({"mcp_receipts": mcp_receipts} if mcp_receipts else {}),
         },
     )
     result = {
@@ -519,6 +529,9 @@ def cmd_room_shot(args: argparse.Namespace) -> int:
     }
     if task_extra:
         result["task_ledger"] = task_extra
+    if mcp_receipts:
+        result["mcp_receipts"] = mcp_receipts
+        result["completions"] = turn["completions"]
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
