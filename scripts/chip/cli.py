@@ -912,7 +912,7 @@ def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False, ste
     alerts = None
     if not (args is not None and getattr(args, "no_alerts", False)):
         raw = getattr(args, "alerts", None) if args is not None else None
-        alerts = pm_tick.AlertStream(Path(raw) if raw else pm_tick.default_alerts_path())
+        alerts = pm_tick.AlertStream(Path(raw)) if raw else pm_tick.default_alert_stream()
     failures = None
     if not (args is not None and getattr(args, "no_routine_failures", False)):
         failures = pm_tick.RoutineFailures()
@@ -1172,6 +1172,19 @@ def cmd_policy(args: argparse.Namespace) -> int:
                 print(f"NOT FOUND: no executor receipt for {args.decision_id}", file=sys.stderr)
                 return 3
             print(json.dumps(rows, ensure_ascii=False))
+        elif sub == "remediations":
+            from chip import remediations as rem
+
+            templates, why = rem.load(env)
+            out_doc: dict = {
+                "enabled": rem.enabled(env),
+                "remediations": [{k: t.get(k) for k in ("id", "match", "job_type", "action", "sudo")} for t in templates],
+            }
+            if why:
+                out_doc["why_empty"] = why
+            if args.alert_id:
+                out_doc["plan"] = rem.plan({"kind": "alert", "id": args.alert_id}, env, templates)
+            print(json.dumps(out_doc, ensure_ascii=False))
         elif sub == "keygen":
             out = Path(args.out).expanduser()
             if out.exists():
@@ -1405,6 +1418,8 @@ def build_parser() -> argparse.ArgumentParser:
     pol_rc.add_argument("--job", default="", help="Filter by job id")
     pol_r1 = pol_sub.add_parser("receipt", parents=[common], help="Executor receipt(s) for one decision id (exit 3 if none)")
     pol_r1.add_argument("decision_id")
+    pol_rem = pol_sub.add_parser("remediations", parents=[common], help="Pinned alert remediations; --alert-id shows the PM's fix plan (read-only)")
+    pol_rem.add_argument("--alert-id", default="")
     pol_kg = pol_sub.add_parser("keygen", parents=[common], help="Operator: create an Ed25519 operator key file (prints the public key)")
     pol_kg.add_argument("--out", required=True)
     pol_check = pol_sub.add_parser("check", parents=[common], help="Evaluate a job request JSON as the PM (exit 0 allow, 4 ask, 2 deny)")
