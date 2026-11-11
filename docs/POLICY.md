@@ -198,10 +198,32 @@ hook: `policy_exec.register_notifier(fn)` or `CHIP_POLICY_NOTIFY_HOOK=module:fun
 (`fn(message, request_row)`). The engine ships no channel; a plugin wires its operator chat. Hook
 errors never raise and the request is retried on the next ask; no notifier → `no-notifier`.
 
-## Next (slice 3)
+## Executor hardening (slice 3)
 
-* `chip policy exec --request JSON` / `chip policy receipts` CLI and executor receipts in the PM summary.
-* Kill the whole process group on a time cap (a `sudo` child can outlive the direct child today), and
-  run a private copy of hash-bound scripts to close the hash-then-exec window.
+Tests: `scripts/test_chip_policy_exec_d3.py`. Same flags as slice 2 (nothing new is on by default).
+
+* **Process-group kill.** The default runner starts the child in its own session
+  (`start_new_session`) and on the time cap kills the whole group (SIGTERM, 1 s grace, then
+  SIGKILL), so grandchildren can't outlive the job or hold its output pipes open. When a job exits
+  normally, background stragglers left in its group are swept too. If the group can't be signalled
+  (e.g. a root-owned group under `sudo`), the runner falls back to signalling the direct child; `sudo`
+  relays SIGTERM to its command.
+* **Private script copy.** A hash-bound script never runs from its original path. The executor reads
+  it once into a fresh `0700` temp dir (`chip-exec-*`), makes the copy `0500`, re-hashes **the copy**
+  against the bound `script_sha256`, swaps the copy path into the argv and runs that. The dir is
+  removed afterwards. An edit that lands after the recheck is refused (`script hash mismatch on the
+  private copy`) and nothing runs; the decision is already claimed, so it can't be retried. Receipts
+  carry `private_copy: true`. Residual: a process running as the same user could still write into the
+  private dir between copy and exec; jobs needing stronger isolation should run as a separate user.
+* **Receipts CLI (read-only).** `chip policy receipts [--limit N] [--status ok|failed|refused] [--job ID]`
+  lists recent executor receipts; `chip policy receipt <decision_id>` shows every receipt for one
+  decision (exit 3 if none). Receipts hold hashes and tails, never the raw argv.
+* **PM daily summary.** `pm_summary.build` adds `executor`: counts by status, granted sudo runs, and
+  one line per failed/refused run. Refused runs also count under refusals
+  (`executor: run refused`). The rendered message gets an **Executor runs** section on days with runs.
+
+## Next (slice 4)
+
+* `chip policy exec --request JSON` (operator-side authorize → execute from the CLI).
 * Relay/dev-bot wiring that calls `run_dev_job`; the plugin's operator-channel notifier and deployment
   hard denies (via `register_hard_deny`).

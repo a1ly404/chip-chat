@@ -144,8 +144,17 @@ D slice 2 — `done`: `scripts/chip/policy_exec.py` executor (`CHIP_POLICY_EXEC`
 * Asks are posted once through an operator notifier hook (`CHIP_POLICY_NOTIFY` default off).
 * Tests: `scripts/test_chip_policy_exec.py`.
 
-Follow-up D slice 3: exec/receipts CLI and PM summary, process-group kill, private script copy, relay
-wiring, plugin notifier and deployment hard denies.
+D slice 3 — `done`: executor hardening (same default-off flags):
+* The default runner kills the whole process group on the time cap and sweeps background
+  stragglers when a job exits.
+* Hash-bound scripts run from a private `0700` copy whose hash is verified on the copy (closes the
+  hash-then-exec window).
+* Read-only `chip policy receipts|receipt` CLI; executor receipts (counts, sudo runs, failed/refused
+  lines) in the PM daily summary.
+* Tests: `scripts/test_chip_policy_exec_d3.py`.
+
+Follow-up D slice 4: `chip policy exec` CLI, relay/dev-bot wiring to `run_dev_job`, plugin notifier and
+deployment hard denies.
 
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `done` (slices 1–3; HTTP/SSE transport is follow-up P1.5b)
 
