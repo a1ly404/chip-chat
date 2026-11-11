@@ -141,6 +141,30 @@ Not yet: any mutating or host-executor job from the picker.
 Each tick appends a row to `pm_tick_history.jsonl`. `--dry-run` works with every flag off and writes
 nothing (cursor included).
 
+### Real alert shapes and failed routines (P1.4e)
+
+Relay dispatch rows usually carry no severity (`{"key", "detail", "raw"}` plus a `gate`), which the
+picker policy would otherwise skip. The tick now:
+
+* drops rows the relay marked `gate=ignored` (or `ignored: true`); `cooldown` rows still count and the
+  picker's per-day dedupe absorbs repeats;
+* infers a severity when none is given, with ordered `[regex, severity]` rules (first match wins):
+  resolved/recovered/healthy again → `info`; outage/leak/data loss/breach → `critical`;
+  down/unhealthy/exited/crash/failed/error/OOM/timeout/degraded/stuck/not running → `warning`;
+  no match → no severity (not picked). Override with `alert_severity_rules` in
+  `bg_picker_policy.json` (a non-empty list replaces the defaults; bad regexes/severities are skipped).
+  Inferred items carry `severity_source: "inferred"`;
+* gives alerts with no id a stable `fp-<sha256>` fingerprint of their normalized text.
+
+**Failed routines** (`RoutineFailures`): new `failed` rows in routine run history become `warning`
+alerts `routine-failed:<routine id>` (detail = the run summary). The per-routine line cursor
+(`pm_tick_routine_cursor.json`) commits only after the pick succeeds; on first use it starts at the
+current end so old failures are not replayed. `pm-tick` routines are excluded so the PM never opens
+jobs about its own loop. `chip bgjob tick` reads it by default; `--no-routine-failures` turns it off.
+
+Container health or any other probe reaches the PM the same way: write alert rows (flat or relay
+shape) to the alert JSONL. All picked jobs are still `read` only.
+
 Scheduling: a routine with `kind=pm-tick` is dispatched to the PM tick by
 `chip routine run-due --via-jobs` (other kinds still run as background jobs).
 

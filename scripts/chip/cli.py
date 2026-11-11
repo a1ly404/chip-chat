@@ -913,6 +913,9 @@ def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False, ste
     if not (args is not None and getattr(args, "no_alerts", False)):
         raw = getattr(args, "alerts", None) if args is not None else None
         alerts = pm_tick.AlertStream(Path(raw) if raw else pm_tick.default_alerts_path())
+    failures = None
+    if not (args is not None and getattr(args, "no_routine_failures", False)):
+        failures = pm_tick.RoutineFailures()
     extra: list = []
     if args is not None and getattr(args, "linear_input", None):
         extra = bg_picker.read_items(Path(args.linear_input))
@@ -920,6 +923,7 @@ def _pm_tick_once(args: argparse.Namespace | None, *, dry_run: bool = False, ste
         datetime.now(timezone.utc),
         alerts=alerts,
         linear=pm_tick.linear_client_from_env(),
+        routine_failures=failures,
         extra_items=extra,
         step=step,
         dry_run=dry_run,
@@ -1219,6 +1223,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bg_tick.add_argument("--alerts", default=None, help="Alert JSONL path (default CHIP_PM_ALERTS_PATH or relay dispatch log)")
     bg_tick.add_argument("--no-alerts", action="store_true", help="Skip the alert stream adapter")
+    bg_tick.add_argument(
+        "--no-routine-failures", action="store_true", help="Skip the failed-routine adapter (routine run history)"
+    )
     bg_tick.add_argument("--linear-input", default=None, help="Extra picker inputs (JSON list / JSONL) instead of a live poll")
     bg_tick.add_argument("--model-step", action="store_true", help="Run jobs with the real model step (CHIP_JOBS_MODEL_STEP=1)")
     bg_tick.add_argument("--dry-run", action="store_true", help="Show picks; writes nothing (cursor included)")

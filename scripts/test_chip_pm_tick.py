@@ -69,7 +69,11 @@ def test_normalize_alert_flat_and_nested() -> None:
     assert flat == {"kind": "alert", "id": "f1", "title": "disk full", "severity": "critical", "detail": ""}
     nested = pm_tick.normalize_alert({"room": "r", "alert": {"key": "svc-down", "severity": "warning"}, "posted": True})
     assert nested["id"] == "svc-down" and nested["severity"] == "warning"
-    assert pm_tick.normalize_alert({"alert": {"title": "no id at all"}}) is None
+    assert pm_tick.normalize_alert({"alert": {}}) is None
+    fp = pm_tick.normalize_alert({"alert": {"title": "no id at all"}})  # P1.4e: stable text fingerprint
+    assert fp["id"].startswith("fp-") and fp == pm_tick.normalize_alert({"alert": {"title": "No id  at all"}}) | {
+        "title": "no id at all"
+    }
 
 
 def test_alert_stream_reads_once_and_skips_partial_and_bad(tmp_path: Path) -> None:

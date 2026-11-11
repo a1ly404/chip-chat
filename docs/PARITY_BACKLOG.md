@@ -110,6 +110,14 @@ generic webhook (`CHIP_PM_SUMMARY_WEBHOOK`, optional decision ping webhook, once
 `scripts/test_chip_pm_summary.py` (17 tests, fakes only). Remaining: enabling the flags in the live
 relay (deploy step).
 
+P1.4e — `done`: real relay alert rows (no severity, `gate` field) now reach the picker: `gate=ignored`
+rows dropped, severity inferred by ordered regex rules (policy `alert_severity_rules`), keyless alerts
+fingerprinted; `RoutineFailures` adapter turns new failed routine runs into `warning` alerts
+(`pm-tick` kind excluded, cursor committed after pick); `chip bgjob tick --no-routine-failures`;
+`scripts/test_chip_pm_real_alerts.py` (fakes only). Follow-up: engine-native job policy + privileged
+execution (PM as team lead, operator-confirmed saved rules, YOLO flag off by default), and live enable
+(deploy step).
+
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `done` (slices 1–3; HTTP/SSE transport is follow-up P1.5b)
 
 Slice 1 (done): `scripts/chip/mcp_client.py` stdio client (initialize + `notifications/initialized`,
