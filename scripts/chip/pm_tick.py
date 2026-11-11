@@ -14,6 +14,15 @@ One ``tick()`` is the "PM runs on its own" loop body:
    * :func:`linear_items` — polls an injected Linear client for open issues carrying a picker label
      (default ``chip-job``). :func:`linear_http_client` is a small GraphQL client used only when
      ``CHIP_PM_LINEAR=1`` and ``CHIP_LINEAR_API_KEY`` are set; tests inject fakes.
+   * :class:`RoutineFailures` — new ``failed`` rows in scheduled-routine run history become
+     ``warning`` alerts (``routine-failed:<id>``), with a persisted per-routine line cursor.
+     ``pm-tick`` routines are excluded so the PM never opens jobs about its own loop.
+
+   Real relay alerts often carry no severity (``{"key", "detail", "raw"}`` plus a ``gate``).
+   :func:`infer_severity` derives one from the text with ordered regex rules (picker policy
+   ``alert_severity_rules``; defaults: resolved/recovered -> info, outage/leak/data loss ->
+   critical, down/unhealthy/failed/crash/... -> warning, no match -> not picked). Rows the relay
+   marked ``gate=ignored`` are dropped, and alerts with no id get a stable text fingerprint.
 
 4. ``bg_picker.pick`` enqueues read-only jobs under its policy, dedupe and daily pick cap.
 5. ``bg_jobs.run_pending`` runs startable jobs under the job caps (daily jobs/spend, hop/spend
@@ -30,14 +39,16 @@ Routines with ``kind=pm-tick`` are dispatched here by ``chip routine run-due --v
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from chip import bg_jobs, bg_picker, budget_mode
+from chip import bg_jobs, bg_picker, budget_mode, routines
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_TICK"
@@ -85,32 +96,93 @@ def _first(d: Mapping[str, Any], keys: Iterable[str]) -> Any:
     return None
 
 
-def normalize_alert(row: Mapping[str, Any]) -> dict[str, Any] | None:
+DEFAULT_SEVERITY_RULES: tuple[tuple[str, str], ...] = (
+    (r"\b(resolved|recovered|back up|back online|healthy again|cleared)\b", "info"),
+    (r"\b(critical|outage|data ?loss|leak(ed|ing)?|breach)\b", "critical"),
+    (
+        (
+            r"\b(down|unhealthy|unreachable|exited|crash(ed|es|ing|loop)?|failed|failing|failure|error|oom|"
+        r"timed? ?out|timeout|degraded|stuck|not running|restart(ing)? loop)\b"
+        ),
+        "warning",
+    ),
+)
+SEVERITIES = frozenset({"critical", "warning", "info"})
+
+
+def severity_rules(policy: Mapping[str, Any] | None = None) -> list[tuple[re.Pattern[str], str]]:
+    """Compile ``alert_severity_rules`` (list of ``[regex, severity]``); bad entries are skipped."""
+    raw = (policy or {}).get("alert_severity_rules")
+    pairs = raw if isinstance(raw, list) and raw else list(DEFAULT_SEVERITY_RULES)
+    out: list[tuple[re.Pattern[str], str]] = []
+    for pair in pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        pat, sev = str(pair[0]), str(pair[1]).strip().lower()
+        if sev not in SEVERITIES or len(pat) > 500:
+            continue
+        try:
+            out.append((re.compile(pat, re.IGNORECASE), sev))
+        except re.error:
+            continue
+    return out
+
+
+def infer_severity(text: str, rules: list[tuple[re.Pattern[str], str]] | None = None) -> str:
+    """First matching rule wins; ``""`` when nothing matches (the picker then skips the alert)."""
+    blob = str(text or "")[:4000]
+    for rx, sev in rules if rules is not None else severity_rules():
+        if rx.search(blob):
+            return sev
+    return ""
+
+
+def normalize_alert(
+    row: Mapping[str, Any], *, rules: list[tuple[re.Pattern[str], str]] | None = None
+) -> dict[str, Any] | None:
     """Map one alert event (flat, or a relay row with nested ``alert``) to a picker input."""
     if not isinstance(row, Mapping):
         return None
+    if str(row.get("gate", "")).strip().lower() == "ignored" or row.get("ignored") is True:
+        return None  # the relay already decided this alert is noise
     inner = row.get("alert")
     a: Mapping[str, Any] = inner if isinstance(inner, Mapping) else row
-    ident = _first(a, ("id", "fingerprint", "key", "alert_id", "name")) or _first(row, ("id", "fingerprint"))
     title = _first(a, ("title", "summary", "message", "name", "key")) or ""
-    sev = _first(a, ("severity", "level", "priority", "status")) or ""
-    if ident is None:
-        return None
     detail = _first(a, ("detail", "description", "body", "text")) or ""
-    return {
+    raw_text = a.get("raw") if isinstance(a.get("raw"), str) else ""
+    ident = _first(a, ("id", "fingerprint", "key", "alert_id", "name")) or _first(row, ("id", "fingerprint"))
+    text = " ".join(str(x) for x in (title, detail, raw_text) if x).strip()
+    if ident is None:
+        if not text:
+            return None
+        ident = "fp-" + hashlib.sha256(" ".join(text.lower().split()).encode()).hexdigest()[:16]
+    sev = str(_first(a, ("severity", "level", "priority")) or "").strip().lower()
+    out = {
         "kind": "alert",
         "id": str(ident)[:120],
-        "title": str(title)[:300],
-        "severity": str(sev).strip().lower(),
-        "detail": str(detail)[:2000],
+        "title": str(title or text)[:300],
+        "severity": sev,
+        "detail": str(detail or (raw_text if raw_text != title else ""))[:2000],
     }
+    if not sev:
+        status = str(a.get("status") or "").strip().lower()
+        out["severity"] = infer_severity(f"{ident} {text} {status}", rules)
+        out["severity_source"] = "inferred"
+    return out
 
 
 class AlertStream:
     """Read new JSONL alert events since the last committed cursor (byte offset)."""
 
-    def __init__(self, path: Path, *, cursor_name: str = "pm_tick_alert_cursor.json") -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        cursor_name: str = "pm_tick_alert_cursor.json",
+        rules: list[tuple[re.Pattern[str], str]] | None = None,
+    ) -> None:
         self.path = Path(path)
+        self.rules = rules
         self.cursor_path = data_dir() / cursor_name
         self._pending: int | None = None
 
@@ -153,7 +225,7 @@ class AlertStream:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 info["bad"] += 1
                 continue
-            item = normalize_alert(row) if isinstance(row, dict) else None
+            item = normalize_alert(row, rules=self._rules()) if isinstance(row, dict) else None
             if item is None:
                 info["ignored"] += 1
                 continue
@@ -162,12 +234,99 @@ class AlertStream:
         info["offset_from"], info["offset_to"] = offset, pos
         return items, info
 
+    def _rules(self) -> list[tuple[re.Pattern[str], str]]:
+        if self.rules is None:
+            self.rules = severity_rules(bg_picker.load_policy())
+        return self.rules
+
     def commit(self) -> None:
         if self._pending is None:
             return
         self.cursor_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.cursor_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"path": str(self.path), "offset": self._pending}), encoding="utf-8")
+        os.replace(tmp, self.cursor_path)
+        self._pending = None
+
+
+# ------------------------------------------------------------------ routine failure adapter
+
+
+class RoutineFailures:
+    """New ``failed`` routine run-history rows -> ``warning`` alert inputs (read once each).
+
+    The cursor maps routine id -> history rows already seen. A routine seen for the first time
+    starts at its current end unless ``backfill=True``, so enabling the adapter does not replay
+    old failures. ``pm-tick`` routines are skipped (no jobs about the PM loop itself).
+    """
+
+    SKIP_KINDS = frozenset({ROUTINE_KIND})
+
+    def __init__(self, *, cursor_name: str = "pm_tick_routine_cursor.json", backfill: bool = False) -> None:
+        self.cursor_path = data_dir() / cursor_name
+        self.backfill = backfill
+        self._pending: dict[str, int] | None = None
+
+    def _cursor(self) -> dict[str, int]:
+        try:
+            raw = json.loads(self.cursor_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): int(v) for k, v in raw.items() if isinstance(v, int) and v >= 0}
+
+    def read(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        cur = self._cursor()
+        first_run = not self.cursor_path.is_file()
+        nxt: dict[str, int] = dict(cur)
+        items: list[dict[str, Any]] = []
+        info: dict[str, Any] = {"routines": 0, "new_rows": 0, "failed": 0}
+        rdir = routines.routines_dir()
+        files = sorted(rdir.glob("*.history.jsonl")) if rdir.is_dir() else []
+        for path in files:
+            rid = path.name[: -len(".history.jsonl")]
+            try:
+                lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            except OSError:
+                continue
+            info["routines"] += 1
+            start = cur.get(rid)
+            if start is None:
+                start = 0 if (self.backfill or not first_run) else len(lines)
+            if start > len(lines):  # history replaced: start over
+                start = 0
+            nxt[rid] = len(lines)
+            for ln in lines[start:]:
+                info["new_rows"] += 1
+                try:
+                    row = json.loads(ln)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict) or row.get("status") != "failed":
+                    continue
+                kind = str(row.get("kind") or "")
+                if kind in self.SKIP_KINDS:
+                    continue
+                info["failed"] += 1
+                items.append(
+                    {
+                        "kind": "alert",
+                        "id": f"routine-failed:{rid}"[:120],
+                        "title": f"Scheduled routine {rid} ({kind or '?'}) failed",
+                        "severity": "warning",
+                        "detail": str(row.get("summary") or "")[:2000],
+                    }
+                )
+        self._pending = nxt
+        return items, info
+
+    def commit(self) -> None:
+        if self._pending is None:
+            return
+        self.cursor_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.cursor_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._pending, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.cursor_path)
         self._pending = None
 
@@ -259,6 +418,7 @@ def tick(
     *,
     alerts: AlertStream | None = None,
     linear: LinearClient | None = None,
+    routine_failures: RoutineFailures | None = None,
     extra_items: Iterable[Mapping[str, Any]] = (),
     step: bg_jobs.Step | None = None,
     dry_run: bool = False,
@@ -286,6 +446,10 @@ def tick(
         got, info = alerts.read()
         items.extend(got)
         out["alerts"] = info
+    if routine_failures is not None:
+        got, info = routine_failures.read()
+        items.extend(got)
+        out["routine_failures"] = info
     if linear is not None:
         try:
             got = linear_items(linear, label=(bg_picker.load_policy(env=e)["linear_labels"] or ["chip-job"])[0])
@@ -295,8 +459,10 @@ def tick(
             out["errors"].append(f"linear: {type(exc).__name__}: {exc}"[:300])
     out["inputs"] = len(items)
     picked = bg_picker.pick(items, now=now, dry_run=dry_run, env=e)
-    if alerts is not None and not dry_run:
-        alerts.commit()
+    if not dry_run:
+        for adapter in (alerts, routine_failures):
+            if adapter is not None:
+                adapter.commit()
     out["picked"] = [j["id"] for j in picked["enqueued"]]
     out["skipped"] = picked["skipped"]
     out["picks_today"], out["daily_max"] = picked["picks_today"], picked["daily_max"]

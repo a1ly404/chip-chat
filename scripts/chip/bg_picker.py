@@ -16,6 +16,8 @@ Policy (defaults; override with ``CHIP_CHAT_DATA_DIR/bg_picker_policy.json`` or 
 * ``linear_closed_states`` — never pick issues in these states.
 * ``daily_max`` — picks per UTC day (``CHIP_PICKER_DAILY_MAX``, default 10, hard max 100).
 * ``job_max_spend_usd`` / ``job_max_hops`` — per-job ceilings, clamped to the bg_jobs caps.
+* ``alert_severity_rules`` — ordered ``[regex, severity]`` pairs used by the PM tick to infer a
+  severity for alerts that carry none (``None`` = built-in defaults in :mod:`chip.pm_tick`).
 
 Rules the policy cannot change: jobs are always ``mode=read`` (the picker never queues a
 mutating job), one job per input per UTC day, no new job while an earlier one for the same
@@ -47,6 +49,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "daily_max": 10,
     "job_max_spend_usd": None,
     "job_max_hops": 1,
+    "alert_severity_rules": None,
 }
 _POLICY_KEYS = frozenset(DEFAULT_POLICY)
 
