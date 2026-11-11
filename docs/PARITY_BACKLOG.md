@@ -118,6 +118,20 @@ fingerprinted; `RoutineFailures` adapter turns new failed routine runs into `war
 execution (PM as team lead, operator-confirmed saved rules, YOLO flag off by default), and live enable
 (deploy step).
 
+D slice 1 — `done`: `scripts/chip/job_policy.py` engine-native job policy (`CHIP_JOB_POLICY` default off):
+PM is the only decider and approves ordinary jobs within a pinned declarative policy (commands, target
+globs, hash-bound scripts, spend/time caps); dev-bot sudo requests become operator confirm requests
+(what/why/scope, expiry; decline/expiry final); confirm saves an exact-scope rule in an Ed25519-signed,
+hash-chained authority store (`scripts/chip/ed25519_ref.py`, runtime holds only the public key) so
+matching requests are auto-approved; list/revoke; `CHIP_PM_YOLO` / pack `pm_yolo` (default false)
+lets the PM grant sudo itself with every grant logged and shown in the PM summary; generic hard denies
+(inline sudo, secret access/exfiltration, unrelated deletes, policy/YOLO edits from a job) plus a
+plugin hook; `job_env()` strips policy controls and secrets. CLI `chip policy
+status|verify|rules|pending|grants|audit|check|confirm|decline|revoke|pin|keygen`, docs/POLICY.md,
+`scripts/test_chip_job_policy.py` (attack matrix). Follow-up D slice 2: executor consumes `allow`
+decisions (job env, caps, sudo only when decided, receipts), bg_jobs mutate/dev-bot jobs routed through
+`evaluate`, asks posted to the operator; deployment-specific hard denies from the plugin.
+
 ### P1.5 MCP connector support with allowlist + per-tool approval levels — `done` (slices 1–3; HTTP/SSE transport is follow-up P1.5b)
 
 Slice 1 (done): `scripts/chip/mcp_client.py` stdio client (initialize + `notifications/initialized`,

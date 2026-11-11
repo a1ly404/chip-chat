@@ -12,7 +12,9 @@
 * ``waiting`` — items that need a human decision: queued ``mutate`` jobs (the PM never runs those on
   its own), job outputs carrying a line that starts with :data:`DECISION_MARKER`, and ticks skipped
   because the monthly budget is stopped, plus pending MCP approvals (``ask``-level tool calls queued by
-  jobs or turns; see :mod:`chip.mcp_tools`).
+  jobs or turns; see :mod:`chip.mcp_tools`) and pending sudo confirm requests (:mod:`chip.job_policy`).
+* ``policy`` / ``sudo_grants`` — job-policy verdict counts for the day and every YOLO sudo grant
+  (reason, scope, expiry); denied requests count as refusals.
 * ``mcp`` — MCP tool receipts for the day counted by status (ok / pending / refused / error).
 
 :func:`render` turns that into one chat message (Discord-style markdown, capped length).
@@ -42,7 +44,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chip import bg_jobs, mcp_tools
+from chip import bg_jobs, job_policy, mcp_tools
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_SUMMARY"
@@ -205,6 +207,23 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
     if mcp_counts.get("refused"):
         refusals["mcp: tool call refused"] += mcp_counts["refused"]
 
+    waiting += job_policy.pending_waiting()
+    policy_counts = job_policy.day_counts(start.strftime(fmt), end.strftime(fmt))
+    if policy_counts.get("deny"):
+        refusals["policy: job request denied"] += policy_counts["deny"]
+    sudo_grants = [
+        {
+            "id": g.get("id"),
+            "job_id": g.get("job_id"),
+            "requested_by": g.get("requested_by"),
+            "reason": _clip(g.get("reason"), 120),
+            "action": (g.get("scope") or {}).get("action"),
+            "target": (g.get("scope") or {}).get("target"),
+            "expires_at": g.get("expires_at"),
+        }
+        for g in job_policy.grants(start.strftime(fmt), end.strftime(fmt))
+    ]
+
     spend_rows = [r for r in _jsonl(data_dir() / "bg_jobs_spend.jsonl") if _in(r.get("ts"), start, end)]
     total = sum(float(r.get("cost_usd") or 0.0) for r in spend_rows)
     retry = sum(float(r.get("retry_cost_usd") or 0.0) for r in spend_rows)
@@ -218,6 +237,8 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         "spend": {"usd": round(total, 6), "retry_usd": round(retry, 6), "hops": len(spend_rows)},
         "waiting": waiting,
         "mcp": dict(sorted(mcp_counts.items())),
+        "policy": dict(sorted(policy_counts.items())),
+        "sudo_grants": sudo_grants,
     }
 
 
@@ -256,6 +277,13 @@ def render(summary: Mapping[str, Any]) -> str:
     lines += ["", "**Changes**"] + (_bullets(list(summary.get("changes") or [])) or ["- none"])
     ref = [f"{k} ×{v}" for k, v in (summary.get("refusals") or {}).items()]
     lines += ["", "**Refusals**"] + (_bullets(ref) or ["- none"])
+    grants = [
+        f"`{g.get('job_id')}` {g.get('requested_by')}: {g.get('action')} on {g.get('target') or '-'}"
+        f" (until {g.get('expires_at')}) — {g.get('reason')}"
+        for g in (summary.get("sudo_grants") or [])
+    ]
+    if grants:
+        lines += ["", "**Sudo grants (YOLO)**"] + _bullets(grants)
     lines += ["", "**Waiting on you**"] + (_bullets(list(summary.get("waiting") or [])) or ["- nothing"])
     text = "\n".join(lines)
     return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 12].rstrip() + "\n…(clipped)"

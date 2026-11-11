@@ -1140,6 +1140,74 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_policy(args: argparse.Namespace) -> int:
+    from chip import job_policy as jp
+
+    sub = args.policy_cmd
+    env = dict(os.environ)
+    try:
+        if sub == "status":
+            print(json.dumps(jp.status(env), ensure_ascii=False))
+        elif sub == "verify":
+            rows = jp.verify_chain(env)
+            print(json.dumps({"authority": "ok", "rows": len(rows)}))
+        elif sub == "rules":
+            print(json.dumps(jp.active_rules(env=env), ensure_ascii=False))
+        elif sub == "pending":
+            print(json.dumps(jp.pending_requests(), ensure_ascii=False))
+        elif sub == "grants":
+            print(json.dumps(jp.grants(), ensure_ascii=False))
+        elif sub == "audit":
+            print(json.dumps(jp.read_audit(args.limit), ensure_ascii=False))
+        elif sub == "keygen":
+            out = Path(args.out).expanduser()
+            if out.exists():
+                print("REFUSED: key file already exists", file=sys.stderr)
+                return 2
+            if jp._inside(out, jp.data_dir()):
+                print("REFUSED: operator key file must live outside the engine data dir", file=sys.stderr)
+                return 2
+            key = jp.OperatorKey.generate()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(key.seed_hex() + "\n")
+            print(json.dumps({"key_file": str(out), jp.PUBKEY_ENV: key.public.hex()}))
+        elif sub == "check":
+            for marker in jp.IN_SYSTEM_MARKERS:
+                if os.environ.get(marker):
+                    print(f"REFUSED: policy check is refused inside a job ({marker} set)", file=sys.stderr)
+                    return 2
+            try:
+                raw = json.loads(args.request)
+            except json.JSONDecodeError as exc:
+                print(f"ERROR: --request is not JSON: {exc}", file=sys.stderr)
+                return 2
+            dec = jp.evaluate(raw, actor="pm", pm_reason=args.reason, env=env)
+            print(json.dumps(dec.to_dict(), ensure_ascii=False))
+            return {"allow": 0, "ask": 4}.get(dec.verdict, 2)
+        elif sub in {"confirm", "decline", "revoke", "pin"}:
+            key = jp.OperatorKey.load(env)
+            if sub == "confirm":
+                res = jp.confirm(args.request_id, key, env=env, rule_ttl_s=args.rule_ttl or None)
+            elif sub == "decline":
+                res = jp.decline(args.request_id, key, env=env)
+            elif sub == "revoke":
+                res = jp.revoke(args.rule_id, key, env=env)
+            else:
+                res = jp.pin_policy(key, env=env)
+            print(json.dumps(res, ensure_ascii=False))
+        else:  # pragma: no cover - argparse enforces choices
+            return 64
+    except jp.AuthorityTampered as exc:
+        print(f"TAMPERED: {exc}", file=sys.stderr)
+        return 5
+    except jp.PolicyError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chip", description="Chip Chat — OpenRouter multi-agent CLI")
     common = argparse.ArgumentParser(add_help=False)
@@ -1304,6 +1372,33 @@ def build_parser() -> argparse.ArgumentParser:
     mc_audit = mcp_sub.add_parser("audit", parents=[common], help="Show recent audit rows")
     mc_audit.add_argument("--limit", type=int, default=50)
     mcp_p.set_defaults(func=cmd_mcp)
+
+    pol_p = sub.add_parser("policy", help="Job policy: PM decisions, operator-confirmed sudo rules, YOLO (CHIP_JOB_POLICY=1)")
+    pol_sub = pol_p.add_subparsers(dest="policy_cmd", required=True)
+    for name, hlp in (
+        ("status", "Flag, YOLO, authority store health, rule and pending counts"),
+        ("verify", "Verify the authority store signature chain"),
+        ("rules", "List active operator-confirmed rules"),
+        ("pending", "List pending sudo confirm requests"),
+        ("grants", "List YOLO sudo grants"),
+        ("pin", "Operator: pin the current policy file hash (needs operator key)"),
+    ):
+        pol_sub.add_parser(name, parents=[common], help=hlp)
+    pol_audit = pol_sub.add_parser("audit", parents=[common], help="Recent evaluation receipts")
+    pol_audit.add_argument("--limit", type=int, default=50)
+    pol_kg = pol_sub.add_parser("keygen", parents=[common], help="Operator: create an Ed25519 operator key file (prints the public key)")
+    pol_kg.add_argument("--out", required=True)
+    pol_check = pol_sub.add_parser("check", parents=[common], help="Evaluate a job request JSON as the PM (exit 0 allow, 4 ask, 2 deny)")
+    pol_check.add_argument("--request", required=True)
+    pol_check.add_argument("--reason", default="")
+    pol_conf = pol_sub.add_parser("confirm", parents=[common], help="Operator: confirm a request (runs once + saves an exact-scope rule)")
+    pol_conf.add_argument("request_id")
+    pol_conf.add_argument("--rule-ttl", type=int, default=0, help="rule expiry in seconds (0 = no expiry)")
+    pol_dec = pol_sub.add_parser("decline", parents=[common], help="Operator: decline a request (final)")
+    pol_dec.add_argument("request_id")
+    pol_rev = pol_sub.add_parser("revoke", parents=[common], help="Operator: revoke a saved rule")
+    pol_rev.add_argument("rule_id")
+    pol_p.set_defaults(func=cmd_policy)
 
     board_p = sub.add_parser("board", help="Room hypothesis board")
     board_sub = board_p.add_subparsers(dest="board_cmd", required=True)

@@ -1,0 +1,149 @@
+# Job policy (`chip policy`)
+
+Parity item **D slice 1**: the engine decides which jobs may run, and which may run with sudo/root,
+by itself, without a separate job runner. Module: `scripts/chip/job_policy.py` (+ `scripts/chip/ed25519_ref.py`).
+Tests: `scripts/test_chip_job_policy.py` (attack matrix included).
+
+**Off by default.** `CHIP_JOB_POLICY=1` enables evaluation; with it off every request is denied.
+This slice only *decides*. Wiring a decision into privileged execution (and into `bg_jobs` mutate
+jobs) is slice 2. Nothing here enables `CHIP_JOBS_ALLOW_MUTATE`, `CHIP_HOST_EXEC` or `CHIP_RECIPE_EXEC`.
+
+## Roles
+
+| who | can | cannot |
+| --- | --- | --- |
+| **PM** (`actor="pm"`) | evaluate requests; approve ordinary jobs inside the policy; in YOLO mode grant sudo | request jobs; write rules; change YOLO or policy |
+| **Dev bot** (`dev:<name>`) | request a job (what, why, scope) | evaluate, approve, confirm, or grant itself sudo |
+| **Operator** | confirm/decline requests, revoke rules, pin the policy file, generate the key | — (not a runtime principal: needs the operator key file) |
+
+## Decision order (`job_policy.evaluate`)
+
+1. flag off → **deny**
+2. malformed request, unknown fields (`approved_by`, `yolo`, `rule_id`, …), non-PM actor, PM/operator
+   requester → **deny**
+3. authority store signature chain broken → **deny** (the whole store fails closed)
+4. policy file changed since the operator pinned it → **deny**
+5. **hard denies** (below) → **deny**, whatever YOLO, rules or confirms say
+6. job-type policy (commands, targets, scripts, caps) → **deny** on mismatch
+7. not sudo → **allow** (PM approves within policy)
+8. sudo: job type `sudo: "never"` → deny; matching operator rule → **allow**; YOLO → **allow** with a
+   logged grant; otherwise → **ask** (a pending operator confirm request)
+
+Every evaluation writes a receipt to `policy/audit.jsonl` (command sha256, never the raw argv).
+
+## Sudo: confirm → durable rule (YOLO off, the default)
+
+* The PM's **ask** creates a request in `policy/requests.jsonl` with what (command, action, target,
+  context), why (PM reason) and an expiry (`CHIP_POLICY_REQUEST_TTL_S`, default 24 h). Identical
+  requests reuse the pending one.
+* `chip policy confirm <id>` (operator): the job may run once (`job_policy.was_confirmed(id)`), and a
+  rule binding the **exact** scope is saved: job type, action, target, context, command sha256,
+  script path + sha256. Matching requests are then auto-approved. Rules never contain wildcards, so a
+  confirm never widens anything. `--rule-ttl` gives the rule an expiry.
+* `chip policy decline <id>` is final for that request; the same exact request is refused for 24 h.
+  Expired requests are closed and cannot be confirmed.
+* `chip policy rules` lists rules, `chip policy revoke <rule>` removes one.
+* Confirm re-checks hard denies and refuses a request record that was edited after it was created.
+
+## YOLO
+
+`CHIP_PM_YOLO` (env) beats the system pack value `values.pm_yolo` (strict JSON `true`); both default
+false. In YOLO the PM grants sudo itself and never asks, but each grant is written to
+`policy/grants.jsonl` (reason, exact scope, expiry `CHIP_PM_YOLO_GRANT_TTL_S`, default 1 h) and shows
+in the daily PM summary under **Sudo grants (YOLO)**. Hard denies, `sudo: never` and job-type policy
+still apply. A request cannot carry its own `yolo` field, and job environments drop `CHIP_PM_YOLO`.
+
+## Authority store (tamper evidence)
+
+`policy/authority.jsonl` holds rule adds/revokes, confirms, declines and policy pins. Each row links to
+the sha256 of the previous row and carries an **Ed25519 signature** by the operator key. The runtime
+holds only the public key (`CHIP_POLICY_OPERATOR_PUBKEY`, the trust root), so the PM, dev bots and jobs
+can verify the store but cannot write a row that verifies. A forged, edited, reordered or deleted row,
+or a non-empty store without the trust root configured, makes every evaluation deny.
+
+Operator key rules (`OperatorKey.load`):
+
+* `CHIP_POLICY_OPERATOR_KEY_FILE` (64 hex chars) must live **outside** the engine data dir;
+* its public half must equal `CHIP_POLICY_OPERATOR_PUBKEY`;
+* it refuses to load inside a job/bot process (`CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR` set).
+
+Set the key file path only in the operator's own shell, never in the relay or job environment.
+
+```console
+$ chip policy keygen --out ~/.config/chip-operator/op.key   # prints CHIP_POLICY_OPERATOR_PUBKEY
+$ export CHIP_POLICY_OPERATOR_PUBKEY=<printed hex>           # relay + operator shell
+$ export CHIP_POLICY_FILE=/etc/chip/job_policy.json           # outside the data dir
+$ chip policy pin                                             # operator shell (has the key file)
+```
+
+## Declarative policy file
+
+`CHIP_POLICY_FILE` (JSON). No file → no job types → everything denied. Editing it requires a fresh
+`chip policy pin` by the operator.
+
+```json
+{
+  "job_types": {
+    "diagnostics": {
+      "allow_commands": ["systemctl", "journalctl", "ls"],
+      "deny_commands": ["dd"],
+      "allow_targets": ["/srv/app", "/srv/app/*"],
+      "deny_targets": ["/srv/app/private*"],
+      "sudo": "ask",
+      "max_spend_usd": 0.10,
+      "max_seconds": 300
+    },
+    "fix-script": {
+      "allow_commands": [],
+      "scripts": {"/opt/chip/scripts/fix.sh": "<sha256>"}
+    }
+  }
+}
+```
+
+* commands match on the executable's base name (globs allowed); targets are globs;
+* a target is required to match `allow_targets` when given (no list → no targets allowed);
+* scripts are **hash-bound**: the request must carry `script_path` + `script_sha256`, the file on disk
+  must hash to it, and (when the job type lists `scripts`) to the pinned value; a rule bound to a
+  script stops matching when the script changes;
+* `max_spend_usd` is clamped to `bg_jobs` per-job caps; `max_seconds` to 3600.
+
+## Hard denies
+
+Built in, generic, never overridden:
+
+* inline privilege escalation (`sudo`, `su`, `doas`, `pkexec`, … in the argv): sudo is only ever a
+  request flag decided by policy;
+* YOLO / rules / policy / enforcement changes from a job: any mention of `CHIP_PM_YOLO`, `pm_yolo`,
+  `CHIP_POLICY_*`, `CHIP_JOB_POLICY`, `chip policy`, the authority store, or a path inside the policy
+  store, the operator key file, the policy file or the enforcement modules;
+* credential/secret access and exfiltration: secret paths (`.ssh`, `.aws`, `.env`, `*.pem`, `*.key`,
+  `shadow`, …), secret-named env var references, environment dumps, raw network tools, uploads
+  (`curl -T/-F/-d @`), remote copies, inline interpreter code (`bash -c`, `python -c`);
+* deletes outside the declared absolute target (also wildcards, `..`, root, too-broad targets, and
+  anything that would remove the policy store or key).
+
+Plugins add more with `job_policy.register_hard_deny(name, fn)` or `CHIP_POLICY_DENY_HOOKS=module:func`
+(`fn(request) -> reason | None`). Hooks can only refuse; a hook that errors or fails to load denies.
+
+## Job environment
+
+`job_policy.job_env(env, job_id=, actor=)` builds a subprocess environment without policy controls,
+the operator key path, or secret-named variables (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*`,
+`*WEBHOOK*`, …), and marks it with `CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR` so operator actions refuse there.
+
+## CLI
+
+| command | who | exit |
+| --- | --- | --- |
+| `chip policy status` / `verify` / `rules` / `pending` / `grants` / `audit` | anyone (read-only) | 5 if the store is tampered |
+| `chip policy check --request JSON [--reason]` | PM (refused inside a job) | 0 allow, 4 ask, 2 deny |
+| `chip policy confirm <id> [--rule-ttl S]` / `decline <id>` / `revoke <rule>` / `pin` | operator key | 2 refused |
+| `chip policy keygen --out PATH` | operator | 2 if the file exists or is inside the data dir |
+
+## Next (slice 2)
+
+Consume an `allow` decision in the executor: run the approved argv with `job_env`, the per-job time
+cap and spend cap, sudo only when the decision says so, and a receipt bound to the decision; route
+`bg_jobs` mutate jobs and dev-bot jobs through `evaluate`; post asks to the operator channel.
+Deployment-specific hard denies are added later from a private plugin via the hook.
