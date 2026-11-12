@@ -18,6 +18,9 @@
 * ``executor`` — job-policy executor receipts for the day (:mod:`chip.policy_exec`): counts by
   status, granted sudo runs, and failed/refused runs; refused runs also count as refusals.
 * ``mcp`` — MCP tool receipts for the day counted by status (ok / pending / refused / error).
+* ``fixes`` — "Fixes CC made" that day (:mod:`chip.pm_fixes`): ok executor receipts that were alert
+  remediations, dev-bot PRs merged via :mod:`chip.dev_pr`, and (only when ``CHIP_PM_FIXES_REPOS`` is
+  set) fix-labelled issues closed and fix PRs merged on the forge. Forge errors never fail the summary.
 
 :func:`render` turns that into one chat message (Discord-style markdown, capped length).
 :func:`render_ping` returns a short one-line-per-decision message, or ``None`` on quiet days.
@@ -46,7 +49,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chip import bg_jobs, job_policy, mcp_tools, policy_exec
+from chip import bg_jobs, job_policy, mcp_tools, pm_fixes, policy_exec
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_SUMMARY"
@@ -151,7 +154,8 @@ def _decisions(job: Mapping[str, Any]) -> list[str]:
     return out
 
 
-def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Mapping[str, Any]] | None = None,
+          forge_http: pm_fixes.Http | None = None) -> dict[str, Any]:
     """Summary dict for one local day (see module docstring)."""
     e = _env(env)
     tz = zone(e)
@@ -229,6 +233,8 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         for g in job_policy.grants(start.strftime(fmt), end.strftime(fmt))
     ]
 
+    fixes = pm_fixes.collect(start, end, env=e, http=forge_http)
+
     spend_rows = [r for r in _jsonl(data_dir() / "bg_jobs_spend.jsonl") if _in(r.get("ts"), start, end)]
     total = sum(float(r.get("cost_usd") or 0.0) for r in spend_rows)
     retry = sum(float(r.get("retry_cost_usd") or 0.0) for r in spend_rows)
@@ -245,6 +251,7 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         "policy": dict(sorted(policy_counts.items())),
         "sudo_grants": sudo_grants,
         "executor": executor,
+        "fixes": fixes,
     }
 
 
@@ -297,6 +304,9 @@ def render(summary: Mapping[str, Any]) -> str:
             head += f" · sudo runs {ex['sudo_runs']}"
         lines += ["", f"**Executor runs** ({head})"] + _bullets(list(ex.get("problems") or []))
     lines += ["", "**Waiting on you**"] + (_bullets(list(summary.get("waiting") or [])) or ["- nothing"])
+    # Last so a long fixes list is what gets clipped, never "Waiting on you".
+    fx = pm_fixes.lines(summary.get("fixes") or {})
+    lines += ["", "**Fixes CC made**"] + (_bullets(fx, 6) or ["- none"])
     text = "\n".join(lines)
     return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 12].rstrip() + "\n…(clipped)"
 

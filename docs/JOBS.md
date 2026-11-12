@@ -213,6 +213,17 @@ one-line-per-decision ping goes there too; quiet days send no ping. `CHIP_PM_SUM
 `{date}` replaced) is appended to ping lines. Gated by `CHIP_PM_SUMMARY=1` (default off); a day posts
 once unless `--force` (state in `pm_summary_sent.json`).
 
+The last section, **Fixes CC made**, lists the fixes Chip Chat itself made that day (`chip.pm_fixes`,
+read-only): ok executor receipts whose policy context starts with `alert:` (or whose job type is in
+`CHIP_PM_FIXES_JOB_TYPES`), dev-bot PRs merged through `chip.dev_pr`, and, only when
+`CHIP_PM_FIXES_REPOS` (comma list of `owner/repo`) is set, closed issues with the fix label
+(`CHIP_PM_FIXES_LABEL`, default `cc-fix`) plus merged PRs that carry that label, use a fix branch
+prefix (`CHIP_PM_FIXES_BRANCH_PREFIXES`, default `cc-fix/,fix/`) or say `Fixes #N` for one of those
+issues, all with links. Forge auth is optional: `CHIP_PM_FIXES_TOKEN_FROM` names another env var
+(its name must contain `TOKEN`); the value is only sent as a header. Forge errors show as one short
+line and never fail the summary. The section comes after "Waiting on you" so clipping never hides a
+decision.
+
 A routine with `kind=pm-summary` posts yesterday's summary (prompt `today` posts the current day) under
 `chip routine run-due --via-jobs`:
 
