@@ -11,6 +11,10 @@ Roles
 
 Decision order (:func:`evaluate`) — first match wins, everything fails closed:
 
+0. Called from inside a job / bot process (``CHIP_BGJOB_ID`` / ``CHIP_JOB_ACTOR`` set in the passed
+   env *or* the process env) → deny, and nothing is written (no audit, request, grant or decision
+   row). Only the PM process outside any job decides; re-arming every flag plus YOLO inside a job
+   changes nothing.
 1. ``CHIP_JOB_POLICY`` off → deny.
 2. Request shape: unknown fields, a non-PM actor, a PM/operator requester → deny.
 3. Authority store hash chain broken (edited, removed, forged rows) → deny.
@@ -93,6 +97,28 @@ class AuthorityTampered(PolicyError):
 
 def _env(env: Mapping[str, str] | None) -> dict[str, str]:
     return dict(os.environ if env is None else env)
+
+
+def in_job_marker(env: Mapping[str, str] | None = None) -> str | None:
+    """Name of the first in-system marker set in ``env`` or the real process env, else None.
+
+    Both are checked, failing closed when either says "job": code inside a job could pass a
+    hand-built env mapping without the markers, so the real process env counts too. This is
+    defense in depth on top of the executor refusal, ``job_env`` scrubbing and hard denies.
+    """
+    sources = [os.environ] if env is None else [env, os.environ]
+    for src in sources:
+        for marker in IN_SYSTEM_MARKERS:
+            if str(src.get(marker, "") or "").strip():
+                return marker
+    return None
+
+
+def refuse_in_job(what: str, env: Mapping[str, str] | None = None) -> None:
+    """Raise :class:`PolicyError` when called from inside a job or bot process."""
+    marker = in_job_marker(env)
+    if marker:
+        raise PolicyError(f"{what} is refused inside a job or bot process ({marker} set)")
 
 
 def _truthy(v: Any) -> bool:
@@ -240,9 +266,7 @@ class OperatorKey:
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> "OperatorKey":
         e = _env(env)
-        for marker in IN_SYSTEM_MARKERS:
-            if str(e.get(marker, "")).strip():
-                raise PolicyError(f"operator actions are refused inside a job or bot process ({marker} set)")
+        refuse_in_job("operator actions", e if env is not None else None)
         raw = str(e.get(KEY_FILE_ENV, "")).strip()
         if not raw:
             raise PolicyError(f"{KEY_FILE_ENV} is not set (operator shell only)")
@@ -301,6 +325,7 @@ def _authority_append(key: OperatorKey, event: str, payload: Mapping[str, Any], 
                       env: Mapping[str, str] | None = None) -> dict[str, Any]:
     if not isinstance(key, OperatorKey):
         raise PolicyError("authority writes need the operator key")
+    refuse_in_job("authority writes", env)
     pub = operator_pubkey(env)
     if pub is None or not hmac.compare_digest(pub, key.public):
         raise PolicyError(f"operator key does not match {PUBKEY_ENV}")
@@ -463,6 +488,7 @@ def pending_requests(now: datetime | None = None) -> list[dict[str, Any]]:
 
 def _open_request(req: JobRequest, pm_reason: str, env: Mapping[str, str], now: datetime) -> tuple[str, str]:
     """Return (request_id, status) for an identical pending/declined request or a new one."""
+    refuse_in_job("opening an operator confirm request", env)
     digest = req.digest()
     for st in pending_requests(now):
         if st.get("digest") == digest:
@@ -782,6 +808,19 @@ def evaluate(
     req: JobRequest | None = None
     yo = False
 
+    # Step 0: never decide from inside a job / bot process. Checked before anything else and
+    # returned without an audit row, so a job cannot write audit, request, grant or decision rows
+    # (or learn anything about the policy) even with every flag plus YOLO re-armed in its env.
+    marker = in_job_marker(env)
+    if marker:
+        jid = ""
+        if isinstance(raw, JobRequest):
+            jid = raw.job_id
+        elif isinstance(raw, Mapping):
+            jid = str(raw.get("job_id", ""))[:96]
+        return Decision("deny", f"in-job refusal: policy decisions are refused inside a job or bot process ({marker} set)",
+                        job_id=jid)
+
     def done(verdict: str, reason: str, **kw: Any) -> Decision:
         d = Decision(verdict, reason, job_id=req.job_id if req else "", yolo=yo, **kw)
         _audit(d, req, actor, n)
@@ -823,6 +862,7 @@ def evaluate(
             return done("allow", "sudo: matches operator-confirmed rule", rule_id=rule["id"])
     yo = yolo(e, pack)
     if yo:
+        refuse_in_job("YOLO grants", env)  # belt and braces: step 0 already returned
         ttl = _int_env(e, GRANT_TTL_ENV, 3600, 60, 86400)
         gid = "yg-" + uuid.uuid4().hex[:12]
         _append(

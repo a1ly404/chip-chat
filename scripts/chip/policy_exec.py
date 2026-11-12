@@ -173,9 +173,14 @@ def authorize(
     now: datetime | None = None,
     notifier: Notifier | None = None,
 ) -> Authorization:
-    """PM decision → ticket (allow) / operator confirm post (ask) / refusal (deny)."""
+    """PM decision → ticket (allow) / operator confirm post (ask) / refusal (deny).
+
+    Refused inside a job / bot process (no ticket, no decision row): see ``job_policy.evaluate``."""
     e = jp._env(env)
     n = jp._now(now)
+    marker = jp.in_job_marker(env)
+    if marker:
+        return Authorization("deny", f"in-job refusal: policy decisions are refused inside a job or bot process ({marker} set)")
     dec = jp.evaluate(raw, actor=actor, pm_reason=pm_reason, env=e, pack=pack, now=n)
     if dec.verdict == "ask":
         sent = notify_ask(dec.request_id, env=e, now=n, notifier=notifier)
@@ -349,9 +354,9 @@ def execute(
         return refuse("job policy disabled")
     if not exec_enabled(e):
         return refuse(f"{EXEC_FLAG} is not enabled")
-    for marker in jp.IN_SYSTEM_MARKERS:
-        if e.get(marker):
-            return refuse(f"executor refused inside a job ({marker} set)")
+    marker = jp.in_job_marker(env)
+    if marker:
+        return refuse(f"executor refused inside a job ({marker} set)")
     try:
         req = raw if isinstance(raw, jp.JobRequest) else jp.JobRequest.from_dict(raw)
     except jp.PolicyError as exc:
