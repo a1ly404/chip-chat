@@ -133,6 +133,22 @@ Plugins add more with `job_policy.register_hard_deny(name, fn)` or `CHIP_POLICY_
 the operator key path, or secret-named variables (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*`,
 `*WEBHOOK*`, …), and marks it with `CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR` so operator actions refuse there.
 
+### In-job refusal (defense in depth)
+
+Code running inside a job could, in principle, re-add every policy flag plus YOLO to an env mapping
+and call the policy API directly. So, besides the executor refusal, the scrubbed job env and the hard
+denies, every decision and row writer refuses when an in-system marker is set in the passed env **or**
+in the real process env (`job_policy.in_job_marker`):
+
+* `job_policy.evaluate` returns `deny` with an `in-job refusal: …` reason as step 0 and writes nothing
+  (no audit, confirm request, YOLO grant or decision row);
+* `policy_exec.authorize` / `run_dev_job` / `gate_job` return `deny` with no ticket;
+* operator confirm request creation, YOLO grant writes and authority-chain appends (`confirm`,
+  `decline`, `revoke`, `pin`) raise `PolicyError`, even for a caller holding an `OperatorKey`.
+
+The PM tick, relay and operator shell never carry these markers (only `job_env` sets them), so the
+legitimate path is unchanged. Tests: `scripts/test_chip_policy_in_job.py`.
+
 ## CLI
 
 | command | who | exit |
