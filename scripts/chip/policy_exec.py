@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib
+import json
 import os
 import shlex
 import shutil
@@ -45,6 +46,7 @@ import signal
 import subprocess
 import tempfile
 import time
+import urllib.request
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -56,6 +58,8 @@ from chip import job_policy as jp
 EXEC_FLAG = "CHIP_POLICY_EXEC"
 NOTIFY_FLAG = "CHIP_POLICY_NOTIFY"
 NOTIFY_HOOK_ENV = "CHIP_POLICY_NOTIFY_HOOK"
+NOTIFY_WEBHOOK_ENV = "CHIP_POLICY_NOTIFY_WEBHOOK"
+NOTIFY_MAX_CHARS = 1900
 DECISION_TTL_ENV = "CHIP_POLICY_DECISION_TTL_S"
 SUDO_ARGV = ("sudo", "-n", "--")
 DEFAULT_SECONDS = 600
@@ -460,12 +464,88 @@ def clear_notifiers() -> None:
     _NOTIFIERS.clear()
 
 
+# transport(url, body) -> HTTP status. Tests swap this; the URL is never logged or returned.
+WebhookTransport = Callable[[str, bytes], int]
+
+
+def _http_post(url: str, body: bytes) -> int:
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "chip-policy-notify"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - operator-configured webhook
+        return int(getattr(resp, "status", 200))
+
+
+def webhook_notifier(url: str, *, transport: WebhookTransport | None = None) -> Notifier:
+    """Generic incoming-webhook notifier: POSTs ``{"content": message}`` with mentions disabled
+    (the message carries PM / requester text). Raises on a non-2xx status so the ask is retried."""
+    target = str(url or "").strip()
+    if not target.lower().startswith(("https://", "http://")):
+        raise ValueError(f"{NOTIFY_WEBHOOK_ENV} must be an http(s) URL")
+
+    def _notify(message: str, row: dict[str, Any]) -> None:
+        text = str(message)
+        if len(text) > NOTIFY_MAX_CHARS:
+            text = text[: NOTIFY_MAX_CHARS - 12].rstrip() + "\n…(clipped)"
+        body = json.dumps({"content": text, "allowed_mentions": {"parse": []}}).encode("utf-8")
+        status = (transport or _webhook_transport())(target, body)
+        if not 200 <= int(status) < 300:
+            raise RuntimeError(f"operator webhook returned HTTP {int(status)}")
+
+    return _notify
+
+
+def _webhook_transport() -> WebhookTransport:
+    return _TRANSPORT[0] or _http_post
+
+
+_TRANSPORT: list[WebhookTransport | None] = [None]
+
+
+def set_webhook_transport(fn: WebhookTransport | None) -> None:
+    """Test helper: route webhook posts through ``fn`` (``None`` restores real HTTP)."""
+    _TRANSPORT[0] = fn
+
+
 def _env_notifiers(env: Mapping[str, str]) -> list[Notifier]:
     out: list[Notifier] = []
     for spec in [s.strip() for s in str(env.get(NOTIFY_HOOK_ENV, "")).split(",") if s.strip()]:
         mod, _, attr = spec.partition(":")
         fn = getattr(importlib.import_module(mod), attr or "notify")
         out.append(fn)
+    url = str(env.get(NOTIFY_WEBHOOK_ENV, "") or "").strip()
+    if url:
+        out.append(webhook_notifier(url))
+    return out
+
+
+def notify_channels(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """What an ask would be posted through (no URLs): flag state, registered / hook / webhook counts."""
+    e = jp._env(env)
+    hooks = [s for s in str(e.get(NOTIFY_HOOK_ENV, "")).split(",") if s.strip()]
+    return {
+        "enabled": jp._truthy(e.get(NOTIFY_FLAG, "0")),
+        "registered": len(_NOTIFIERS),
+        "hooks": len(hooks),
+        "webhook": bool(str(e.get(NOTIFY_WEBHOOK_ENV, "") or "").strip()),
+    }
+
+
+def notify_pending(
+    *,
+    env: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+    notifier: Notifier | None = None,
+) -> dict[str, str]:
+    """Post every pending confirm request that has not been posted yet (retry sweep after an
+    ``error`` / ``no-notifier``). Returns ``{request_id: notify status}``."""
+    done = {r.get("id") for r in jp._jsonl(notified_path())}
+    out: dict[str, str] = {}
+    for row in jp.pending_requests(now):
+        rid = str(row.get("id") or "")
+        if rid and rid not in done:
+            out[rid] = notify_ask(rid, env=env, now=now, notifier=notifier)
     return out
 
 
@@ -593,6 +673,6 @@ def day_receipts(start: str, end: str) -> dict[str, Any]:
 
 __all__ = [
     "Authorization", "ExecRefused", "Ticket", "authorize", "clear_notifiers", "confirm_message", "exec_enabled",
-    "day_receipts", "exec_step", "execute", "gate_job", "notify_ask", "private_script_copy", "receipt", "receipts",
-    "register_notifier", "run_dev_job", "subprocess_runner",
+    "day_receipts", "exec_step", "execute", "gate_job", "notify_ask", "notify_channels", "notify_pending", "private_script_copy", "receipt", "receipts",
+    "register_notifier", "run_dev_job", "set_webhook_transport", "subprocess_runner", "webhook_notifier",
 ]

@@ -195,8 +195,22 @@ Entry points:
 `CHIP_POLICY_NOTIFY=1` (default off) posts each new confirm request once (`policy/notified.jsonl`):
 what, command, PM reason, expiry and the `chip policy confirm|decline <id>` commands. The channel is a
 hook: `policy_exec.register_notifier(fn)` or `CHIP_POLICY_NOTIFY_HOOK=module:func`
-(`fn(message, request_row)`). The engine ships no channel; a plugin wires its operator chat. Hook
-errors never raise and the request is retried on the next ask; no notifier → `no-notifier`.
+(`fn(message, request_row)`). Hook errors never raise and the request is retried on the next ask;
+no notifier → `no-notifier`.
+
+Built-in generic channel: set `CHIP_POLICY_NOTIFY_WEBHOOK` to an incoming-webhook URL (any service that
+accepts `POST {"content": "..."}`). The message is clipped to 1900 chars and mentions are disabled
+(`allowed_mentions.parse = []`), because it carries PM / requester text. A non-2xx reply is an `error`
+(retried later). The URL is never printed: `chip policy status` shows only
+`notify: {enabled, registered, hooks, webhook: true|false}`. The webhook name matches the job-env
+secret filter, so jobs never see it.
+
+CLI (refused inside a job, like `check`):
+
+* `chip policy check --request JSON --notify`: on `ask`, also post the confirm request (adds `notify`).
+* `chip policy notify <request_id>`: post one pending request now. Exit 0 sent/duplicate, 1
+  off/no-notifier/error, 3 not pending.
+* `chip policy notify --pending`: retry sweep, posts every pending request not yet posted.
 
 ## Executor hardening (slice 3)
 
