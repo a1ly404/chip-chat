@@ -155,6 +155,14 @@ picker policy would otherwise skip. The tick now:
   `bg_picker_policy.json` (a non-empty list replaces the defaults; bad regexes/severities are skipped).
   Inferred items carry `severity_source: "inferred"`;
 * gives alerts with no id a stable `fp-<sha256>` fingerprint of their normalized text.
+* drops the PM's own output before any severity is inferred (`pm_tick.self_generated`): rows whose
+  `source` / `origin` / `producer` / `kind` / `username` / `author` (top level or nested `alert`) is
+  `pm-summary`, `pm-tick`, `pm-ping`, `chip-pm-summary` or starts with `picker:`; messages whose text
+  opens like a PM daily summary (`PM daily summary YYYY-MM-DD`) or decision ping
+  (`PM YYYY-MM-DD: N decision(s) waiting`); and text carrying `source=pm-summary` / `source=picker:…`.
+  The summary is posted to the same channels the relay listens on, and its job lines ("failed",
+  "timeout") would otherwise infer `warning` and open a job about the summary itself. Dropped rows
+  count in the tick's `alerts.self` (and `alerts.ignored`);
 
 **Failed routines** (`RoutineFailures`): new `failed` rows in routine run history become `warning`
 alerts `routine-failed:<routine id>` (detail = the run summary). The per-routine line cursor
@@ -234,3 +242,21 @@ With `CHIP_JOB_POLICY=1`, `run_pending` routes every mutate job through the poli
 
 A mutate job with `params.exec: true` runs its approved argv through `policy_exec` with time and spend
 caps, a scrubbed env, sudo only when granted, and receipts bound to the decision. See POLICY.md "Executor".
+
+## Planned maintenance windows (`chip.maintenance`)
+
+Scripts that restart the engine's containers on purpose (deploy, rollback, recreate) mark the window
+so watchers can tell a planned restart from an unplanned one:
+
+```
+python -m chip.maintenance start --receipt <id> --reason deploy [--ttl 7200] [--at <unix ts>]
+python -m chip.maintenance end   --receipt <id> [--status ok|failed]
+python -m chip.maintenance status
+```
+
+Rows append to `<data dir>/chip_state/maintenance.jsonl` (`CHIP_MAINTENANCE_PATH` overrides). A watcher
+calls `maintenance.covering(restart_ts)` (window ± 300 s grace) or `maintenance.active()` and logs a
+covered restart as planned (info) instead of a problem; restarts outside every window alert as before.
+Fail-safe: a window with no `end` closes itself at `start + ttl`, TTL is clamped to 12 h (a late `end`
+cannot stretch it), re-marking the same receipt keeps the first start, and writing a marker is refused
+inside a background job (`CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR`) so job code cannot mute its own alerts.
