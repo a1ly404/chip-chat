@@ -40,6 +40,7 @@ import hmac
 import importlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -59,6 +60,11 @@ EXEC_FLAG = "CHIP_POLICY_EXEC"
 NOTIFY_FLAG = "CHIP_POLICY_NOTIFY"
 NOTIFY_HOOK_ENV = "CHIP_POLICY_NOTIFY_HOOK"
 NOTIFY_WEBHOOK_ENV = "CHIP_POLICY_NOTIFY_WEBHOOK"
+# Runtime fallback: the NAME of another env var holding the webhook URL, read when
+# CHIP_POLICY_NOTIFY_WEBHOOK is empty (for URLs a secret manager injects at process start,
+# after any compose-time interpolation already ran). Only *WEBHOOK* names are accepted.
+NOTIFY_WEBHOOK_FROM_ENV = "CHIP_POLICY_NOTIFY_WEBHOOK_FROM"
+_WEBHOOK_VAR = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 NOTIFY_MAX_CHARS = 1900
 DECISION_TTL_ENV = "CHIP_POLICY_DECISION_TTL_S"
 SUDO_ARGV = ("sudo", "-n", "--")
@@ -519,10 +525,28 @@ def _env_notifiers(env: Mapping[str, str]) -> list[Notifier]:
         mod, _, attr = spec.partition(":")
         fn = getattr(importlib.import_module(mod), attr or "notify")
         out.append(fn)
-    url = str(env.get(NOTIFY_WEBHOOK_ENV, "") or "").strip()
+    url = notify_webhook_url(env)
     if url:
         out.append(webhook_notifier(url))
     return out
+
+
+def notify_webhook_source(env: Mapping[str, str] | None = None) -> str:
+    """Which env var the ask webhook comes from (a name, never the URL); ``""`` when none is set."""
+    e = jp._env(env)
+    if str(e.get(NOTIFY_WEBHOOK_ENV, "") or "").strip():
+        return NOTIFY_WEBHOOK_ENV
+    name = str(e.get(NOTIFY_WEBHOOK_FROM_ENV, "") or "").strip()
+    if name and _WEBHOOK_VAR.match(name) and "WEBHOOK" in name and str(e.get(name, "") or "").strip():
+        return name
+    return ""
+
+
+def notify_webhook_url(env: Mapping[str, str] | None = None) -> str:
+    """``CHIP_POLICY_NOTIFY_WEBHOOK``, else the var named by ``CHIP_POLICY_NOTIFY_WEBHOOK_FROM``."""
+    e = jp._env(env)
+    src = notify_webhook_source(e)
+    return str(e.get(src, "") or "").strip() if src else ""
 
 
 def notify_channels(env: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -533,7 +557,7 @@ def notify_channels(env: Mapping[str, str] | None = None) -> dict[str, Any]:
         "enabled": jp._truthy(e.get(NOTIFY_FLAG, "0")),
         "registered": len(_NOTIFIERS),
         "hooks": len(hooks),
-        "webhook": bool(str(e.get(NOTIFY_WEBHOOK_ENV, "") or "").strip()),
+        "webhook": bool(notify_webhook_source(e)),
     }
 
 
@@ -679,5 +703,5 @@ def day_receipts(start: str, end: str) -> dict[str, Any]:
 __all__ = [
     "Authorization", "ExecRefused", "Ticket", "authorize", "clear_notifiers", "confirm_message", "exec_enabled",
     "day_receipts", "exec_step", "execute", "gate_job", "notify_ask", "notify_channels", "notify_pending", "private_script_copy", "receipt", "receipts",
-    "register_notifier", "run_dev_job", "set_webhook_transport", "subprocess_runner", "webhook_notifier",
+    "notify_webhook_source", "notify_webhook_url", "register_notifier", "run_dev_job", "set_webhook_transport", "subprocess_runner", "webhook_notifier",
 ]

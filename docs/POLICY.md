@@ -221,6 +221,11 @@ accepts `POST {"content": "..."}`). The message is clipped to 1900 chars and men
 `notify: {enabled, registered, hooks, webhook: true|false}`. The webhook name matches the job-env
 secret filter, so jobs never see it.
 
+Runtime fallback: when `CHIP_POLICY_NOTIFY_WEBHOOK` is empty, `CHIP_POLICY_NOTIFY_WEBHOOK_FROM=<VAR>` names
+another env var to read the URL from at call time (for URLs a secret manager injects into the process
+after compose-time interpolation already ran). Only env-var-shaped names containing `WEBHOOK` are
+accepted; anything else is ignored (`no-notifier`). The direct variable always wins.
+
 CLI (refused inside a job, like `check`):
 
 * `chip policy check --request JSON --notify`: on `ask`, also post the confirm request (adds `notify`).

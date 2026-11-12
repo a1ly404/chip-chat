@@ -24,6 +24,12 @@ One ``tick()`` is the "PM runs on its own" loop body:
    critical, down/unhealthy/failed/crash/... -> warning, no match -> not picked). Rows the relay
    marked ``gate=ignored`` are dropped, and alerts with no id get a stable text fingerprint.
 
+   The PM's own output never becomes an alert (:func:`self_generated`): rows tagged with a PM
+   source (``pm-summary``, ``pm-tick``, ``picker:*``), and messages whose text is a PM daily summary
+   or decision ping (they are posted to the same monitoring channels the relay listens on), are
+   dropped at intake before any severity is inferred, so "jobs ... failed" inside a summary can
+   never open a job about the summary itself.
+
 4. ``bg_picker.pick`` enqueues read-only jobs under its policy, dedupe and daily pick cap.
 5. ``bg_jobs.run_pending`` runs startable jobs under the job caps (daily jobs/spend, hop/spend
    ceilings, read concurrency) with the supplied step (mock by default; model step in thrift mode
@@ -137,6 +143,52 @@ def infer_severity(text: str, rules: list[tuple[re.Pattern[str], str]] | None = 
     return ""
 
 
+# The PM's own producers. A row tagged with one of these (or whose text is PM output) is the
+# PM talking to itself: the daily summary, its decision ping, picker-made rows and tick rows.
+SELF_SOURCES = frozenset({"pm-summary", "pm-tick", "pm-ping", "chip-pm-summary"})
+SELF_SOURCE_PREFIXES = ("picker:", "pm-summary:", "pm-tick:")
+_SOURCE_FIELDS = ("source", "origin", "producer", "kind", "username", "author")
+_SELF_TEXT = re.compile(
+    r"(?:^|[\W_])(?:PM daily summary \d{4}-\d{2}-\d{2}\b|PM \d{4}-\d{2}-\d{2}: \d+ decision\(s\) waiting\b)",
+    re.IGNORECASE,
+)
+_SELF_SOURCE_TEXT = re.compile(r"\bsource\s*[=:]\s*[`'\"]?(?:pm-summary|pm-tick|picker:)", re.IGNORECASE)
+
+
+def _is_self_source(value: Any) -> bool:
+    v = str(value or "").strip().lower()
+    return bool(v) and (v in SELF_SOURCES or v.startswith(SELF_SOURCE_PREFIXES))
+
+
+def self_generated(row: Mapping[str, Any]) -> str:
+    """Why ``row`` is the PM's own output (``""`` when it is not).
+
+    Checks the source-like fields of the row and of a nested ``alert``, then the text: a message
+    that opens like a PM daily summary / decision ping, or carries ``source=pm-summary`` /
+    ``source=picker:...``. A real alert that merely mentions a job id is not affected.
+    """
+    if not isinstance(row, Mapping):
+        return ""
+    inner = row.get("alert")
+    layers = [row] + ([inner] if isinstance(inner, Mapping) else [])
+    for layer in layers:
+        for field in _SOURCE_FIELDS:
+            if field == "kind" and layer is row and str(layer.get(field, "")).strip().lower() == "alert":
+                continue
+            if _is_self_source(layer.get(field)):
+                return f"{field}={str(layer.get(field)).strip()[:60]}"
+    for layer in layers:
+        for field in ("title", "summary", "message", "name", "key", "detail", "description", "body", "text", "raw"):
+            val = layer.get(field)
+            if not isinstance(val, str) or not val:
+                continue
+            if _SELF_TEXT.search(val[:300]):
+                return f"{field} is PM output"
+            if _SELF_SOURCE_TEXT.search(val[:4000]):
+                return f"{field} names a PM source"
+    return ""
+
+
 def normalize_alert(
     row: Mapping[str, Any], *, rules: list[tuple[re.Pattern[str], str]] | None = None
 ) -> dict[str, Any] | None:
@@ -145,6 +197,8 @@ def normalize_alert(
         return None
     if str(row.get("gate", "")).strip().lower() == "ignored" or row.get("ignored") is True:
         return None  # the relay already decided this alert is noise
+    if self_generated(row):
+        return None  # the PM's own summary / picker rows: never an alert, never a severity
     inner = row.get("alert")
     a: Mapping[str, Any] = inner if isinstance(inner, Mapping) else row
     title = _first(a, ("title", "summary", "message", "name", "key")) or ""
@@ -195,7 +249,9 @@ class AlertStream:
 
     def read(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Return ``(items, info)``; call :meth:`commit` to advance past what was read."""
-        info: dict[str, Any] = {"path": str(self.path), "lines": 0, "bad": 0, "ignored": 0, "reset": False}
+        info: dict[str, Any] = {
+            "path": str(self.path), "lines": 0, "bad": 0, "ignored": 0, "self": 0, "reset": False,
+        }
         self._pending = None
         if not self.path.is_file():
             info["missing"] = True
@@ -224,6 +280,10 @@ class AlertStream:
                 row = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 info["bad"] += 1
+                continue
+            if isinstance(row, dict) and self_generated(row):
+                info["self"] += 1
+                info["ignored"] += 1
                 continue
             item = normalize_alert(row, rules=self._rules()) if isinstance(row, dict) else None
             if item is None:
@@ -262,7 +322,7 @@ class MultiAlertStream:
             got, info = st.read()
             items.extend(got)
             infos.append(info)
-        total = {k: sum(int(i.get(k, 0) or 0) for i in infos) for k in ("lines", "bad", "ignored")}
+        total = {k: sum(int(i.get(k, 0) or 0) for i in infos) for k in ("lines", "bad", "ignored", "self")}
         return items, {**total, "streams": infos}
 
     def commit(self) -> None:
