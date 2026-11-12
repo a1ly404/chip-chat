@@ -141,7 +141,7 @@ D slice 2 — `done`: `scripts/chip/policy_exec.py` executor (`CHIP_POLICY_EXEC`
   Receipts are bound to the decision.
 * Dev-bot entry point is `run_dev_job`. `bg_jobs` mutate jobs are routed through the policy (ask stays
   queued, deny fails, `params.exec` runs via the executor).
-* Asks are posted once through an operator notifier hook (`CHIP_POLICY_NOTIFY` default off).
+* Asks are posted once through an operator notifier hook (`CHIP_POLICY_NOTIFY` default off); built-in generic webhook channel `CHIP_POLICY_NOTIFY_WEBHOOK` + `chip policy notify` CLI.
 * Tests: `scripts/test_chip_policy_exec.py`.
 
 D slice 3 — `done`: executor hardening (same default-off flags):

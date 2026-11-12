@@ -1147,7 +1147,12 @@ def cmd_policy(args: argparse.Namespace) -> int:
     env = dict(os.environ)
     try:
         if sub == "status":
-            print(json.dumps(jp.status(env), ensure_ascii=False))
+            from chip import policy_exec as px
+
+            st = jp.status(env)
+            if isinstance(st, dict):
+                st = {**st, "notify": px.notify_channels(env)}
+            print(json.dumps(st, ensure_ascii=False))
         elif sub == "verify":
             rows = jp.verify_chain(env)
             print(json.dumps({"authority": "ok", "rows": len(rows)}))
@@ -1210,8 +1215,32 @@ def cmd_policy(args: argparse.Namespace) -> int:
                 print(f"ERROR: --request is not JSON: {exc}", file=sys.stderr)
                 return 2
             dec = jp.evaluate(raw, actor="pm", pm_reason=args.reason, env=env)
-            print(json.dumps(dec.to_dict(), ensure_ascii=False))
+            out_dec = dec.to_dict()
+            if args.notify and dec.verdict == "ask" and dec.request_id:
+                from chip import policy_exec as px
+
+                out_dec["notify"] = px.notify_ask(dec.request_id, env=env)
+            print(json.dumps(out_dec, ensure_ascii=False))
             return {"allow": 0, "ask": 4}.get(dec.verdict, 2)
+        elif sub == "notify":
+            from chip import policy_exec as px
+
+            for marker in jp.IN_SYSTEM_MARKERS:
+                if os.environ.get(marker):
+                    print(f"REFUSED: policy notify is refused inside a job ({marker} set)", file=sys.stderr)
+                    return 2
+            if bool(args.request_id) == bool(args.pending):
+                print("ERROR: give exactly one of <request_id> or --pending", file=sys.stderr)
+                return 2
+            if args.pending:
+                res = px.notify_pending(env=env)
+                print(json.dumps({"notify": res, "channels": px.notify_channels(env)}, ensure_ascii=False))
+                return 0 if all(v in {"sent", "duplicate"} for v in res.values()) else 1
+            status = px.notify_ask(args.request_id, env=env)
+            print(json.dumps({"request_id": args.request_id, "notify": status, "channels": px.notify_channels(env)}))
+            if status == "not-pending":
+                return 3
+            return 0 if status in {"sent", "duplicate"} else 1
         elif sub in {"confirm", "decline", "revoke", "pin"}:
             key = jp.OperatorKey.load(env)
             if sub == "confirm":
@@ -1425,6 +1454,13 @@ def build_parser() -> argparse.ArgumentParser:
     pol_check = pol_sub.add_parser("check", parents=[common], help="Evaluate a job request JSON as the PM (exit 0 allow, 4 ask, 2 deny)")
     pol_check.add_argument("--request", required=True)
     pol_check.add_argument("--reason", default="")
+    pol_check.add_argument("--notify", action="store_true", help="On ask, post the confirm request (CHIP_POLICY_NOTIFY=1)")
+    pol_nt = pol_sub.add_parser(
+        "notify", parents=[common],
+        help="Post a pending confirm request to the operator channel (exit 0 sent/duplicate, 1 off/no-notifier/error, 3 not pending)",
+    )
+    pol_nt.add_argument("request_id", nargs="?", default="")
+    pol_nt.add_argument("--pending", action="store_true", help="Post every pending request not yet posted")
     pol_conf = pol_sub.add_parser("confirm", parents=[common], help="Operator: confirm a request (runs once + saves an exact-scope rule)")
     pol_conf.add_argument("request_id")
     pol_conf.add_argument("--rule-ttl", type=int, default=0, help="rule expiry in seconds (0 = no expiry)")
