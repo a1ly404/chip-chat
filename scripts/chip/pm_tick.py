@@ -35,6 +35,10 @@ One ``tick()`` is the "PM runs on its own" loop body:
    ceilings, read concurrency) with the supplied step (mock by default; model step in thrift mode
    still refuses mutate jobs, which the picker never creates anyway).
 
+6. ``forge_steps.advance`` (only with ``CHIP_FORGE_STEPS`` on and ``CHIP_FORGE_STEPS_TICK=1``) polls CI on
+   submitted dev-bot PRs and merges approved ones whose CI is green, through the configured forge step
+   runner. It never opens or reviews, and a failure there never fails the tick.
+
 The alert cursor advances only after the pick step succeeds. Each tick appends one row to
 ``CHIP_CHAT_DATA_DIR/pm_tick_history.jsonl``.
 
@@ -54,7 +58,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from chip import bg_jobs, bg_picker, budget_mode, routines
+from chip import bg_jobs, bg_picker, budget_mode, forge_steps, routines
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_TICK"
@@ -530,6 +534,7 @@ def tick(
     step: bg_jobs.Step | None = None,
     dry_run: bool = False,
     env: Mapping[str, str] | None = None,
+    forge_runner: Any = None,
 ) -> dict[str, Any]:
     """One PM loop pass. Returns a summary dict (also appended to history unless ``dry_run``)."""
     if now.tzinfo is None:
@@ -584,6 +589,11 @@ def tick(
         out["deferred"] = res["deferred"]
         out["spend_usd"] = round(sum(float(j.get("spend_usd") or 0.0) for j in res["ran"]), 6)
         out["status"] = "ok"
+    if forge_steps.enabled(e) and forge_steps.tick_enabled(e):
+        try:
+            out["forge"] = forge_steps.advance(env=e, runner=forge_runner, now=now)
+        except Exception as exc:  # a broken forge runner must not stop the PM loop
+            out["errors"].append(f"forge: {type(exc).__name__}: {exc}"[:300])
     _append_history(out)
     return out
 
