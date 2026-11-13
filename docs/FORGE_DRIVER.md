@@ -22,6 +22,8 @@ How each step authenticates:
 
 The JWT and the token exist only in memory. Neither is logged, and any output is redacted.
 
+A freshly minted installation token can get `Repository not found` (HTTP 404) from GitHub's git endpoints for a few seconds, even though the API already accepts it. This was seen live: the first clone right after the mint failed, and the same token cloned fine 3 s later. So the network git calls (`checkout` clone, `open` push) retry **only** that answer, after 2, 4 and 8 s (`GIT_RETRY_DELAYS`). Any other git failure fails at once.
+
 Author ≠ approver at the forge:
 
 - `review` posts a real review (`APPROVE` / `REQUEST_CHANGES` with `commit_id` = the head sha), made as the PM app.

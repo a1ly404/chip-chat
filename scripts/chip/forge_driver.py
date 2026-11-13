@@ -88,7 +88,14 @@ APP_PERMS = {
     "dev": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"},
     "pm": {"pull_requests": "write", "contents": "read", "checks": "read", "statuses": "read"},
 }
-JWT_BACKDATE, JWT_TTL = 60, 540  # GitHub caps exp at 10 min; stay under it with clock-skew room
+JWT_BACKDATE, JWT_TTL = 60, 540
+# A freshly minted installation token can get "Repository not found" (HTTP 404) from the git
+# endpoints for a few seconds while the API already accepts it (seen live: the first clone right
+# after the mint failed, the same token cloned fine 3 s later). Network git calls retry ONLY that
+# answer, with these delays (seconds). Any other git failure fails at once.
+GIT_RETRY_DELAYS = (2, 4, 8)
+_GIT_NOT_FOUND = re.compile(r"repository '[^']*' not found|Repository not found|returned error: 404|HTTP 404",
+                            re.IGNORECASE)  # GitHub caps exp at 10 min; stay under it with clock-skew room
 
 
 def app_env_names(role: str) -> tuple[str, str, str]:
@@ -213,12 +220,14 @@ def worktree_path(item_id: str) -> Path:
 class Driver:
     def __init__(self, *, env: Mapping[str, str] | None = None, http: Http | None = None,
                  git: Git | None = None, now: datetime | None = None,
-                 clock: Callable[[], float] | None = None) -> None:
+                 clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], None] | None = None) -> None:
         self.env = env
         self.http = http or _urllib_http
         self.git = git or _subprocess_git
         self.now = now
         self.clock = clock or time.time
+        self.sleep = sleep or time.sleep
         self.static_tok = token(env)
         self.tok = self.static_tok
         self.auth = "token"
@@ -342,9 +351,17 @@ class Driver:
                      "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {auth}"})
         return base
 
-    def _run_git(self, argv: Sequence[str], cwd: str, env: Mapping[str, str] | None = None) -> str:
-        rc, out = self.git(argv, cwd, env if env is not None else {k: v for k, v in os.environ.items()
-                                                                     if not k.startswith(("GIT_", "CHIP_FORGE_"))})
+    def _run_git(self, argv: Sequence[str], cwd: str, env: Mapping[str, str] | None = None,
+                 *, retry_not_found: bool = False) -> str:
+        env = env if env is not None else {k: v for k, v in os.environ.items()
+                                           if not k.startswith(("GIT_", "CHIP_FORGE_"))}
+        rc, out = self.git(argv, cwd, env)
+        if retry_not_found:
+            for delay in GIT_RETRY_DELAYS:
+                if rc == 0 or not _GIT_NOT_FOUND.search(out or ""):
+                    break
+                self.sleep(delay)
+                rc, out = self.git(argv, cwd, env)
         if rc != 0:
             raise ForgeError(self._redact(f"git {argv[1] if len(argv) > 1 else ''} failed: {out}"))
         return out
@@ -367,7 +384,7 @@ class Driver:
         with self._session(STEP_ROLE["checkout"], repo):
             self._run_git(["git", "-c", "credential.helper=", "clone", "-q", "--no-tags", "--single-branch",
                            "--depth", "1", "--branch", str(base), f"{GIT_HOST}/{repo}.git", str(wt)],
-                          str(wt.parent), self._git_env())
+                          str(wt.parent), self._git_env(), retry_not_found=True)
         self._run_git(["git", "-C", str(wt), "remote", "remove", "origin"], str(wt.parent))
         sha = dp._sha(self._run_git(["git", "-C", str(wt), "rev-parse", "HEAD"], str(wt.parent))
                       .strip().splitlines()[-1], "base sha")
@@ -399,7 +416,7 @@ class Driver:
     def _open(self, item_id: str, it: Mapping[str, Any], repo: str, worktree: str, sha: str, br: str,
               title: str, body: str, decision_id: str, base: str) -> dict[str, Any]:
         self._run_git(["git", "-c", "credential.helper=", "push", "--no-verify", f"{GIT_HOST}/{repo}.git",
-                       f"{sha}:refs/heads/{br}"], worktree, self._git_env())
+                       f"{sha}:refs/heads/{br}"], worktree, self._git_env(), retry_not_found=True)
         owner = repo.split("/")[0]
         existing = self._api("GET", f"/repos/{repo}/pulls?state=open&head={owner}:{br}") or []
         if existing:
