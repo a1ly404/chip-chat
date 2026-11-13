@@ -19,6 +19,14 @@ implement, plus the dry-run side every caller can rely on:
 
 Flag: ``CHIP_HOST_EXEC`` (default off in repo) gates turn/relay wiring; the
 module stays injectable so tests run without network, hostnames or secrets.
+
+Turn/relay seam: :func:`run_turn_request` is the one entry a chat turn (or a
+relay command handler) calls to run a host job. It refuses unless
+``CHIP_HOST_EXEC`` is on, then hands the request to the job-policy executor
+(``policy_exec.run_dev_job``: PM authorize -> bound, capped execute), so every
+turn-originated run gets a decision id and a ``policy/exec_receipts.jsonl``
+receipt exactly like a dev-bot job. Nothing here widens policy: requester
+identity, hard denies, script pins, caps and sudo basis are all the policy's.
 """
 
 from __future__ import annotations
@@ -140,3 +148,59 @@ class ManifestAdapter:
             path = _append_receipt(self._receipts_dir(), hook, 0, "dry-run: engine adapter never runs host commands")
             return HostResult(hook=hook, exit=0, detail="dry-run: engine adapter never runs host commands", receipt_path=path)
         raise NotImplementedError("real execution belongs to a plugin adapter; engine stays dry-run")
+
+
+# ------------------------------------------------------------------ chat turn / relay seam
+
+TURN_PATH = "turn"
+TURN_REF_MAX = 64
+
+
+def _turn_refusal(reason: str, turn_ref: str) -> dict[str, Any]:
+    return {"verdict": "refused", "reason": reason, "path": TURN_PATH, "turn_ref": turn_ref, "receipt": None}
+
+
+def run_turn_request(
+    raw: Any,
+    *,
+    turn_ref: str,
+    env: Mapping[str, str] | None = None,
+    pack: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+    runner: Any = None,
+    notifier: Any = None,
+) -> dict[str, Any]:
+    """Run one host job requested from a chat turn through the job policy.
+
+    ``raw`` is a job-policy request (same shape as a dev-bot job: ``job_id``,
+    ``requested_by`` = ``dev:<name>``, ``job_type``, ``command``, ...).
+    ``turn_ref`` identifies the turn (room/message id) and is recorded in the
+    PM reason so the audit row ties back to the chat. Refuses with no side
+    effects when ``CHIP_HOST_EXEC`` is off, the turn ref is empty, or the
+    request is not an object. Otherwise returns ``policy_exec.run_dev_job``'s
+    result (verdict, decision ticket, and ``receipt`` when it ran) plus
+    ``path``/``turn_ref``.
+    """
+    ref = str(turn_ref or "").strip()[:TURN_REF_MAX]
+    gate_env = env if env is not None else os.environ
+    if not host_exec_enabled(gate_env):
+        return _turn_refusal(f"{HOST_EXEC_ENV} off: turn host-exec disabled", ref)
+    if not ref:
+        return _turn_refusal("turn_ref required: a turn host-exec must name its turn", ref)
+    if not isinstance(raw, Mapping):
+        return _turn_refusal("request must be a JSON object", ref)
+    from chip import policy_exec as px
+
+    why = str(raw.get("reason") or "").strip()[:160]
+    out = px.run_dev_job(
+        raw,
+        pm_reason=f"chat turn {ref}: {why}" if why else f"chat turn {ref}",
+        env=env,
+        pack=pack,
+        now=now,
+        runner=runner,
+        notifier=notifier,
+    )
+    out["path"] = TURN_PATH
+    out["turn_ref"] = ref
+    return out
