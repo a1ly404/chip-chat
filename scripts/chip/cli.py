@@ -1153,6 +1153,11 @@ def cmd_policy(args: argparse.Namespace) -> int:
             if isinstance(st, dict):
                 st = {**st, "notify": px.notify_channels(env)}
             print(json.dumps(st, ensure_ascii=False))
+            warn = st.get("pin_warning") if isinstance(st, dict) else None
+            if warn and (st.get("enabled") or st.get("policy_file")):
+                print(f"WARNING: {warn}", file=sys.stderr)
+            if getattr(args, "strict", False) and not (isinstance(st, dict) and st.get("pin_current")):
+                return 6
         elif sub == "verify":
             rows = jp.verify_chain(env)
             print(json.dumps({"authority": "ok", "rows": len(rows)}))
@@ -1431,7 +1436,6 @@ def build_parser() -> argparse.ArgumentParser:
     pol_p = sub.add_parser("policy", help="Job policy: PM decisions, operator-confirmed sudo rules, YOLO (CHIP_JOB_POLICY=1)")
     pol_sub = pol_p.add_subparsers(dest="policy_cmd", required=True)
     for name, hlp in (
-        ("status", "Flag, YOLO, authority store health, rule and pending counts"),
         ("verify", "Verify the authority store signature chain"),
         ("rules", "List active operator-confirmed rules"),
         ("pending", "List pending sudo confirm requests"),
@@ -1439,6 +1443,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("pin", "Operator: pin the current policy file hash (needs operator key)"),
     ):
         pol_sub.add_parser(name, parents=[common], help=hlp)
+    pol_st = pol_sub.add_parser(
+        "status", parents=[common],
+        help="Flag, YOLO, authority health, pin current/stale (pinned vs file sha16), rule and pending counts",
+    )
+    pol_st.add_argument("--strict", action="store_true", help="exit 6 unless the policy pin is current")
     pol_audit = pol_sub.add_parser("audit", parents=[common], help="Recent evaluation receipts")
     pol_audit.add_argument("--limit", type=int, default=50)
     pol_rc = pol_sub.add_parser("receipts", parents=[common], help="Recent executor receipts (read-only)")

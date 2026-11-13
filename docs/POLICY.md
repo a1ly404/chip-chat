@@ -82,6 +82,25 @@ $ chip policy pin                                             # operator shell (
 `CHIP_POLICY_FILE` (JSON). No file → no job types → everything denied. Editing it requires a fresh
 `chip policy pin` by the operator.
 
+### Pin status: current, not just present
+
+`chip policy status` reports whether the pin is **current**, i.e. whether the pinned sha256 equals the
+sha256 of the policy file on disk right now (the same check `evaluate` makes):
+
+| field | meaning |
+| --- | --- |
+| `pin` | `current`, `stale` (pinned, but the file changed since), `unpinned`, `no_policy_file`, `policy_error` (file missing/unreadable/not JSON) or `tampered` |
+| `pin_current` | `true` only for `current` |
+| `pinned_sha16` / `policy_sha16` | first 16 hex chars of the pinned sha and of the file's sha (`null` when unknown) |
+| `armed` | flag on **and** authority store ok **and** `pin_current` — the only state in which a decision can allow |
+| `pin_warning` | one line explaining a non-current pin (absent when current) |
+
+`pinned` (a pin row exists) is kept for compatibility but is **not** a health signal: a stale pin
+is present yet every job is denied. Fail closed: when the pin is not current the CLI also prints
+`WARNING: ...` on stderr, `chip policy status --strict` exits **6**, and the PM daily summary adds the
+warning to "waiting on you" (when the policy flag is on and a policy file is configured). Callers that
+gate on the policy being usable should read `armed` / `pin_current` or use `--strict`.
+
 ```json
 {
   "job_types": {
@@ -154,6 +173,7 @@ legitimate path is unchanged. Tests: `scripts/test_chip_policy_in_job.py`.
 | command | who | exit |
 | --- | --- | --- |
 | `chip policy status` / `verify` / `rules` / `pending` / `grants` / `audit` | anyone (read-only) | 5 if the store is tampered |
+| `chip policy status --strict` | anyone (read-only) | 6 unless the policy pin is current |
 | `chip policy check --request JSON [--reason]` | PM (refused inside a job) | 0 allow, 4 ask, 2 deny |
 | `chip policy confirm <id> [--rule-ttl S]` / `decline <id>` / `revoke <rule>` / `pin` | operator key | 2 refused |
 | `chip policy keygen --out PATH` | operator | 2 if the file exists or is inside the data dir |
