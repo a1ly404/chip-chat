@@ -11,7 +11,7 @@ Audience: humans and automated agents working on the Chip Chat **engine** reposi
 ## Development
 
 1. Use **mock mode** (`CHIP_CHAT_MOCK=1` or `--mock`) for routine work; avoid live OpenRouter spend without an explicit GO.
-2. Run tests locally before pushing: `pip install -e '.[dev,relay]'` then `python3 -m pytest -q`.
+2. Run tests locally before pushing: `pip install -e '.[dev,relay,forge]'` then `python3 -m pytest -q`.
 3. Never commit `.env`, tokens, webhooks, or real Discord snowflakes in engine code — use pack `identity` JSON in private packs.
 4. Keep changes minimal and match existing style in the touched module.
 5. Commits should be reviewable slices; reference your tracker in commit messages without auto-closing issues unless asked.

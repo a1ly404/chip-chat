@@ -18,7 +18,7 @@ cd chip-chat
 chmod +x bin/chip
 cp .env.example .env
 # Set OPENROUTER_CC_API_KEY in .env (never commit)
-pip install -e '.[dev,relay]'
+pip install -e '.[dev,relay,forge]'
 export CHIP_SYSTEM_PACK=acme-example
 ```
 
