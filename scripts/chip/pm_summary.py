@@ -214,6 +214,7 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         refusals["mcp: tool call refused"] += mcp_counts["refused"]
 
     waiting += job_policy.pending_waiting()
+    waiting += job_policy.pin_waiting(e)
     policy_counts = job_policy.day_counts(start.strftime(fmt), end.strftime(fmt))
     if policy_counts.get("deny"):
         refusals["policy: job request denied"] += policy_counts["deny"]

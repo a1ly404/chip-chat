@@ -1065,14 +1065,85 @@ def pending_waiting(now: datetime | None = None) -> list[str]:
     return out
 
 
+PIN_STATES = ("current", "stale", "unpinned", "no_policy_file", "policy_error", "tampered")
+
+
+def pin_state(env: Mapping[str, str] | None = None, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Is the operator's policy pin CURRENT (pinned sha == sha of the policy file on disk)?
+
+    Mirrors the check :func:`evaluate` makes, so a pin that is merely *present* never reads as
+    healthy. Returns ``pin`` (one of :data:`PIN_STATES`), ``pin_current`` (True only for
+    ``current``) and the 16-char ``pinned_sha16`` / ``policy_sha16`` (None when unknown).
+    Fail closed: anything other than ``current`` means evaluate denies every job.
+    """
+    e = _env(env)
+    out: dict[str, Any] = {"pin": "tampered", "pin_current": False, "pinned_sha16": None, "policy_sha16": None}
+    if rows is None:
+        try:
+            rows = verify_chain(e)
+        except AuthorityTampered:
+            return out
+    pinned = pinned_policy_sha(rows)
+    out["pinned_sha16"] = pinned[:16] if pinned else None
+    try:
+        _policy, actual = load_policy(e)
+    except PolicyError as exc:
+        out.update(pin="policy_error", policy_error=str(exc)[:200])
+        return out
+    out["policy_sha16"] = actual[:16] if actual else None
+    if actual is None:
+        out["pin"] = "no_policy_file"
+    elif not pinned:
+        out["pin"] = "unpinned"
+    elif pinned == actual:
+        out.update(pin="current", pin_current=True)
+    else:
+        out["pin"] = "stale"
+    return out
+
+
+def pin_problem(st: Mapping[str, Any]) -> str:
+    """One human line when a pin state is not healthy ('' when current)."""
+    pin = st.get("pin")
+    if pin == "current":
+        return ""
+    if pin == "stale":
+        return (f"policy pin is STALE: pinned {st.get('pinned_sha16')} != policy file {st.get('policy_sha16')}; "
+                "every job is denied until the operator re-pins (`chip policy pin`)")
+    if pin == "unpinned":
+        return "policy file is not pinned; every job is denied until the operator runs `chip policy pin`"
+    if pin == "no_policy_file":
+        return f"no policy file ({POLICY_FILE_ENV} unset); no job types, everything denied"
+    if pin == "policy_error":
+        return f"policy file unusable ({st.get('policy_error', '')}); every job is denied"
+    return "authority store tampered; every job is denied"
+
+
+def pin_waiting(env: Mapping[str, str] | None = None) -> list[str]:
+    """A "waiting on you" line for the PM summary when the policy is on but the pin is not current."""
+    e = _env(env)
+    if not enabled(e) or not policy_file(e):
+        return []
+    why = pin_problem(pin_state(e))
+    return [why] if why else []
+
+
 def status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     e = _env(env)
     out: dict[str, Any] = {"enabled": enabled(e), "yolo": yolo(e), "policy_file": bool(policy_file(e))}
+    rows: list[dict[str, Any]] | None = None
     try:
         rows = verify_chain(e)
         out.update(authority="ok", rows=len(rows), rules=len(active_rules(rows)), pinned=bool(pinned_policy_sha(rows)))
     except AuthorityTampered as exc:
         out.update(authority=f"tampered: {exc}")
+    out.update(pin_state(e, rows))  # rows None → re-verifies → "tampered"
+    # "armed" = decisions can actually allow: flag on, store intact, pin current. A present but
+    # stale pin is NOT armed (fail closed: it must never look healthy).
+    out["armed"] = bool(out["enabled"] and out.get("authority") == "ok" and out["pin_current"])
+    why = pin_problem(out)
+    if why:
+        out["pin_warning"] = why
     out["pending"] = len(pending_requests())
     return out
 
@@ -1080,6 +1151,7 @@ def status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 __all__ = [
     "AuthorityTampered", "Decision", "JobRequest", "OperatorKey", "PolicyError", "active_rules",
     "builtin_hard_deny", "confirm", "recheck", "sudo_basis_ok", "decline", "enabled", "evaluate", "grants", "job_env", "pending_requests",
-    "pending_waiting", "pin_policy", "register_hard_deny", "revoke", "status", "verify_chain", "was_confirmed",
+    "pending_waiting", "pin_policy", "pin_problem", "pin_state", "pin_waiting", "register_hard_deny", "revoke",
+    "status", "verify_chain", "was_confirmed",
     "yolo",
 ]
