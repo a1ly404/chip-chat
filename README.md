@@ -9,7 +9,7 @@ Licensed under the [MIT License](LICENSE).
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev,relay]'
+pip install -e '.[dev,relay,forge]'
 
 export CHIP_CHAT_MOCK=1
 export CHIP_SYSTEM_PACK=acme-example

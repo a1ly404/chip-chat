@@ -18,9 +18,25 @@ Steps (all fail closed; nothing is pushed or opened if a precheck refuses):
   ``dev_pr.merge_gate``; only on ``allow`` merge with the forge's expected-head-sha pin set to the
   gated sha, then ``dev_pr.record_merged``.
 
-Token: ``CHIP_FORGE_TOKEN`` (else ``GITHUB_TOKEN`` / ``GH_TOKEN``) from env. It is never printed,
-logged or put on a command line (git gets it via ``GIT_CONFIG_*`` env), and any forge/git output is
-redacted before it can surface. Missing token = refuse before any network call.
+Auth, two modes (both fail closed, nothing configured = every step refused before any network call):
+
+* **GitHub App mode** (preferred): two distinct apps, one per role. ``open``/``merge``/``ci`` use the
+  *dev* app (``CHIP_FORGE_DEV_APP_ID`` / ``_INSTALLATION_ID`` / ``_KEY_FILE``); ``review`` uses the
+  *PM* app (``CHIP_FORGE_PM_APP_*``). Each step mints its own short-lived installation token (RS256
+  JWT, ``iat`` 60s back, ``exp`` 9 min, ``iss`` = app id -> ``POST /app/installations/{id}/access_tokens``
+  scoped to the item repo and the role's permissions) and revokes it (``DELETE /installation/token``)
+  when the step ends. In this mode ``review`` is a real forge review (APPROVE / REQUEST_CHANGES on the
+  head sha) and author != approver holds at the forge too: the two apps must differ (app id,
+  installation, key file), the reviewer app's bot login may not be the PR author, and a PR reused by
+  ``open`` must have been opened by the dev app. Once any app var is set, a half-configured app or a
+  missing role refuses; there is no fallback to a static token. Tokens are never minted inside a job
+  (the key files belong to the forge step only; ``job_policy.job_env`` strips ``CHIP_FORGE_*``).
+  Needs ``PyJWT[crypto]`` (``pip install 'chip-chat[forge]'``).
+* **Static token** (legacy): ``CHIP_FORGE_TOKEN`` (else ``GITHUB_TOKEN`` / ``GH_TOKEN``). One identity
+  for every step, so ``review`` stays a PR comment (see above).
+
+Tokens, JWTs and key material are never printed, logged or put on a command line (git gets the token
+via ``GIT_CONFIG_*`` env), and any forge/git output is redacted before it can surface.
 
 Every call appends a row (no token, no bodies) to ``<data dir>/policy/forge_driver.jsonl``.
 
@@ -37,10 +53,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from chip import dev_pr as dp
 from chip import job_policy as jp
@@ -56,6 +76,20 @@ CI_BAD = frozenset({"failure", "cancelled", "timed_out", "action_required", "sta
 MAX_BODY = 4000
 EXIT_OK, EXIT_REFUSED, EXIT_FORGE, EXIT_USAGE = 0, 2, 5, 64
 
+# GitHub App mode: one app per role; steps map to roles (author = dev app, approver = PM app).
+ROLES = ("dev", "pm")
+STEP_ROLE = {"open": "dev", "merge": "dev", "ci": "dev", "review": "pm"}
+APP_PERMS = {
+    "dev": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"},
+    "pm": {"pull_requests": "write", "contents": "read", "checks": "read", "statuses": "read"},
+}
+JWT_BACKDATE, JWT_TTL = 60, 540  # GitHub caps exp at 10 min; stay under it with clock-skew room
+
+
+def app_env_names(role: str) -> tuple[str, str, str]:
+    r = role.upper()
+    return (f"CHIP_FORGE_{r}_APP_ID", f"CHIP_FORGE_{r}_APP_INSTALLATION_ID", f"CHIP_FORGE_{r}_APP_KEY_FILE")
+
 # http(method, url, body_or_None, headers) -> (status, parsed_json_or_None)
 Http = Callable[[str, str, Any, Mapping[str, str]], "tuple[int, Any]"]
 # git(argv, cwd, env) -> (returncode, combined_output)
@@ -64,6 +98,56 @@ Git = Callable[[Sequence[str], str, Mapping[str, str]], "tuple[int, str]"]
 
 class ForgeError(RuntimeError):
     """The forge or git failed (message is already redacted)."""
+
+
+@dataclass(frozen=True)
+class AppCfg:
+    role: str
+    app_id: str
+    installation_id: str
+    key_file: str
+
+
+def app_config(role: str, env: Mapping[str, str] | None = None) -> AppCfg | None:
+    """The role's app config, ``None`` when none of its vars are set; refuses a partial or malformed one."""
+    e = jp._env(env)
+    names = app_env_names(role)
+    vals = [str(e.get(n, "") or "").strip() for n in names]
+    if not any(vals):
+        return None
+    if not all(vals):
+        raise dp.DevPrRefused(f"{role} app partially configured (need all of {', '.join(names)})")
+    if not (vals[0].isdigit() and vals[1].isdigit()):
+        raise dp.DevPrRefused(f"{role} app id / installation id must be numeric")
+    return AppCfg(role, vals[0], vals[1], vals[2])
+
+
+def app_configs(env: Mapping[str, str] | None = None) -> dict[str, AppCfg | None]:
+    """Both roles' configs; when both are set they must be distinct identities (author != approver)."""
+    cfgs = {r: app_config(r, env) for r in ROLES}
+    dev, pm = cfgs["dev"], cfgs["pm"]
+    if dev and pm and (dev.app_id == pm.app_id or dev.installation_id == pm.installation_id
+                       or os.path.realpath(dev.key_file) == os.path.realpath(pm.key_file)):
+        raise dp.DevPrRefused("dev and PM apps must be distinct (app id, installation and key file)")
+    return cfgs
+
+
+def app_jwt(cfg: AppCfg, now_ts: float) -> str:
+    """RS256 app JWT (iat backdated 60s, exp 9 min, iss = app id). Never logged; key bytes never surface."""
+    try:
+        import jwt  # PyJWT[crypto], optional extra "forge"
+    except ImportError:
+        raise dp.DevPrRefused("GitHub App auth needs PyJWT[crypto] (pip install 'chip-chat[forge]')") from None
+    try:
+        key = Path(cfg.key_file).read_bytes()
+    except OSError:
+        raise dp.DevPrRefused(f"{cfg.role} app key file is not readable") from None
+    now = int(now_ts)
+    try:
+        return jwt.encode({"iat": now - JWT_BACKDATE, "exp": now + JWT_TTL, "iss": cfg.app_id}, key,
+                          algorithm="RS256")
+    except Exception:  # noqa: BLE001 - never echo key parsing errors (they can quote key bytes)
+        raise dp.DevPrRefused(f"{cfg.role} app key is not a usable RSA private key") from None
 
 
 def token(env: Mapping[str, str] | None = None) -> str:
@@ -81,10 +165,12 @@ def _secrets(tok: str) -> list[str]:
     return [tok, base64.b64encode(f"x-access-token:{tok}".encode()).decode()]
 
 
-def redact(text: str, tok: str) -> str:
+def redact(text: str, tok: "str | Sequence[str]") -> str:
     out = str(text or "")
-    for s in _secrets(tok):
-        out = out.replace(s, "***")
+    toks = [tok] if isinstance(tok, str) else list(tok)
+    for t in toks:
+        for s in _secrets(t):
+            out = out.replace(s, "***")
     return out[:500]
 
 
@@ -114,33 +200,103 @@ def _subprocess_git(argv: Sequence[str], cwd: str, env: Mapping[str, str]) -> tu
 
 class Driver:
     def __init__(self, *, env: Mapping[str, str] | None = None, http: Http | None = None,
-                 git: Git | None = None, now: datetime | None = None) -> None:
+                 git: Git | None = None, now: datetime | None = None,
+                 clock: Callable[[], float] | None = None) -> None:
         self.env = env
         self.http = http or _urllib_http
         self.git = git or _subprocess_git
         self.now = now
-        self.tok = token(env)
+        self.clock = clock or time.time
+        self.static_tok = token(env)
+        self.tok = self.static_tok
+        self.auth = "token"
+        self.login = ""  # app mode: the bot login of the app the current step runs as
+        self._seen: list[str] = [self.static_tok] if self.static_tok else []
+        self.revoked: list[bool] = []
+
+    # -------------------------------------------------------------- auth
+    def _redact(self, text: str) -> str:
+        return redact(text, self._seen)
+
+    def _auth(self, role: str) -> AppCfg | None:
+        """The app config this role's step must run as, ``None`` for the static token; refuses otherwise."""
+        cfgs = app_configs(self.env)
+        if any(cfgs.values()):
+            cfg = cfgs.get(role)
+            if cfg is None:
+                raise dp.DevPrRefused(f"GitHub App mode: the {role} app is not configured "
+                                      f"({', '.join(app_env_names(role))}); no static-token fallback")
+            return cfg
+        if not self.static_tok:
+            raise dp.DevPrRefused("no forge token in env (" + "/".join(TOKEN_ENVS)
+                                  + ") and no GitHub App config (CHIP_FORGE_DEV_APP_* / CHIP_FORGE_PM_APP_*)")
+        return None
+
+    def _raw(self, method: str, path: str, body: Any, bearer: str) -> tuple[int, Any]:
+        headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {bearer}",
+                   "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chip-forge-driver"}
+        try:
+            return self.http(method, API + path, body, headers)
+        except Exception as exc:  # noqa: BLE001 - surface a redacted error only
+            raise ForgeError(self._redact(f"{method} {path.split('?')[0]}: {exc}")) from None
+
+    def _mint(self, cfg: AppCfg, repo: str) -> None:
+        if jp.in_job_marker(self.env):
+            raise dp.DevPrRefused("GitHub App tokens are never minted inside a job (forge step only)")
+        j = app_jwt(cfg, self.clock())
+        self._seen.append(j)
+        status, app = self._raw("GET", "/app", None, j)
+        slug = str((app or {}).get("slug", "")) if isinstance(app, dict) else ""
+        if status >= 400 or not slug or str((app or {}).get("id", "")) != cfg.app_id:
+            raise ForgeError(self._redact(f"{cfg.role} app identity check -> {status}"))
+        status, out = self._raw("POST", f"/app/installations/{cfg.installation_id}/access_tokens",
+                                {"repositories": [repo.split("/", 1)[1]], "permissions": dict(APP_PERMS[cfg.role])}, j)
+        tok = str((out or {}).get("token", "")) if isinstance(out, dict) else ""
+        if status >= 400 or not tok:
+            msg = out.get("message", "") if isinstance(out, dict) else ""
+            raise ForgeError(self._redact(f"{cfg.role} app token mint -> {status} {msg}"))
+        self._seen.append(tok)
+        self.tok, self.auth, self.login = tok, f"app:{cfg.role}", f"{slug}[bot]".lower()
+
+    def _revoke(self) -> None:
+        ok = False
+        try:
+            status, _ = self._raw("DELETE", "/installation/token", None, self.tok)
+            ok = status in (204, 200)
+        except ForgeError:
+            ok = False
+        self.revoked.append(ok)
+
+    @contextmanager
+    def _session(self, role: str, repo: str) -> Iterator[None]:
+        """Run one step as ``role``: mint a per-step installation token (app mode) and revoke it after."""
+        cfg = self._auth(role)
+        if cfg is None:
+            yield
+            return
+        self._mint(cfg, repo)
+        try:
+            yield
+        finally:
+            self._revoke()
+            self.tok, self.auth, self.login = self.static_tok, "token", ""
 
     # -------------------------------------------------------------- plumbing
-    def _require(self, it: Mapping[str, Any]) -> str:
+    def _require(self, it: Mapping[str, Any], role: str = "dev") -> str:
         dp._common(self.env)
-        if not self.tok:
-            raise dp.DevPrRefused("no forge token in env (" + "/".join(TOKEN_ENVS) + ")")
+        self._auth(role)
         repo = str(it.get("repo") or "").lower()
         if repo not in dp.allowed_repos(self.env):
             raise dp.DevPrRefused(f"repo {repo!r} not in {dp.REPOS_ENV} allowlist")
+        if "/" not in repo:
+            raise dp.DevPrRefused("malformed repo")
         return repo
 
     def _api(self, method: str, path: str, body: Any = None) -> Any:
-        headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.tok}",
-                   "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chip-forge-driver"}
-        try:
-            status, out = self.http(method, API + path, body, headers)
-        except Exception as exc:  # noqa: BLE001 - surface a redacted error only
-            raise ForgeError(redact(f"{method} {path.split('?')[0]}: {exc}", self.tok)) from None
+        status, out = self._raw(method, path, body, self.tok)
         if status >= 400:
             msg = out.get("message", "") if isinstance(out, dict) else ""
-            raise ForgeError(redact(f"{method} {path.split('?')[0]} -> {status} {msg}", self.tok))
+            raise ForgeError(self._redact(f"{method} {path.split('?')[0]} -> {status} {msg}"))
         return out
 
     def _pr(self, repo: str, n: int) -> dict[str, Any]:
@@ -168,7 +324,7 @@ class Driver:
 
     def _git_env(self) -> dict[str, str]:
         auth = base64.b64encode(f"x-access-token:{self.tok}".encode()).decode()
-        base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        base = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "CHIP_FORGE_"))}
         base.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_COUNT": "1",
                      "GIT_CONFIG_KEY_0": f"http.{GIT_HOST}/.extraheader",
                      "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {auth}"})
@@ -176,16 +332,16 @@ class Driver:
 
     def _run_git(self, argv: Sequence[str], cwd: str, env: Mapping[str, str] | None = None) -> str:
         rc, out = self.git(argv, cwd, env if env is not None else {k: v for k, v in os.environ.items()
-                                                                     if not k.startswith("GIT_")})
+                                                                     if not k.startswith(("GIT_", "CHIP_FORGE_"))})
         if rc != 0:
-            raise ForgeError(redact(f"git {argv[1] if len(argv) > 1 else ''} failed: {out}", self.tok))
+            raise ForgeError(self._redact(f"git {argv[1] if len(argv) > 1 else ''} failed: {out}"))
         return out
 
     # -------------------------------------------------------------- steps
     def open(self, item_id: str, *, actor: str, worktree: str, branch: str, title: str, body: str,
              decision_id: str, base: str = "main") -> dict[str, Any]:
         it = dp._item(item_id)
-        repo = self._require(it)
+        repo = self._require(it, STEP_ROLE["open"])
         if str(actor or "").lower() != it["author"]:
             raise dp.DevPrRefused("only the assigned author may open the PR")
         if it["state"] not in ("assigned", "changes_requested"):
@@ -200,6 +356,11 @@ class Driver:
             raise dp.DevPrRefused("title required")
         dp._receipt_ok(str(decision_id or "").strip(), it["author"])  # before anything leaves the box
         sha = dp._sha(self._run_git(["git", "rev-parse", "HEAD"], worktree).strip().splitlines()[-1], "worktree HEAD")
+        with self._session(STEP_ROLE["open"], repo):
+            return self._open(item_id, it, repo, worktree, sha, br, title, body, decision_id, base)
+
+    def _open(self, item_id: str, it: Mapping[str, Any], repo: str, worktree: str, sha: str, br: str,
+              title: str, body: str, decision_id: str, base: str) -> dict[str, Any]:
         self._run_git(["git", "-c", "credential.helper=", "push", "--no-verify", f"{GIT_HOST}/{repo}.git",
                        f"{sha}:refs/heads/{br}"], worktree, self._git_env())
         owner = repo.split("/")[0]
@@ -211,37 +372,58 @@ class Driver:
                                                             "base": base, "body": str(body or "")[:MAX_BODY]}) or {}
         n = int(pr.get("number") or 0)
         pr = self._pr(repo, n)
+        if self.login and str((pr.get("user") or {}).get("login", "")).lower() != self.login:
+            raise dp.DevPrRefused("forge PR was not opened by the dev app")
         if str((pr.get("head") or {}).get("sha", "")).lower() != sha:
             raise dp.DevPrRefused("forge PR head does not match the pushed sha")
         out = dp.submit(item_id, actor=it["author"], pr=n, head_sha=sha, decision_id=decision_id,
                         env=self.env, now=self.now)
         _log({"id": item_id, "step": "open", "actor": it["author"], "repo": repo, "pr": n, "branch": br,
-              "head_sha": sha}, self.now)
+              "head_sha": sha, "auth": self.auth}, self.now)
         return {"id": item_id, "pr": n, "head_sha": sha, "url": pr.get("html_url", ""), "state": out["state"]}
 
     def review(self, item_id: str, *, actor: str, verdict: str, note: str = "") -> dict[str, Any]:
         it = dp._item(item_id)
-        repo = self._require(it)
+        repo = self._require(it, STEP_ROLE["review"])
         if not it.get("pr"):
             raise dp.DevPrRefused("item has no PR")
-        head = str((self._pr(repo, it["pr"]).get("head") or {}).get("sha", "")).lower()
-        out = dp.review(item_id, actor=actor, verdict=verdict, head_sha=head, note=note, env=self.env, now=self.now)
-        word = "APPROVE" if verdict == "approve" else "CHANGES REQUESTED"
-        text = (f"**[dev-pr review] {word}** by `{out['reviewer']}` on `{head}` (item `{item_id}`, "
-                f"author `{out['author']}`).\n\n{str(note)[:dp.MAX_NOTE]}")
-        c = self._api("POST", f"/repos/{repo}/issues/{int(it['pr'])}/comments", {"body": text}) or {}
-        _log({"id": item_id, "step": "review", "actor": out["reviewer"], "repo": repo, "pr": it["pr"],
-              "verdict": verdict, "head_sha": head, "comment_id": c.get("id")}, self.now)
-        return {"id": item_id, "verdict": verdict, "head_sha": head, "comment_id": c.get("id"), "state": out["state"]}
+        if verdict not in ("approve", "changes"):
+            raise dp.DevPrRefused("verdict must be approve or changes")
+        with self._session(STEP_ROLE["review"], repo):
+            pr = self._pr(repo, it["pr"])
+            head = str((pr.get("head") or {}).get("sha", "")).lower()
+            if self.login and str((pr.get("user") or {}).get("login", "")).lower() == self.login:
+                raise dp.DevPrRefused("the reviewing app opened this PR (author != approver)")
+            out = dp.review(item_id, actor=actor, verdict=verdict, head_sha=head, note=note, env=self.env, now=self.now)
+            word = "APPROVE" if verdict == "approve" else "CHANGES REQUESTED"
+            text = (f"**[dev-pr review] {word}** by `{out['reviewer']}` on `{head}` (item `{item_id}`, "
+                    f"author `{out['author']}`).\n\n{str(note)[:dp.MAX_NOTE]}")
+            if self.auth.startswith("app:"):
+                # Distinct app identity: a real forge review bound to the head sha.
+                event = "APPROVE" if verdict == "approve" else "REQUEST_CHANGES"
+                rv = self._api("POST", f"/repos/{repo}/pulls/{int(it['pr'])}/reviews",
+                               {"commit_id": head, "event": event, "body": text}) or {}
+                rid, kind = rv.get("id"), "review"
+            else:
+                c = self._api("POST", f"/repos/{repo}/issues/{int(it['pr'])}/comments", {"body": text}) or {}
+                rid, kind = c.get("id"), "comment"
+            _log({"id": item_id, "step": "review", "actor": out["reviewer"], "repo": repo, "pr": it["pr"],
+                  "verdict": verdict, "head_sha": head, f"{kind}_id": rid, "auth": self.auth}, self.now)
+        return {"id": item_id, "verdict": verdict, "head_sha": head, f"{kind}_id": rid, "kind": kind,
+                "state": out["state"]}
 
     def merge(self, item_id: str, *, actor: str, method: str = "squash") -> dict[str, Any]:
         dp._pm_only(actor, "merge", self.env)
         it = dp._item(item_id)
-        repo = self._require(it)
+        repo = self._require(it, STEP_ROLE["merge"])
         if method not in ("squash", "merge", "rebase"):
             raise dp.DevPrRefused("merge method must be squash, merge or rebase")
         if not it.get("pr"):
             raise dp.DevPrRefused("item has no PR")
+        with self._session(STEP_ROLE["merge"], repo):
+            return self._merge(item_id, it, repo, actor, method)
+
+    def _merge(self, item_id: str, it: Mapping[str, Any], repo: str, actor: str, method: str) -> dict[str, Any]:
         pr = self._pr(repo, it["pr"])
         if pr.get("state") != "open":
             raise dp.DevPrRefused(f"PR is {pr.get('state')!r}, not open")
@@ -259,7 +441,7 @@ class Driver:
         merged = dp._sha(str(res.get("sha", "")), "merged sha")
         dp.record_merged(item_id, actor=actor, gate_id=g["gate_id"], merged_sha=merged, env=self.env, now=self.now)
         _log({"id": item_id, "step": "merge", "actor": actor, "repo": repo, "pr": it["pr"], "verdict": "allow",
-              "gate_id": g["gate_id"], "head_sha": g["head_sha"], "merged_sha": merged}, self.now)
+              "gate_id": g["gate_id"], "head_sha": g["head_sha"], "merged_sha": merged, "auth": self.auth}, self.now)
         return {**g, "merged": True, "merged_sha": merged}
 
 
@@ -308,14 +490,15 @@ def main(argv: Sequence[str] | None = None, *, driver: Driver | None = None) -> 
             out = d.merge(args.item, actor=args.actor, method=args.method)
         else:
             it = dp._item(args.item)
-            repo = d._require(it)
-            head = str((d._pr(repo, it["pr"]).get("head") or {}).get("sha", "")) if it.get("pr") else ""
-            out = {"id": args.item, "head_sha": head, "ci": d.ci_state(repo, head) if head else "none"}
+            repo = d._require(it, STEP_ROLE["ci"])
+            with d._session(STEP_ROLE["ci"], repo):
+                head = str((d._pr(repo, it["pr"]).get("head") or {}).get("sha", "")) if it.get("pr") else ""
+                out = {"id": args.item, "head_sha": head, "ci": d.ci_state(repo, head) if head else "none"}
     except dp.DevPrRefused as exc:
-        print(json.dumps({"refused": redact(str(exc), d.tok)}))
+        print(json.dumps({"refused": d._redact(str(exc))}))
         return EXIT_REFUSED
     except ForgeError as exc:
-        print(json.dumps({"forge_error": redact(str(exc), d.tok)}))
+        print(json.dumps({"forge_error": d._redact(str(exc))}))
         return EXIT_FORGE
     print(json.dumps(out, ensure_ascii=False))
     if isinstance(out, dict) and out.get("verdict") == "deny":

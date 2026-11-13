@@ -1028,7 +1028,8 @@ def job_env(env: Mapping[str, str] | None = None, *, job_id: str = "", actor: st
     """Environment for a job/dev-bot subprocess: no policy controls, no operator key, no secrets."""
     out = {}
     for k, v in _env(env).items():
-        if k == YOLO_ENV or k.startswith(("CHIP_POLICY_", "CHIP_JOB_POLICY")) or _SECRET_ENV_NAME.search(k):
+        # CHIP_FORGE_*: forge auth (static token, GitHub App ids and key-file paths) belongs to the forge step only.
+        if k == YOLO_ENV or k.startswith(("CHIP_POLICY_", "CHIP_JOB_POLICY", "CHIP_FORGE_")) or _SECRET_ENV_NAME.search(k):
             continue
         out[k] = v
     out["CHIP_BGJOB_ID"] = job_id or "unknown"
