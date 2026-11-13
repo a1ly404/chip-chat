@@ -9,6 +9,9 @@ driver prints.
 
 Order, enforced here before the runner is called (the driver and ``chip.dev_pr`` enforce it again):
 
+0. ``checkout`` - item ``assigned`` / ``changes_requested``; runs as the item's author (the dev
+   identity): clones the base branch into the item's fixed worktree under the data dir, with no remote
+   left, so the PM-authorized change job can edit and commit there without any credential.
 1. ``open``   - item ``assigned`` / ``changes_requested``; runs as the item's author (the dev identity).
 2. ``ci``     - item has a PR; read-only CI poll of the PR's current head.
 3. ``review`` - item ``submitted``, and a fresh ``ci`` poll says ``success`` on the submitted head;
@@ -22,7 +25,7 @@ Anything else is refused with a reason and nothing runs.
 
 Fail closed and default off:
 
-* ``CHIP_FORGE_STEPS`` - empty / ``0`` refuses every step. ``1`` / ``all`` allows all four, or a
+* ``CHIP_FORGE_STEPS`` - empty / ``0`` refuses every step. ``1`` / ``all`` allows all five, or a
   comma list (e.g. ``ci,review``) allows just those.
 * ``CHIP_FORGE_STEP_CMD`` - the runner command as a JSON array (argv prefix, no shell). The step and
   its arguments are appended. Empty = refused (no runner configured).
@@ -39,7 +42,7 @@ Every call (allowed or refused) appends a row with the PM's reason to
 ``<data dir>/policy/forge_steps.jsonl``. Rows hold the step, item, rc and a short whitelisted summary
 of the driver's JSON (pr, head sha, url, state, ci, verdict, gate/merged sha). No bodies, no tokens.
 
-CLI: ``python -m chip.forge_steps open|ci|review|merge|advance|status`` (JSON out; exit 0 ok,
+CLI: ``python -m chip.forge_steps checkout|open|ci|review|merge|advance|status`` (JSON out; exit 0 ok,
 2 refused/deny, 5 runner or forge error, 64 usage).
 """
 
@@ -63,10 +66,10 @@ CMD_ENV = "CHIP_FORGE_STEP_CMD"
 TICK_ENV = "CHIP_FORGE_STEPS_TICK"
 TIMEOUT_ENV = "CHIP_FORGE_STEP_TIMEOUT_S"
 FILE_NAME = "forge_steps.jsonl"
-STEPS = ("open", "ci", "review", "merge")
+STEPS = ("checkout", "open", "ci", "review", "merge")
 DEFAULT_TIMEOUT_S = 300
 EXIT_OK, EXIT_REFUSED, EXIT_RUNNER, EXIT_USAGE = 0, 2, 5, 64
-SUMMARY_KEYS = ("pr", "head_sha", "url", "state", "ci", "verdict", "reasons", "gate_id", "merged",
+SUMMARY_KEYS = ("worktree", "base_sha", "pr", "head_sha", "url", "state", "ci", "verdict", "reasons", "gate_id", "merged",
                 "merged_sha", "review_id", "comment_id", "kind", "refused", "forge_error")
 _ITEM = re.compile(r"^devpr-[0-9a-f]{12}$")
 _SECRETISH = re.compile(r"(TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE|API_KEY|_KEY$|_KEY_|WEBHOOK|CREDENTIAL|COOKIE)",
@@ -280,6 +283,14 @@ class Steps:
             raise self._refuse(step, item_id, reason, str(exc)) from None
 
     # ---------------------------------------------------------------- steps
+    def checkout(self, item_id: str, *, reason: str, base: str = "main") -> dict[str, Any]:
+        it = self._guard("checkout", item_id, reason)
+        if it["state"] not in ("assigned", "changes_requested"):
+            raise self._refuse("checkout", item_id, reason, f"cannot check out in state {it['state']!r}")
+        if not str(base or "").strip():
+            raise self._refuse("checkout", item_id, reason, "base required")
+        return self._call("checkout", item_id, [f"--actor={it['author']}", f"--base={base}"], reason, it["author"])
+
     def open(self, item_id: str, *, worktree: str, branch: str, title: str, decision_id: str,
              reason: str, body: str = "", base: str = "main") -> dict[str, Any]:
         it = self._guard("open", item_id, reason)
@@ -368,6 +379,10 @@ def status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m chip.forge_steps", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
+    k = sub.add_parser("checkout")
+    k.add_argument("item")
+    k.add_argument("--base", default="main")
+    k.add_argument("--reason", required=True)
     o = sub.add_parser("open")
     o.add_argument("item")
     o.add_argument("--worktree", required=True)
@@ -405,6 +420,8 @@ def main(argv: Sequence[str] | None = None, *, runner: StepRunner | None = None)
             out: Any = status()
         elif args.cmd == "advance":
             out = advance(runner=runner)
+        elif args.cmd == "checkout":
+            out = s.checkout(args.item, base=args.base, reason=args.reason)
         elif args.cmd == "open":
             out = s.open(args.item, worktree=args.worktree, branch=args.branch, title=args.title, body=args.body,
                          decision_id=args.decision_id, base=args.base, reason=args.reason)
