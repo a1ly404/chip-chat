@@ -7,6 +7,10 @@ at the time of the call, and every forge path is built from that repo, never fro
 
 Steps (all fail closed; nothing is pushed or opened if a precheck refuses):
 
+* ``checkout`` (the assigned author, before the job): clone the item repo's base branch into the
+  item's fixed worktree ``<data dir>/devpr/<item>/wt`` (path built from the item id, never caller
+  input) and remove the clone's remote, so the PM-authorized job that makes the change has the
+  code but no credentials and nothing to push to. Refused if the worktree already exists.
 * ``open``   (the assigned author): precheck the cited executor receipt, push the worktree HEAD to a
   new branch (never ``main``/``master``/the base, never forced), open (or reuse) the PR, check the
   forge's PR head equals the pushed sha, then ``dev_pr.submit``.
@@ -40,7 +44,7 @@ via ``GIT_CONFIG_*`` env), and any forge/git output is redacted before it can su
 
 Every call appends a row (no token, no bodies) to ``<data dir>/policy/forge_driver.jsonl``.
 
-CLI: ``python -m chip.forge_driver open|review|merge|ci`` (JSON out; exit 0 ok, 2 refused/deny,
+CLI: ``python -m chip.forge_driver checkout|open|review|merge|ci`` (JSON out; exit 0 ok, 2 refused/deny,
 5 forge error, 64 usage).
 """
 
@@ -78,7 +82,8 @@ EXIT_OK, EXIT_REFUSED, EXIT_FORGE, EXIT_USAGE = 0, 2, 5, 64
 
 # GitHub App mode: one app per role; steps map to roles (author = dev app, approver = PM app).
 ROLES = ("dev", "pm")
-STEP_ROLE = {"open": "dev", "merge": "dev", "ci": "dev", "review": "pm"}
+STEP_ROLE = {"checkout": "dev", "open": "dev", "merge": "dev", "ci": "dev", "review": "pm"}
+WORKTREES_DIR = "devpr"
 APP_PERMS = {
     "dev": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"},
     "pm": {"pull_requests": "write", "contents": "read", "checks": "read", "statuses": "read"},
@@ -196,6 +201,13 @@ def _urllib_http(method: str, url: str, body: Any, headers: Mapping[str, str]) -
 def _subprocess_git(argv: Sequence[str], cwd: str, env: Mapping[str, str]) -> tuple[int, str]:
     p = subprocess.run(list(argv), cwd=cwd, env=dict(env), capture_output=True, text=True, timeout=180)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def worktree_path(item_id: str) -> Path:
+    """The item's fixed worktree: ``<data dir>/devpr/<item>/wt`` (item id validated)."""
+    if not dp._ITEM.match(str(item_id or "")):
+        raise dp.DevPrRefused("malformed item id")
+    return jp.data_dir() / WORKTREES_DIR / item_id / "wt"
 
 
 class Driver:
@@ -338,6 +350,31 @@ class Driver:
         return out
 
     # -------------------------------------------------------------- steps
+    def checkout(self, item_id: str, *, actor: str, base: str = "main") -> dict[str, Any]:
+        """Clone the item repo's ``base`` into the item's fixed worktree for the change job (no remote left)."""
+        it = dp._item(item_id)
+        repo = self._require(it, STEP_ROLE["checkout"])
+        if str(actor or "").lower() != it["author"]:
+            raise dp.DevPrRefused("only the assigned author may check out the worktree")
+        if it["state"] not in ("assigned", "changes_requested"):
+            raise dp.DevPrRefused(f"cannot check out in state {it['state']!r}")
+        if not _BRANCH.match(str(base or "")) or ".." in str(base):
+            raise dp.DevPrRefused("malformed base branch")
+        wt = worktree_path(item_id)
+        if wt.exists() or wt.is_symlink():
+            raise dp.DevPrRefused("worktree already exists for this item (reuse it)")
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        with self._session(STEP_ROLE["checkout"], repo):
+            self._run_git(["git", "-c", "credential.helper=", "clone", "-q", "--no-tags", "--single-branch",
+                           "--depth", "1", "--branch", str(base), f"{GIT_HOST}/{repo}.git", str(wt)],
+                          str(wt.parent), self._git_env())
+        self._run_git(["git", "-C", str(wt), "remote", "remove", "origin"], str(wt.parent))
+        sha = dp._sha(self._run_git(["git", "-C", str(wt), "rev-parse", "HEAD"], str(wt.parent))
+                      .strip().splitlines()[-1], "base sha")
+        _log({"id": item_id, "step": "checkout", "actor": it["author"], "repo": repo, "base": str(base),
+              "base_sha": sha, "worktree": str(wt), "auth": self.auth}, self.now)
+        return {"id": item_id, "worktree": str(wt), "base": str(base), "base_sha": sha, "state": it["state"]}
+
     def open(self, item_id: str, *, actor: str, worktree: str, branch: str, title: str, body: str,
              decision_id: str, base: str = "main") -> dict[str, Any]:
         it = dp._item(item_id)
@@ -451,6 +488,10 @@ class Driver:
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m chip.forge_driver", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
+    k = sub.add_parser("checkout")
+    k.add_argument("item")
+    k.add_argument("--actor", required=True)
+    k.add_argument("--base", default="main")
     o = sub.add_parser("open")
     o.add_argument("item")
     o.add_argument("--actor", required=True)
@@ -481,8 +522,10 @@ def main(argv: Sequence[str] | None = None, *, driver: Driver | None = None) -> 
         return 0 if exc.code == 0 else EXIT_USAGE
     d = driver or Driver()
     try:
-        if args.cmd == "open":
-            out: Any = d.open(args.item, actor=args.actor, worktree=args.worktree, branch=args.branch,
+        if args.cmd == "checkout":
+            out: Any = d.checkout(args.item, actor=args.actor, base=args.base)
+        elif args.cmd == "open":
+            out = d.open(args.item, actor=args.actor, worktree=args.worktree, branch=args.branch,
                               title=args.title, body=args.body, decision_id=args.decision_id, base=args.base)
         elif args.cmd == "review":
             out = d.review(args.item, actor=args.actor, verdict=args.verdict, note=args.note)
