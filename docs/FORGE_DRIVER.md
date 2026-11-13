@@ -41,3 +41,40 @@ This needs the `forge` extra: `pip install -e '.[forge]'` (PyJWT with cryptograp
 `CHIP_FORGE_TOKEN` (else `GITHUB_TOKEN` / `GH_TOKEN`). One identity serves every step, so `review` is
 only a PR comment, and the binding approval is the reviewer row in the dev_pr ledger. This mode is used
 only when no `CHIP_FORGE_*_APP_*` var is set. With nothing configured, every step is refused.
+
+## PM-driven steps (`chip.forge_steps`)
+
+`chip.forge_steps` lets the PM run the four driver steps itself instead of a human. It runs on the
+PM side (relay or scheduler), which never holds a key, token or app config. The orchestrator
+sends only the step name, the item id and plain arguments to a pluggable **step runner**. It then
+parses the single JSON line the driver prints. The usual runner starts a separate one-shot process
+or container. That process is the only one with the key files mounted read-only, and it runs
+`python -m chip.forge_driver`.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `CHIP_FORGE_STEPS` | empty (off) | Empty or `0` refuses every step. `1`/`all` enables all four steps; a comma list such as `ci,review` enables only those. |
+| `CHIP_FORGE_STEP_CMD` | empty | Runner argv prefix as a JSON array, for example `["docker","compose","--profile","forge","run","--rm","-T","forge-svc"]`. No shell is used. The step and its args are appended. If this is empty, every step is refused. |
+| `CHIP_FORGE_STEPS_TICK` | `0` | With `1`, the PM tick polls CI on submitted items and merges approved, green ones. It never opens or reviews. |
+| `CHIP_FORGE_STEP_TIMEOUT_S` | `300` | Runner timeout, clamped to 10–1800 s. |
+
+The order is enforced before the runner is called. The driver and `chip.dev_pr` check it again
+on their side.
+
+1. **`open`** runs as the item's author (the dev app). The item must be `assigned` or `changes_requested`. It needs the worktree, branch, title and the cited job decision id.
+2. **`ci`** is a read-only poll of the PR's current head.
+3. **`review`** runs as the item's reviewer, and the driver signs it with the PM app. The item must be `submitted`. An `approve` first runs a fresh `ci` poll, which must say `success` on the submitted head. The author can never review, and the PM app may not be the PR author.
+4. **`merge`** runs as the PM. It needs an APPROVE from a reviewer other than the author, and a fresh `ci` poll that says `success` on the approved head. The driver re-gates with `dev_pr.merge_gate` and merges pinned to the gated sha.
+
+If any check fails, the step is refused with a reason and nothing runs.
+
+Fail closed:
+
+- Steps are PM-only. They are refused inside a job or bot process (`CHIP_BGJOB_ID` / `CHIP_JOB_ACTOR`), so a dev bot cannot push its own PR through.
+- Every step needs a PM reason.
+- The runner gets a scrubbed environment: every `CHIP_FORGE_*` var, secret-looking var (token, key, webhook, password) and policy control is removed. Removing `CHIP_FORGE_*` matters for container runners whose config is interpolated from the deployment's own env file: a blank value inherited from the caller would otherwise override it.
+- Only the driver's exit code and parsed JSON come back. Raw output is never returned or logged.
+
+Every call, allowed or refused, appends a row to `<data dir>/policy/forge_steps.jsonl`. Each row holds the step, item, actor, the PM's reason, the status, the rc, and a whitelisted summary of the driver's result (pr, head sha, url, state, ci, verdict, gate id, merged sha). It holds no bodies and no tokens.
+
+CLI: `python -m chip.forge_steps open|ci|review|merge|advance|status`. It prints JSON and exits 0 ok, 2 refused, 5 runner/forge error, or 64 usage. `review` takes `--verdict approve|changes`. The verdict comes from the assigned reviewer, and the PM only carries it to the forge.
