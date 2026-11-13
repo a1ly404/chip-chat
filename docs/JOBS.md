@@ -88,6 +88,18 @@ Jobs are single-turn unless `params.single_turn` is false; multi-hop jobs finish
 contains `[[done]]`, else the hop cap ends them. All existing per-job hop/spend and daily caps
 still apply. Offline (`--mock` / `CHIP_CHAT_MOCK=1`) never calls OpenRouter and records $0.
 
+## Disk health check (default off)
+
+Module: `scripts/chip/disk_health.py`. `CHIP_DISK_CHECK=1` makes `disk_health.maybe_write()` (call it
+from your watch tick) write `CHIP_CHAT_DATA_DIR/watch/checks/disk.json` in the standard
+external-check shape (`check, checked_at, status, problems, warns, notes, stale_after_s`):
+**warn** below 15% or 10 GiB free, **problem** below 5% or 2 GiB (`CHIP_DISK_WARN_PCT`,
+`CHIP_DISK_WARN_GIB`, `CHIP_DISK_PROBLEM_PCT`, `CHIP_DISK_PROBLEM_GIB`; `0` disables a leg) on
+`CHIP_DISK_CHECK_PATHS` (default: the data dir). A failed stat is a warn, never a crash; finding
+strings carry no byte counts so they dedupe. Optional `CHIP_DISK_ALERTS_PATH` appends a flat PM alert
+row (`id disk-low:<path>`, severity warning/critical) when a path gets worse; point
+`CHIP_PM_ALERTS_EXTRA_PATHS` at it. No notifier of its own. CLI: `python -m chip.disk_health --json`.
+
 ## PM job picker (P1.4b)
 
 Module: `scripts/chip/bg_picker.py`. Turns normalized alert / Linear inputs into **read-only**
