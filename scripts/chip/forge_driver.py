@@ -44,7 +44,10 @@ via ``GIT_CONFIG_*`` env), and any forge/git output is redacted before it can su
 
 Every call appends a row (no token, no bodies) to ``<data dir>/policy/forge_driver.jsonl``.
 
-CLI: ``python -m chip.forge_driver checkout|open|review|merge|ci`` (JSON out; exit 0 ok, 2 refused/deny,
+* ``fixes`` (PM, read-only): the PM summary's "Fixes CC made" forge read (``chip.pm_fixes`` rules)
+  for one allowlisted repo and a time window, with a read-only PM app token; no item, no writes.
+
+CLI: ``python -m chip.forge_driver checkout|open|review|merge|ci|fixes`` (JSON out; exit 0 ok, 2 refused/deny,
 5 forge error, 64 usage).
 """
 
@@ -82,12 +85,19 @@ EXIT_OK, EXIT_REFUSED, EXIT_FORGE, EXIT_USAGE = 0, 2, 5, 64
 
 # GitHub App mode: one app per role; steps map to roles (author = dev app, approver = PM app).
 ROLES = ("dev", "pm")
-STEP_ROLE = {"checkout": "dev", "open": "dev", "merge": "dev", "ci": "dev", "review": "pm"}
+STEP_ROLE = {"checkout": "dev", "open": "dev", "merge": "dev", "ci": "dev", "review": "pm", "fixes": "pm"}
 WORKTREES_DIR = "devpr"
 APP_PERMS = {
     "dev": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"},
     "pm": {"pull_requests": "write", "contents": "read", "checks": "read", "statuses": "read"},
 }
+# ``fixes`` (PM summary "Fixes CC made" read) mints a READ-ONLY PM token. If the app has no
+# ``issues`` permission the mint answers 422; it is retried once without it (PRs still listed).
+FIXES_PERMS = ({"contents": "read", "pull_requests": "read", "issues": "read"},
+               {"contents": "read", "pull_requests": "read"})
+FIXES_MAX_DAYS = 8
+_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,49}$")
 JWT_BACKDATE, JWT_TTL = 60, 540
 # A freshly minted installation token can get "Repository not found" (HTTP 404) from the git
 # endpoints for a few seconds while the API already accepts it (seen live: the first clone right
@@ -261,7 +271,7 @@ class Driver:
         except Exception as exc:  # noqa: BLE001 - surface a redacted error only
             raise ForgeError(self._redact(f"{method} {path.split('?')[0]}: {exc}")) from None
 
-    def _mint(self, cfg: AppCfg, repo: str) -> None:
+    def _mint(self, cfg: AppCfg, repo: str, perms: Mapping[str, str] | None = None) -> None:
         if jp.in_job_marker(self.env):
             raise dp.DevPrRefused("GitHub App tokens are never minted inside a job (forge step only)")
         j = app_jwt(cfg, self.clock())
@@ -271,7 +281,8 @@ class Driver:
         if status >= 400 or not slug or str((app or {}).get("id", "")) != cfg.app_id:
             raise ForgeError(self._redact(f"{cfg.role} app identity check -> {status}"))
         status, out = self._raw("POST", f"/app/installations/{cfg.installation_id}/access_tokens",
-                                {"repositories": [repo.split("/", 1)[1]], "permissions": dict(APP_PERMS[cfg.role])}, j)
+                                {"repositories": [repo.split("/", 1)[1]],
+                                 "permissions": dict(perms if perms is not None else APP_PERMS[cfg.role])}, j)
         tok = str((out or {}).get("token", "")) if isinstance(out, dict) else ""
         if status >= 400 or not tok:
             msg = out.get("message", "") if isinstance(out, dict) else ""
@@ -289,13 +300,13 @@ class Driver:
         self.revoked.append(ok)
 
     @contextmanager
-    def _session(self, role: str, repo: str) -> Iterator[None]:
+    def _session(self, role: str, repo: str, perms: Mapping[str, str] | None = None) -> Iterator[None]:
         """Run one step as ``role``: mint a per-step installation token (app mode) and revoke it after."""
         cfg = self._auth(role)
         if cfg is None:
             yield
             return
-        self._mint(cfg, repo)
+        self._mint(cfg, repo, perms)
         try:
             yield
         finally:
@@ -466,6 +477,61 @@ class Driver:
         return {"id": item_id, "verdict": verdict, "head_sha": head, f"{kind}_id": rid, "kind": kind,
                 "state": out["state"]}
 
+    def fixes(self, repo: str, *, since: str, until: str, label: str = "",
+              prefixes: str | None = None) -> dict[str, Any]:
+        """Read-only "Fixes CC made" for one allowlisted repo, as the PM app (``chip.pm_fixes`` rules).
+
+        No item, nothing written to the forge. The repo must be on ``CHIP_DEVPR_REPOS``; the token is a
+        read-only PM installation token scoped to that repo and revoked when the read ends.
+        """
+        from chip import pm_fixes  # local: pm_fixes is summary-side and must not import the driver
+
+        dp._common(self.env)
+        repo = str(repo or "").strip().lower()
+        if "/" not in repo or not dp._REPO.match(repo):
+            raise dp.DevPrRefused("malformed repo")
+        if repo not in dp.allowed_repos(self.env):
+            raise dp.DevPrRefused(f"repo {repo!r} not in {dp.REPOS_ENV} allowlist")
+        if not (_ISO.match(str(since)) and _ISO.match(str(until))):
+            raise dp.DevPrRefused("since/until must be ISO-8601 timestamps with a zone")
+        start = datetime.fromisoformat(str(since).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(until).replace("Z", "+00:00"))
+        if not (start < end) or (end - start).total_seconds() > FIXES_MAX_DAYS * 86400:
+            raise dp.DevPrRefused(f"window must be 0 < until - since <= {FIXES_MAX_DAYS} days")
+        if label and not _LABEL.match(label):
+            raise dp.DevPrRefused("malformed label")
+        fenv = {pm_fixes.REPOS_ENV: repo, pm_fixes.API_ENV: API}
+        if label:
+            fenv[pm_fixes.LABEL_ENV] = label
+        if prefixes is not None:
+            pre = [x.strip() for x in str(prefixes).split(",") if x.strip()]
+            if any(not _BRANCH.match(x) for x in pre):
+                raise dp.DevPrRefused("malformed branch prefix")
+            fenv[pm_fixes.PREFIX_ENV] = ",".join(pre)
+
+        def _get(url: str, _headers: Mapping[str, str]) -> tuple[int, Any]:
+            if not url.startswith(API + "/repos/" + repo + "/"):
+                raise ForgeError("fixes read outside the repo")
+            return self._raw("GET", url[len(API):], None, self.tok)
+
+        last: Exception | None = None
+        for perms in FIXES_PERMS:
+            try:
+                with self._session(STEP_ROLE["fixes"], repo, perms):
+                    items, errors = pm_fixes.forge_fixes(start, end, fenv, _get)
+                    auth = self.auth
+                break
+            except ForgeError as exc:
+                last = exc
+                if "mint -> 422" not in str(exc):
+                    raise
+        else:
+            raise last if last else ForgeError("fixes: no token")
+        errors = [self._redact(e) for e in errors]
+        _log({"step": "fixes", "repo": repo, "since": since, "until": until, "items": len(items),
+              "errors": len(errors), "auth": auth}, self.now)
+        return {"repo": repo, "items": items, "errors": errors, "auth": auth}
+
     def merge(self, item_id: str, *, actor: str, method: str = "squash") -> dict[str, Any]:
         dp._pm_only(actor, "merge", self.env)
         it = dp._item(item_id)
@@ -529,6 +595,12 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("--method", default="squash", choices=("squash", "merge", "rebase"))
     c = sub.add_parser("ci")
     c.add_argument("item")
+    f = sub.add_parser("fixes")
+    f.add_argument("--repo", required=True)
+    f.add_argument("--since", required=True)
+    f.add_argument("--until", required=True)
+    f.add_argument("--label", default="")
+    f.add_argument("--prefixes", default=None)
     return p
 
 
@@ -548,6 +620,8 @@ def main(argv: Sequence[str] | None = None, *, driver: Driver | None = None) -> 
             out = d.review(args.item, actor=args.actor, verdict=args.verdict, note=args.note)
         elif args.cmd == "merge":
             out = d.merge(args.item, actor=args.actor, method=args.method)
+        elif args.cmd == "fixes":
+            out = d.fixes(args.repo, since=args.since, until=args.until, label=args.label, prefixes=args.prefixes)
         else:
             it = dp._item(args.item)
             repo = d._require(it, STEP_ROLE["ci"])

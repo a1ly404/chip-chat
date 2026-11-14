@@ -15,6 +15,11 @@ i.e. a 24h window), from three sources:
   ``CHIP_PM_FIXES_TOKEN_FROM`` may name another env var whose name contains ``TOKEN``; the value is
   only sent as a header and never logged or returned. Forge errors never fail the summary; they show
   up as a short ``errors`` line (status code / exception type only).
+* **Forge via the PM app (optional)** — ``CHIP_PM_FIXES_VIA=forge`` reads the repos in
+  ``CHIP_PM_FIXES_FORGE_REPOS`` (comma list; empty = every ``CHIP_PM_FIXES_REPOS`` repo) through the
+  forge step runner (``chip.forge_steps`` ``CHIP_FORGE_STEP_CMD``) as the read-only driver step
+  ``fixes``, so a private repo is read with the PM GitHub App and this process never holds a key or
+  token. Other repos keep the direct read above. Refused inside a job; runner errors are error lines.
 
 Read-only: nothing here writes, posts or changes anything.
 """
@@ -27,7 +32,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from chip import dev_pr, job_policy, policy_exec
@@ -38,6 +43,9 @@ PREFIX_ENV = "CHIP_PM_FIXES_BRANCH_PREFIXES"
 JOB_TYPES_ENV = "CHIP_PM_FIXES_JOB_TYPES"
 API_ENV = "CHIP_PM_FIXES_API"
 TOKEN_FROM_ENV = "CHIP_PM_FIXES_TOKEN_FROM"
+VIA_ENV = "CHIP_PM_FIXES_VIA"
+FORGE_REPOS_ENV = "CHIP_PM_FIXES_FORGE_REPOS"
+FORGE_STEP = "fixes"
 DEFAULT_LABEL = "cc-fix"
 DEFAULT_PREFIXES = ("cc-fix/", "fix/")
 DEFAULT_API = "https://api.github.com"
@@ -48,6 +56,8 @@ _CLOSES = re.compile(r"\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)\b", 
 
 # http(url, headers) -> (status, parsed JSON or None)
 Http = Callable[[str, Mapping[str, str]], tuple[int, Any]]
+# runner(step, args) -> object with .rc / .out / .error (chip.forge_steps.StepResult)
+Runner = Callable[[str, list], Any]
 
 
 def _env(env: Mapping[str, str] | None) -> dict[str, str]:
@@ -79,6 +89,16 @@ def _clip(v: Any, n: int) -> str:
 
 def repos(env: Mapping[str, str] | None = None) -> list[str]:
     return [r for r in _csv(_env(env).get(REPOS_ENV)) if _REPO.match(r)]
+
+
+def via_forge(env: Mapping[str, str] | None = None) -> list[str]:
+    """Repos read through the forge runner (PM app); ``[]`` unless ``CHIP_PM_FIXES_VIA=forge``."""
+    e = _env(env)
+    if str(e.get(VIA_ENV) or "").strip().lower() != "forge":
+        return []
+    names = repos(e)
+    only = {r.lower() for r in _csv(e.get(FORGE_REPOS_ENV)) if _REPO.match(r)}
+    return [r for r in names if not only or r.lower() in only]
 
 
 def _token(e: Mapping[str, str]) -> str:
@@ -164,7 +184,8 @@ def forge_fixes(start: datetime, end: datetime, env: Mapping[str, str] | None = 
                 http: Http | None = None) -> tuple[list[dict[str, Any]], list[str]]:
     """(fix issues closed + fix PRs merged in the window, error lines) for CHIP_PM_FIXES_REPOS."""
     e = _env(env)
-    names = repos(e)
+    via = via_forge(e)
+    names = [r for r in repos(e) if r not in via]
     if not names:
         return [], []
     get = http or _urllib_http
@@ -221,14 +242,69 @@ def forge_fixes(start: datetime, end: datetime, env: Mapping[str, str] | None = 
     return items, errors
 
 
+_ITEM_KEYS = ("kind", "at", "repo", "number", "url", "title", "sha", "why")
+
+
+def forge_runner_fixes(start: datetime, end: datetime, env: Mapping[str, str] | None = None,
+                       runner: Runner | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """(items, error lines) for the ``CHIP_PM_FIXES_VIA=forge`` repos, via the forge step ``fixes``."""
+    e = _env(env)
+    names = via_forge(e)
+    if not names:
+        return [], []
+    if job_policy.in_job_marker(e):
+        return [], [f"{r} via forge: refused inside a job" for r in names]
+    if runner is None:
+        from chip import forge_steps  # local: keeps the summary import light
+
+        try:
+            runner = forge_steps.default_runner(e)
+        except forge_steps.StepRefused:
+            return [], [f"{r} via forge: no runner ({forge_steps.CMD_ENV})" for r in names]
+    label = str(e.get(LABEL_ENV) or DEFAULT_LABEL).strip() or DEFAULT_LABEL
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    since, until = start.astimezone(timezone.utc).strftime(fmt), end.astimezone(timezone.utc).strftime(fmt)
+    items: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for repo in names:
+        args = ["--repo", repo, "--since", since, "--until", until, "--label", label]
+        if e.get(PREFIX_ENV) is not None:
+            args += ["--prefixes", ",".join(_csv(e.get(PREFIX_ENV)))]
+        try:
+            res = runner(FORGE_STEP, args)
+        except Exception as exc:  # noqa: BLE001 - a runner failure must not fail the summary
+            errors.append(f"{repo} via forge: {type(exc).__name__}")
+            continue
+        out = getattr(res, "out", None) or {}
+        rc = getattr(res, "rc", None)
+        if rc != 0 or not isinstance(out, dict) or "refused" in out or "forge_error" in out:
+            why = (out.get("refused") or out.get("forge_error")) if isinstance(out, dict) else ""
+            errors.append(f"{repo} via forge: rc {rc}" + (f" {_clip(why, 60)}" if why else ""))
+            continue
+        for x in out.get("errors") or []:
+            errors.append(f"via forge: {_clip(x, 60)}")
+        for i in out.get("items") or []:
+            if not isinstance(i, dict) or i.get("kind") not in ("issue", "pr") or str(i.get("repo")) != repo:
+                continue
+            if not _within(i.get("at"), start, end):
+                continue
+            row = {k: i.get(k) for k in _ITEM_KEYS if k in i}
+            row["title"] = _clip(row.get("title"), 90)
+            row["via"] = "forge"
+            items.append(row)
+    return items, errors
+
+
 # ------------------------------------------------------------------ collect / render
 
 
 def collect(start: datetime, end: datetime, *, env: Mapping[str, str] | None = None,
-            http: Http | None = None) -> dict[str, Any]:
+            http: Http | None = None, runner: Runner | None = None) -> dict[str, Any]:
     """All CC fixes in ``[start, end)`` (aware datetimes): ``{"items": [...], "errors": [...]}``."""
     items = receipt_fixes(start, end, env) + devpr_fixes(start, end)
     forge, errors = forge_fixes(start, end, env, http)
+    vf, verr = forge_runner_fixes(start, end, env, runner)
+    forge, errors = forge + vf, errors + verr
     seen = {i.get("url") for i in items if i.get("url")}
     for f in forge:
         if f.get("url") and f["url"] in seen:
@@ -259,4 +335,5 @@ def lines(fixes: Mapping[str, Any]) -> list[str]:
     return out
 
 
-__all__ = ["collect", "devpr_fixes", "forge_fixes", "lines", "receipt_fixes", "repos"]
+__all__ = ["collect", "devpr_fixes", "forge_fixes", "forge_runner_fixes", "lines", "receipt_fixes", "repos",
+           "via_forge"]

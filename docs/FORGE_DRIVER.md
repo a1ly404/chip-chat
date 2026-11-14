@@ -38,6 +38,14 @@ Fail closed:
 
 This needs the `forge` extra: `pip install -e '.[forge]'` (PyJWT with cryptography).
 
+### Read-only `fixes` step (PM app)
+
+`python -m chip.forge_driver fixes --repo owner/name --since ISO --until ISO [--label L] [--prefixes a/,b/]`
+is the PM summary's "Fixes CC made" forge read (`chip.pm_fixes`, `CHIP_PM_FIXES_VIA=forge`). No item,
+no writes: the repo must be on `CHIP_DEVPR_REPOS`, the window is at most 8 days, and the PM app mints
+a token with only `contents`/`pull_requests`/`issues` read (retried once without `issues` if the app
+lacks it), revoked when the read ends. Output: `{"repo", "items", "errors", "auth"}`.
+
 ## Static token (legacy)
 
 `CHIP_FORGE_TOKEN` (else `GITHUB_TOKEN` / `GH_TOKEN`). One identity serves every step, so `review` is

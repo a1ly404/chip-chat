@@ -236,6 +236,13 @@ issues, all with links. Forge auth is optional: `CHIP_PM_FIXES_TOKEN_FROM` names
 line and never fail the summary. The section comes after "Waiting on you" so clipping never hides a
 decision.
 
+A private repo can be read with the PM GitHub App instead of a token in the summary process:
+`CHIP_PM_FIXES_VIA=forge` sends the repos in `CHIP_PM_FIXES_FORGE_REPOS` (empty = all of
+`CHIP_PM_FIXES_REPOS`) through the forge step runner (`CHIP_FORGE_STEP_CMD`) as the read-only driver
+step `forge_driver fixes --repo R --since ISO --until ISO`. That step mints a read-only PM token
+scoped to the repo (repo must be on `CHIP_DEVPR_REPOS`), applies the same rules and revokes the token.
+Other repos keep the direct read. Runner failures are error lines; refused inside a job.
+
 A routine with `kind=pm-summary` posts yesterday's summary (prompt `today` posts the current day) under
 `chip routine run-due --via-jobs`:
 
