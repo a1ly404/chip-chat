@@ -98,6 +98,26 @@ FIXES_PERMS = ({"contents": "read", "pull_requests": "read", "issues": "read"},
 FIXES_MAX_DAYS = 8
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,49}$")
+# Closing keywords GitHub honors on a merge commit message (auto-closes the linked issue).
+_CLOSING = re.compile(
+    r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*[:#]?\s*#(\d{1,6})\b", re.IGNORECASE,
+)
+
+
+def closing_refs(pr: Mapping[str, Any]) -> list[int]:
+    """Issue numbers a PR's title/body declare with a closing keyword, first-seen order.
+
+    Only keyword+``#N`` pairs count ("Refs #N" never closes). Built from the title and body
+    only — never free-form text — so the generated merge commit message is fixed lines.
+    """
+    seen: dict[int, None] = {}
+    for field in ("title", "body"):
+        text = pr.get(field)
+        if not isinstance(text, str):
+            continue
+        for m in _CLOSING.finditer(text[:MAX_BODY]):
+            seen.setdefault(int(m.group(1)), None)
+    return list(seen)
 JWT_BACKDATE, JWT_TTL = 60, 540
 # A freshly minted installation token can get "Repository not found" (HTTP 404) from the git
 # endpoints for a few seconds while the API already accepts it (seen live: the first clone right
@@ -554,15 +574,26 @@ class Driver:
             _log({"id": item_id, "step": "merge", "actor": actor, "repo": repo, "pr": it["pr"], "verdict": "deny",
                   "reasons": g["reasons"]}, self.now)
             return {**g, "merged": False}
-        res = self._api("PUT", f"/repos/{repo}/pulls/{int(it['pr'])}/merge",
-                        {"sha": g["head_sha"], "merge_method": method}) or {}
+        payload: dict[str, Any] = {"sha": g["head_sha"], "merge_method": method}
+        closes = closing_refs(pr)
+        if closes:
+            # A squash/merge commit message that carries the closing keywords is what GitHub
+            # uses to close linked issues on merge — the PR body alone is dropped by the
+            # forge's default squash message ("PR title"). Pass both explicitly (#refs close).
+            payload["commit_title"] = str(pr.get("title") or "")[:250]
+            payload["commit_message"] = "\n".join(f"Fixes #{n}" for n in closes)
+        res = self._api("PUT", f"/repos/{repo}/pulls/{int(it['pr'])}/merge", payload) or {}
         if not res.get("merged"):
             raise ForgeError("forge did not merge")
         merged = dp._sha(str(res.get("sha", "")), "merged sha")
         dp.record_merged(item_id, actor=actor, gate_id=g["gate_id"], merged_sha=merged, env=self.env, now=self.now)
         _log({"id": item_id, "step": "merge", "actor": actor, "repo": repo, "pr": it["pr"], "verdict": "allow",
-              "gate_id": g["gate_id"], "head_sha": g["head_sha"], "merged_sha": merged, "auth": self.auth}, self.now)
-        return {**g, "merged": True, "merged_sha": merged}
+              "gate_id": g["gate_id"], "head_sha": g["head_sha"], "merged_sha": merged,
+              **({"closes": closes} if closes else {}), "auth": self.auth}, self.now)
+        out = {**g, "merged": True, "merged_sha": merged}
+        if closes:
+            out["closes"] = closes
+        return out
 
 
 # ------------------------------------------------------------------ CLI
