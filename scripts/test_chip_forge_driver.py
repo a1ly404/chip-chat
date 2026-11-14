@@ -30,8 +30,10 @@ class FakeForge:
         self.prs: dict[int, dict] = {}
 
     def pr_obj(self, n):
-        return {"number": n, "state": self.prs.get(n, {}).get("state", "open"), "head": {"sha": self.head},
-                "base": {"repo": {"full_name": self.repo}}, "html_url": f"https://forge/{n}"}
+        meta = self.prs.get(n, {})
+        return {"number": n, "state": meta.get("state", "open"), "head": {"sha": self.head},
+                "base": {"repo": {"full_name": self.repo}}, "html_url": f"https://forge/{n}",
+                "title": meta.get("title", ""), "body": meta.get("body", "")}
 
     def __call__(self, method, url, body, headers):
         assert url.startswith(fd.API + "/repos/" + REPO + "/"), url
@@ -41,7 +43,7 @@ class FakeForge:
         if method == "GET" and "/pulls?state=open" in path:
             return 200, [self.pr_obj(n) for n in self.prs]
         if method == "POST" and path.endswith("/pulls"):
-            self.prs[41] = {"state": "open"}
+            self.prs[41] = {"state": "open", "title": body.get("title", ""), "body": body.get("body", "")}
             return 201, self.pr_obj(41)
         if method == "GET" and "/pulls/" in path:
             return 200, self.pr_obj(int(path.rsplit("/", 1)[1]))
@@ -266,6 +268,47 @@ def test_closed_pr_not_merged(fenv):
     forge.prs[41]["state"] = "closed"
     with pytest.raises(dp.DevPrRefused, match="not open"):
         drv(fenv, forge).merge(iid, actor=jp.PM)
+
+
+def test_merge_carries_closing_refs_in_commit_message(fenv):
+    """Forge-app squash merges drop the PR body, so the merge commit message must carry it (#557)."""
+    forge = FakeForge()
+    it = assigned(fenv)
+    dec = job_receipt(fenv)
+    drv(fenv, forge).open(it["id"], actor=AUTHOR, worktree="/wt", branch="dev/x",
+                          title="fix thing", body="Fixes #123.\n\nAlso refs #999 (no close).",
+                          decision_id=dec)
+    iid = it["id"]
+    drv(fenv, forge).review(iid, actor=REVIEWER, verdict="approve", note="lgtm")
+    out = drv(fenv, forge).merge(iid, actor=jp.PM)
+    assert out["merged"] and out["closes"] == [123]
+    put = [b for m, p, b in forge.calls if m == "PUT"][0]
+    assert put["commit_title"] == "fix thing"
+    assert put["commit_message"] == "Fixes #123"
+    row = json.loads((jp.policy_dir() / fd.FILE_NAME).read_text().splitlines()[-1])
+    assert row["closes"] == [123]
+
+
+def test_merge_without_closing_keywords_keeps_default_message(fenv):
+    forge = FakeForge()
+    it = assigned(fenv)
+    dec = job_receipt(fenv)
+    drv(fenv, forge).open(it["id"], actor=AUTHOR, worktree="/wt", branch="dev/x",
+                          title="docs", body="Refs #123 only, no close.",
+                          decision_id=dec)
+    iid = it["id"]
+    drv(fenv, forge).review(iid, actor=REVIEWER, verdict="approve", note="lgtm")
+    out = drv(fenv, forge).merge(iid, actor=jp.PM)
+    assert out["merged"] and "closes" not in out
+    put = [b for m, p, b in forge.calls if m == "PUT"][0]
+    assert put == {"sha": SHA, "merge_method": "squash"}
+
+
+def test_closing_refs_from_title_and_dedupe():
+    pr = {"title": "fix: Fixes #7 and closes #8", "body": "resolves #8, FIX  #9"}
+    assert fd.closing_refs(pr) == [7, 8, 9]
+    assert fd.closing_refs({"title": "Refs #5", "body": "x"}) == []
+    assert fd.closing_refs({"title": "t"}) == [] and fd.closing_refs({}) == []
 
 
 def test_cli_ci_and_usage(fenv, capsys):
