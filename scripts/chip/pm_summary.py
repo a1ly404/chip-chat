@@ -242,11 +242,13 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         # decisions from earlier days that nobody has decided yet (carried 7 days).
         delegations = deleg_ledger.summary(start.timestamp(), end.timestamp(), env=e)
         today = {" ".join(str(w).split()) for w in waiting}
+        carried: list[str] = []
         for d in deleg_ledger.track_decisions(waiting):
             if d.get("text") in today or float(d.get("first_seen") or 0) >= start.timestamp():
                 continue
             since = datetime.fromtimestamp(float(d["first_seen"]), tz).strftime("%b %d")
-            waiting.append(f"{_clip(d.get('text'), 180)} (still waiting since {since}; reply `decided {d.get('id')}` to clear)")
+            carried.append(f"{_clip(d.get('text'), 160)} (still waiting since {since}; reply `decided {d.get('id')}` to clear)")
+        waiting[:0] = carried  # oldest first, so a long day never clips them away
 
     fixes = pm_fixes.collect(start, end, env=e, http=forge_http)
 
@@ -320,8 +322,8 @@ def render(summary: Mapping[str, Any]) -> str:
             head += f" · sudo runs {ex['sudo_runs']}"
         lines += ["", f"**Executor runs** ({head})"] + _bullets(list(ex.get("problems") or []))
     dl = deleg_ledger.summary_lines(summary.get("delegations") or {})
-    if summary.get("delegations"):
-        lines += ["", "**Open delegations**"] + (_bullets(dl) or ["- none"])
+    if dl:
+        lines += ["", "**Open delegations**"] + _bullets(dl)
     lines += ["", "**Waiting on you**"] + (_bullets(list(summary.get("waiting") or [])) or ["- nothing"])
     # Last so a long fixes list is what gets clipped, never "Waiting on you".
     fx = pm_fixes.lines(summary.get("fixes") or {})
