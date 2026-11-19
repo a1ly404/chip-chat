@@ -18,6 +18,8 @@
 * ``executor`` — job-policy executor receipts for the day (:mod:`chip.policy_exec`): counts by
   status, granted sudo runs, and failed/refused runs; refused runs also count as refusals.
 * ``mcp`` — MCP tool receipts for the day counted by status (ok / pending / refused / error).
+* ``delegations`` — open / stale hand-offs and quiet check-in closes (:mod:`chip.deleg_ledger`, only when
+  ``CHIP_DELEG_LEDGER`` is on); earlier days' undecided "waiting" items are carried into ``waiting``.
 * ``fixes`` — "Fixes CC made" that day (:mod:`chip.pm_fixes`): ok executor receipts that were alert
   remediations, dev-bot PRs merged via :mod:`chip.dev_pr`, and (only when ``CHIP_PM_FIXES_REPOS`` is
   set) fix-labelled issues closed and fix PRs merged on the forge. Forge errors never fail the summary.
@@ -49,7 +51,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chip import bg_jobs, job_policy, mcp_tools, pm_fixes, policy_exec
+from chip import bg_jobs, deleg_ledger, job_policy, mcp_tools, pm_fixes, policy_exec
 from chip.config import data_dir
 
 FLAG = "CHIP_PM_SUMMARY"
@@ -234,6 +236,18 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         for g in job_policy.grants(start.strftime(fmt), end.strftime(fmt))
     ]
 
+    delegations: dict[str, Any] = {}
+    if deleg_ledger.enabled(e):
+        # Open/stale hand-offs and quiet check-in closes (chip.deleg_ledger), plus
+        # decisions from earlier days that nobody has decided yet (carried 7 days).
+        delegations = deleg_ledger.summary(start.timestamp(), end.timestamp(), env=e)
+        today = {" ".join(str(w).split()) for w in waiting}
+        for d in deleg_ledger.track_decisions(waiting):
+            if d.get("text") in today or float(d.get("first_seen") or 0) >= start.timestamp():
+                continue
+            since = datetime.fromtimestamp(float(d["first_seen"]), tz).strftime("%b %d")
+            waiting.append(f"{_clip(d.get('text'), 180)} (still waiting since {since}; reply `decided {d.get('id')}` to clear)")
+
     fixes = pm_fixes.collect(start, end, env=e, http=forge_http)
 
     spend_rows = [r for r in _jsonl(data_dir() / "bg_jobs_spend.jsonl") if _in(r.get("ts"), start, end)]
@@ -253,6 +267,7 @@ def build(day: date, *, env: Mapping[str, str] | None = None, jobs: Iterable[Map
         "sudo_grants": sudo_grants,
         "executor": executor,
         "fixes": fixes,
+        "delegations": delegations,
     }
 
 
@@ -304,6 +319,9 @@ def render(summary: Mapping[str, Any]) -> str:
         if ex.get("sudo_runs"):
             head += f" · sudo runs {ex['sudo_runs']}"
         lines += ["", f"**Executor runs** ({head})"] + _bullets(list(ex.get("problems") or []))
+    dl = deleg_ledger.summary_lines(summary.get("delegations") or {})
+    if summary.get("delegations"):
+        lines += ["", "**Open delegations**"] + (_bullets(dl) or ["- none"])
     lines += ["", "**Waiting on you**"] + (_bullets(list(summary.get("waiting") or [])) or ["- nothing"])
     # Last so a long fixes list is what gets clipped, never "Waiting on you".
     fx = pm_fixes.lines(summary.get("fixes") or {})
